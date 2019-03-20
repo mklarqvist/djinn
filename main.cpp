@@ -30,6 +30,7 @@ public:
         n_samples(0), n_steps(0),
         prev(nullptr), ppa(nullptr)
     {
+        static_assert(n_symbols > 0);
         for(int i = 0; i < n_symbols; ++i) {
             queue[i] = nullptr;
         }
@@ -42,7 +43,7 @@ public:
         prev(new uint8_t[n_samples]),
         ppa(new uint32_t[n_samples])
     {
-
+        static_assert(n_symbols > 0);
         for(int i = 0; i < n_symbols; ++i) {
             queue[i] = new uint32_t[n_samples];
         }
@@ -137,7 +138,7 @@ public:
 
         uint32_t of = 0;
         for(int j = 0; j < n_symbols; ++j) {
-            for(int i = 0; i < n_queue[j]; ++i, ++of)
+            for(uint32_t i = 0; i < n_queue[j]; ++i, ++of)
                 ppa[of] = queue[j][i];
         }
         //for(int i = 0; i < n_q2; ++i, ++of) ppa[of] = q2[i];
@@ -208,8 +209,8 @@ void ReadVcfGT (const std::string& filename) {
     pil::RangeCoder rc1, rc2;
     pil::FrequencyModel<2>* fmodel1 = new pil::FrequencyModel<2>[2048];
     pil::FrequencyModel<2>* fmodel2 = new pil::FrequencyModel<2>[2048];
-    pil::FrequencyModel<2>* fmodel1_hard = new pil::FrequencyModel<2>[2048];
-    pil::FrequencyModel<2>* fmodel2_hard = new pil::FrequencyModel<2>[2048];
+    pil::FrequencyModel<2>* fmodel1_hard = new pil::FrequencyModel<2>[4096];
+    pil::FrequencyModel<2>* fmodel2_hard = new pil::FrequencyModel<2>[4096];
     rc1.SetOutput(out1_buffer);
     rc1.StartEncode();
     rc2.SetOutput(out2_buffer);
@@ -268,14 +269,45 @@ void ReadVcfGT (const std::string& filename) {
         }
         */
 
+        /*
+        {
+            uint16_t s = 0;
+            uint8_t* a = reader->bcf1_->d.fmt[0].p;
+            for(int i = 0; i < 2*reader->n_samples_; i += 2) {
+               const uint8_t& gt = BCF_UNPACK_GENOTYPE(a[i]);
+               fmodel1[s].EncodeSymbol(&rc1, gt);
+               s <<= 1;
+               s |= (gt == 1);
+               s &= 2047;
+               _mm_prefetch((const char *)&fmodel1[s], _MM_HINT_T0);
+               //data_buffer[n_data++] = pbwt[0].prev[i];
+           }
+        }
 
-        if(pbwt[0].n_queue[1] >= 100) {
+        {
+            uint16_t s = 0;
+            uint8_t* a = reader->bcf1_->d.fmt[0].p;
+            for(int i = 0; i < 2*reader->n_samples_; i += 2) {
+                const uint8_t& gt = BCF_UNPACK_GENOTYPE(a[i+1]);
+               fmodel2[s].EncodeSymbol(&rc1, gt);
+               s <<= 1;
+               s |= (gt == 1);
+               s &= 2047;
+               _mm_prefetch((const char *)&fmodel2[s], _MM_HINT_T0);
+               //data_buffer[n_data++] = pbwt[0].prev[i];
+            }
+        }
+        */
+
+
+
+        if(pbwt[0].n_queue[1] >= 50) {
            uint16_t s = 0;
            for(int i = 0; i < reader->n_samples_; ++i) {
                fmodel1_hard[s].EncodeSymbol(&rc1, pbwt[0].prev[i]);
                s <<= 1;
                s |= (pbwt[0].prev[i] == 1);
-               s &= 2047;
+               s &= 4095;
                _mm_prefetch((const char *)&fmodel1_hard[s], _MM_HINT_T0);
                //data_buffer[n_data++] = pbwt[0].prev[i];
            }
@@ -295,14 +327,14 @@ void ReadVcfGT (const std::string& filename) {
         }
 
 
-        if(pbwt[1].n_queue[1] >= 100) {
+        if(pbwt[1].n_queue[1] >= 50) {
            uint16_t s = 0;
            for(int j = 0; j < reader->n_samples_; ++j) {
                //std::cerr << (int)pbwt[1].prev[j] << " ";
                fmodel2_hard[s].EncodeSymbol(&rc2, pbwt[1].prev[j]);
                s <<= 1;
                s |= (pbwt[1].prev[j] == 1);
-               s &= 2047;
+               s &= 4095;
                _mm_prefetch((const char *)&fmodel2_hard[s], _MM_HINT_T0);
                //data_buffer[n_data++] = pbwt[1].prev[j];
            }
@@ -349,7 +381,7 @@ void ReadVcfGT (const std::string& filename) {
             //std::cerr << "RC1 " << n_lines << " Compressed=" << n_in << "->" << n_out << "(" << (float)n_in/n_out << "-fold)" << std::endl;
             delete[] fmodel1; delete[] fmodel1_hard;
             fmodel1 = new pil::FrequencyModel<2>[2048];
-            fmodel1_hard = new pil::FrequencyModel<2>[2048];
+            fmodel1_hard = new pil::FrequencyModel<2>[4096];
             pbwt[0].reset();
 
             n_out += rc2.OutSize();
@@ -359,7 +391,7 @@ void ReadVcfGT (const std::string& filename) {
             std::cerr << "RC " << n_lines << " Compressed=" << n_in << "->" << n_out << "(" << (float)n_in/n_out << "-fold)" << std::endl;
             delete[] fmodel2; delete[] fmodel2_hard;
             fmodel2 = new pil::FrequencyModel<2>[2048];
-            fmodel2_hard = new pil::FrequencyModel<2>[2048];
+            fmodel2_hard = new pil::FrequencyModel<2>[4096];
             pbwt[1].reset();
             n_lines = 0;
         }
