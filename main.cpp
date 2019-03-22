@@ -34,7 +34,7 @@ public:
         n_samples(0), n_steps(0),
         prev(nullptr), ppa(nullptr)
     {
-        static_assert(n_symbols > 1);
+        static_assert(n_symbols > 1, "Number of symbols must be > 1");
         for(int i = 0; i < n_symbols; ++i) {
             queue[i] = nullptr;
         }
@@ -47,7 +47,7 @@ public:
         prev(new uint8_t[n_samples]),
         ppa(new uint32_t[n_samples])
     {
-        static_assert(n_symbols > 1);
+        static_assert(n_symbols > 1, "Number of symbols must be > 1");
         for(int i = 0; i < n_symbols; ++i) {
             queue[i] = new uint32_t[n_samples];
         }
@@ -220,8 +220,11 @@ void ReadVcfGT (const std::string& filename) {
     //pil::FrequencyModel<2>* fmodel1_hard = new pil::FrequencyModel<2>[4096];
     //pil::FrequencyModel<2>* fmodel2_hard = new pil::FrequencyModel<2>[4096];
 
-    pil::FrequencyModel<4>* gtpbwt_model = new pil::FrequencyModel<4>[16384]; // order-7 model
-    pil::FrequencyModel<16>* gtpbwt_model_4 = new pil::FrequencyModel<16>[16384]; // order-2 model
+    std::cerr << "N-samples=" << reader->n_samples_ << std::endl;
+
+#define MODEL_SIZE 16556
+    pil::FrequencyModel<4>* gtpbwt_model = new pil::FrequencyModel<4>[MODEL_SIZE]; // order-7 model
+    pil::FrequencyModel<16>* gtpbwt_model_4 = new pil::FrequencyModel<16>[MODEL_SIZE]; // order-2 model
     // if alt > 4 then use individual pbwts OR raw + zstd
 
     rc1.SetOutput(out1_buffer);
@@ -287,12 +290,12 @@ void ReadVcfGT (const std::string& filename) {
 
             //size_t before = rc_pbwt.OutSize();
             {
-               uint16_t s = 0;
+               uint32_t s = 0;
                for(int i = 0; i < j; ++i) {
                    gtpbwt_model_4[s].EncodeSymbol(&rc_pbwt4, gt_pbwt4.prev[i]);
                    s <<= 2;
                    s |= gt_pbwt4.prev[i];
-                   s &= 16383;
+                   s &= (MODEL_SIZE-1);
                    _mm_prefetch((const char *)&gtpbwt_model_4[s], _MM_HINT_T0);
                }
             }
@@ -311,12 +314,12 @@ void ReadVcfGT (const std::string& filename) {
             //std::cerr << std::endl;
             gt_pbwt.Update(gtpbwt_buffer, 1);
             {
-               uint16_t s = 0;
+               uint32_t s = 0;
                for(int i = 0; i < reader->n_samples_; ++i) {
                    gtpbwt_model[s].EncodeSymbol(&rc_pbwt, gt_pbwt.prev[i]);
                    s <<= 2;
                    s |= gt_pbwt.prev[i];
-                   s &= 16383;
+                   s &= (MODEL_SIZE-1);
                    _mm_prefetch((const char *)&gtpbwt_model[s], _MM_HINT_T0);
                }
             }
@@ -334,9 +337,9 @@ void ReadVcfGT (const std::string& filename) {
             rc_pbwt4.StartEncode();
             std::cerr << "gtPBWT " << n_lines << " Compressed=" << n_in << "->" << n_out_gtpbwt << "(" << (float)n_in/n_out_gtpbwt << "-fold)" << std::endl;
             delete[] gtpbwt_model;
-            gtpbwt_model = new pil::FrequencyModel<4>[16384];
+            gtpbwt_model = new pil::FrequencyModel<4>[MODEL_SIZE];
             delete[] gtpbwt_model_4;
-            gtpbwt_model_4 = new pil::FrequencyModel<16>[16384];
+            gtpbwt_model_4 = new pil::FrequencyModel<16>[MODEL_SIZE];
             gt_pbwt.reset();
             gt_pbwt4.reset();
             n_lines = 0;
