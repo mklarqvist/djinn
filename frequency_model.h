@@ -89,8 +89,8 @@ namespace pil {
 template <int NSYM>
 class FrequencyModel {
 private:
-    static constexpr int PIL_FREQUENCY_MODEL_STEP = 8;
-    static constexpr int PIL_FREQUENCY_MODEL_MAX = (1 << 16) - 16;
+    static constexpr int PIL_FREQUENCY_MODEL_STEP = 24;
+    static constexpr int PIL_FREQUENCY_MODEL_MAX = (1 << 12) - 24;
 
     typedef struct {
         uint16_t Freq;
@@ -148,7 +148,7 @@ void FrequencyModel<NSYM>::Normalize() {
     /* Faster than F[i].Freq for 0 <= i < NSYM */
     TotFreq = 0;
     for (s = F; s->Freq; s++) {
-        s->Freq -= s->Freq>>1;
+        s->Freq -= s->Freq >> 1;
         TotFreq += s->Freq;
     }
 }
