@@ -14,17 +14,10 @@
 #include <zstd.h>
 #include <zstd_errors.h>
 
-// #define bcf_gt_phased(idx) (((idx)+1)<<1|1)
-// phase = & 1
-// (idx-1) >> 1
-
-// (allele+ 1)<<1|phased
-
-
-const uint8_t BCF_UNPACK_TOMAHAWK[3] = {2, 0, 1};
-const uint8_t BCF_UNPACK_TOMAHAWK_GENERAL[16] = {15, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14};
-#define BCF_UNPACK_GENOTYPE(A) BCF_UNPACK_TOMAHAWK[(A >> 1)]
-#define BCF_UNPACK_GENOTYPE_GENERAL(A) BCF_UNPACK_TOMAHAWK_GENERAL[(A >> 1)]
+const uint8_t TWK_BCF_GT_UNPACK[3] = {2, 0, 1};
+const uint8_t TWK_BCF_GT_UNPACK_GENERAL[16] = {15, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14};
+#define BCF_UNPACK_GENOTYPE(A) TWK_BCF_GT_UNPACK[(A >> 1)]
+#define BCF_UNPACK_GENOTYPE_GENERAL(A) TWK_BCF_GT_UNPACK_GENERAL[(A >> 1)]
 
 template <int n_symbols = 2>
 class PBWT {
@@ -194,17 +187,6 @@ void ReadVcfGT (const std::string& filename) {
         exit(1);
     }
 
-
-    //std::cerr << hr->n[0] << "," << hr->n[1] << "," << hr->n[2] << std::endl;
-    //assert(reader->n_samples_ == 2504);
-    //bcf1_t *rec = bcf_init1();
-
-    //const uint32_t n_samples = hr->n[2];
-    //int mgt_arr = 0;
-    //int* gt_arr = nullptr;
-   // int* gt1_a = new int[uint32_t(2.5*reader->n_samples_)];
-    //int* gt2_a = new int[uint32_t(2.5*reader->n_samples_)];
-
     uint64_t n_out = 0, n_in = 0, n_data = 0, n_out1 = 0, n_out2 = 0, n_out_gtpbwt = 0;
     //uint8_t* data_buffer = new uint8_t[2*10000000];
     uint8_t* gtpbwt_buffer  = new uint8_t[reader->n_samples_];
@@ -212,9 +194,8 @@ void ReadVcfGT (const std::string& filename) {
     uint8_t* out1_buffer = new uint8_t[10000000];
     uint8_t* out2_buffer = new uint8_t[10000000];
     uint8_t* out_gtpbwt  = new uint8_t[10000000];
-    uint8_t* out_gtpbwt_24  = new uint8_t[10000000];
 
-    pil::RangeCoder rc1, rc2, rc_pbwt, rc_pbwt4, rc_pbwt24;
+    pil::RangeCoder rc1, rc2, rc_pbwt, rc_pbwt4;
     pil::FrequencyModel<2>* fmodel1 = new pil::FrequencyModel<2>[4096]; // order-12 model
     pil::FrequencyModel<2>* fmodel2 = new pil::FrequencyModel<2>[4096]; // order-12 model
     //pil::FrequencyModel<2>* fmodel1_hard = new pil::FrequencyModel<2>[4096];
@@ -247,7 +228,7 @@ void ReadVcfGT (const std::string& filename) {
     uint32_t n_lines = 0;
     uint32_t last_flush_pos = 0;
 
-    uint32_t n_under_10 = 0;
+//    uint32_t n_under_10 = 0;
 
     //uint32_t n_bitmaps = std::ceil((float)reader->n_samples_/64);
     //uint64_t* bitmaps = new uint64_t[n_bitmaps];
@@ -261,19 +242,20 @@ void ReadVcfGT (const std::string& filename) {
         //ref = REF = strdup(line->d.allele[0]);
         //while ( (*ref = toupper(*ref)) ) ++ref ;
         if(reader->bcf1_->n_allele > 4) {
-//            if(reader->bcf1_->n_allele <= 4) {
-//
-//            } else
-            std::cerr << "skip: n_allele=" << reader->bcf1_->n_allele << std::endl;
+            uint8_t* gts = reader->bcf1_->d.fmt[0].p;
+            for(int i = 0; i < 2*reader->n_samples_; ++i) {
+                out1_buffer[n_out1++] = gts[i];
+            }
+
             continue;
         }
 
 
 //        pbwt[0].Update(reader->bcf1_->d.fmt[0].p+0, 2);
 //        pbwt[1].Update(reader->bcf1_->d.fmt[0].p+1, 2);
+
         ++n_processed;
         ++n_lines;
-        // encode
 
         n_in += 2*reader->n_samples_;
 
@@ -326,7 +308,14 @@ void ReadVcfGT (const std::string& filename) {
         }
 
         //if (reader->bcf1_->pos - last_flush_pos > 500000) {
-        if (n_lines == 8196 || rc_pbwt.OutSize() > 9000000) {
+        if (n_lines == 8196 || rc_pbwt.OutSize() > 9000000 || n_out1 > 9000000) {
+            if(n_out1) {
+                int ret = ZstdCompress(out1_buffer,n_out1,out2_buffer,10000000,6);
+                n_out += ret;
+                std::cerr << "Zstd " << n_lines << " Compressed=" << n_out1 << "->" << ret << "(" << (float)n_out1/ret << "-fold)" << std::endl;
+                n_out1 = 0;
+            }
+
             n_out_gtpbwt += rc_pbwt.OutSize();
             n_out_gtpbwt += rc_pbwt4.OutSize();
             rc_pbwt.FinishEncode();
@@ -558,7 +547,7 @@ void ReadVcfGT (const std::string& filename) {
         std::cerr << "gtPBWT " << n_lines << " Compressed=" << n_in << "->" << n_out_gtpbwt << "(" << (float)n_in/n_out_gtpbwt << "-fold)" << std::endl;
     }
 
-    std::cerr << "under 10= " << n_under_10 << " -> " << n_under_10*sizeof(uint32_t) << std::endl;
+//    std::cerr << "under 10= " << n_under_10 << " -> " << n_under_10*sizeof(uint32_t) << std::endl;
 
     delete[] fmodel1; delete[] fmodel2;
 //    delete[] fmodel1_hard; delete[] fmodel2_hard;
