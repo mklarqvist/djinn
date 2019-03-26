@@ -69,10 +69,6 @@ namespace pil {
  *--------------------------------------------------------------------------
  * A simple frequency model.
  *
- * Define NSYM to be an integer value before including this file.
- * It will then generate types and functions specific to that
- * maximum number of symbols.
- *
  * This keeps a list of symbols and their frequencies, approximately
  * sorted by symbol frequency. We allow for a single symbol to periodically
  * move up the list when emitted, effectively doing a single step of
@@ -86,157 +82,36 @@ namespace pil {
  *--------------------------------------------------------------------------
  */
 
-template <int NSYM, int STEP = 64, int SHIFT = 11>
 class FrequencyModel {
 private:
-    static constexpr int PIL_FREQUENCY_MODEL_STEP = STEP;
-    static constexpr int PIL_FREQUENCY_MODEL_MAX = (1 << SHIFT) - STEP;
-
-    typedef struct {
+    struct SymFreqs {
         uint16_t Freq;
         uint16_t Symbol;
-    } SymFreqs;
+    };
 
 public:
     FrequencyModel();
-    FrequencyModel(int max_sym);
+    FrequencyModel(int nsym, int max_sym);
+    FrequencyModel(int nsym, int max_sym, int step, int shift);
+    ~FrequencyModel();
+
     void Initiate(int max_sym);
+    void Initiate(int nsym, int max_sym);
     void Normalize();
     void EncodeSymbol(RangeCoder* rc, uint16_t sym);
-    void EncodeSymbol(uint16_t sym, uint32_t weight = 1);
     uint16_t DecodeSymbol(RangeCoder* rc);
 
+    void SetStep(int step) { STEP = step; }
+    void SetShift(int shift) { SHIFT = shift; }
+
 private:
+    int NSYM, STEP, SHIFT;
     uint32_t TotFreq;  // Total frequency
 
     // Array of Symbols approximately sorted by Freq.
-    SymFreqs sentinel, F[NSYM+1];
+    SymFreqs sentinel;
+    SymFreqs* F;
 };
-
-// impl
-
-template <int NSYM, int STEP, int SHIFT>
-FrequencyModel<NSYM, STEP, SHIFT>::FrequencyModel() :
-    TotFreq(0)
-{
-    static_assert(NSYM >= 1, "NSYM must be >= 1");
-    Initiate(NSYM);
-}
-
-template <int NSYM, int STEP, int SHIFT>
-FrequencyModel<NSYM, STEP, SHIFT>::FrequencyModel(int max_sym) { Initiate(max_sym); }
-
-template <int NSYM, int STEP, int SHIFT>
-void FrequencyModel<NSYM, STEP, SHIFT>::Initiate(int max_sym) {
-    int i;
-
-    for (i = 0; i < max_sym; i++) {
-        F[i].Symbol = i;
-        F[i].Freq   = 1;
-    }
-
-    for (; i < NSYM; i++) {
-        F[i].Symbol = i;
-        F[i].Freq   = 0;
-    }
-
-    TotFreq         = max_sym;
-    sentinel.Symbol = 0;
-    sentinel.Freq   = PIL_FREQUENCY_MODEL_MAX; // Always first; simplifies sorting.
-
-    F[NSYM].Freq    = 0; // terminates normalize() loop. See below.
-}
-
-template <int NSYM, int STEP, int SHIFT>
-void FrequencyModel<NSYM, STEP, SHIFT>::Normalize() {
-    SymFreqs *s;
-
-    /* Faster than F[i].Freq for 0 <= i < NSYM */
-    TotFreq = 0;
-    for (s = F; s->Freq; s++) {
-        s->Freq -= s->Freq >> 1;
-        TotFreq += s->Freq;
-    }
-}
-
-template <int NSYM, int STEP, int SHIFT>
-void FrequencyModel<NSYM, STEP, SHIFT>::EncodeSymbol(RangeCoder* rc, uint16_t sym) {
-    SymFreqs *s = F;
-    uint32_t AccFreq  = 0;
-
-    while (s->Symbol != sym) {
-        AccFreq += s++->Freq;
-        _mm_prefetch((uint8_t*)(s+1), _MM_HINT_T0);
-    }
-
-    rc->Encode(AccFreq, s->Freq, TotFreq);
-    s->Freq += PIL_FREQUENCY_MODEL_STEP;
-    TotFreq += PIL_FREQUENCY_MODEL_STEP;
-
-    if (TotFreq > PIL_FREQUENCY_MODEL_MAX)
-        Normalize();
-
-    /* Keep approx sorted */
-    if (s[0].Freq > s[-1].Freq) {
-        SymFreqs t = s[0];
-        s[0] = s[-1];
-        s[-1] = t;
-    }
-}
-
-template <int NSYM, int STEP, int SHIFT>
-void FrequencyModel<NSYM, STEP, SHIFT>::EncodeSymbol(uint16_t sym, uint32_t weight) {
-    SymFreqs *s = F;
-    uint32_t AccFreq  = 0;
-
-    while (s->Symbol != sym) {
-        AccFreq += s++->Freq;
-        _mm_prefetch((uint8_t*)(s+1), _MM_HINT_T0);
-    }
-
-    s->Freq += PIL_FREQUENCY_MODEL_STEP;
-    TotFreq += PIL_FREQUENCY_MODEL_STEP;
-
-    if (TotFreq > PIL_FREQUENCY_MODEL_MAX)
-        Normalize();
-
-    /* Keep approx sorted */
-    if (s[0].Freq > s[-1].Freq) {
-        SymFreqs t = s[0];
-        s[0]  = s[-1];
-        s[-1] = t;
-    }
-}
-
-template <int NSYM, int STEP, int SHIFT>
-uint16_t FrequencyModel<NSYM, STEP, SHIFT>::DecodeSymbol(RangeCoder *rc) {
-    SymFreqs* s = F;
-    uint32_t freq = rc->GetFreq(TotFreq);
-    uint32_t AccFreq;
-
-    for (AccFreq = 0; (AccFreq += s->Freq) <= freq; s++)
-        _mm_prefetch((uint8_t*)s, _MM_HINT_T0);
-
-    AccFreq -= s->Freq;
-
-    rc->Decode(AccFreq, s->Freq, TotFreq);
-    s->Freq += PIL_FREQUENCY_MODEL_STEP;
-    TotFreq += PIL_FREQUENCY_MODEL_STEP;
-
-    if (TotFreq > PIL_FREQUENCY_MODEL_MAX)
-        Normalize();
-
-    /* Keep approx sorted */
-    if (s[0].Freq > s[-1].Freq) {
-        SymFreqs t = s[0];
-        s[0] = s[-1];
-        s[-1] = t;
-        return t.Symbol;
-    }
-
-    return s->Symbol;
-}
-
 
 }
 
