@@ -194,7 +194,7 @@ public:
     }
 
     void ResetPBWT() {
-        if(pbwt.get() != nullptr)
+        if (pbwt.get() != nullptr)
             pbwt->reset();
     }
 
@@ -329,6 +329,8 @@ void ReadVcfGT (const std::string& filename) {
         //char *ref, *REF;
         //ref = REF = strdup(line->d.allele[0]);
         //while ( (*ref = toupper(*ref)) ) ++ref ;
+
+        // 
         if (reader->bcf1_->n_allele > 4) {
             uint8_t* gts = reader->bcf1_->d.fmt[0].p;
             for (int i = 0; i < 2*reader->n_samples_; ++i) {
@@ -399,12 +401,10 @@ void ReadVcfGT (const std::string& filename) {
             }
             std::cerr << std::endl;*/
 
-            if(alts[15] == 0) {
+            if (alts[15] == 0) {
 
                 pmodel1.pbwt->Update(&gts[0], 2);
                 pmodel2.pbwt->Update(&gts[1], 2);
-
-
 
             {
                uint32_t n_bused = 0;
@@ -416,7 +416,7 @@ void ReadVcfGT (const std::string& filename) {
 
                //uint32_t nset = 0;
                //for (int i = 0; i < n_bitmaps; ++i) {
-               //    if(bitmaps1[i/n_bstep] !=0)++nset;
+               //    if (bitmaps1[i/n_bstep] !=0)++nset;
                //}
                //std::cerr << "nset=" << nset << "/" << n_bitmaps << std::endl;
 
@@ -427,7 +427,7 @@ void ReadVcfGT (const std::string& filename) {
                   uint32_t p = 0, n_p = n_bstep, s = 0;
                   for (int i = 0; i < n_bitmaps; ++i) {
                       //std::cerr << "p=" << p << std::endl;
-                      if(bitmaps1[i]) {
+                      if (bitmaps1[i]) {
                           //std::cerr << "i=" << i << "/" << n_bitmaps << " p/np=" << p << ":" << n_p << "/" << reader->n_samples_  << std::endl;
                           ++n_bused;
                           for (int j = 0; j < n_p; ++j) {
@@ -463,7 +463,7 @@ void ReadVcfGT (const std::string& filename) {
                       n_p = (p + n_bstep > reader->n_samples_ ? reader->n_samples_ - p : n_bstep);
                   }
                   assert(p + n_p == reader->n_samples_);
-                  //if((rc1.OutSize() - before) > pbwt[0].n_queue[1]*sizeof(uint16_t))
+                  //if ((rc1.OutSize() - before) > pbwt[0].n_queue[1]*sizeof(uint16_t))
                   //std::cerr << pbwt[1].n_queue[1] << "\t" <<  n_bused << "\t" << rc1.OutSize() - before << "\t" << (rc1.OutSize() - before) / ((float)pbwt[0].n_queue[1]*sizeof(uint16_t)) << std::endl;
                   //std::cerr << "Seen=" << n_seen << "/" << pbwt[1].n_queue[1] << std::endl;
                   //assert(n_seen == pbwt[0].n_queue[1]);
@@ -499,7 +499,7 @@ void ReadVcfGT (const std::string& filename) {
 
                for (int i = 0; i < n_bitmaps; ++i) {
                    //std::cerr << "p=" << p << std::endl;
-                   if(bitmaps2[i]) {
+                   if (bitmaps2[i]) {
                        //std::cerr << "i=" << i << "/" << n_bitmaps << " p/np=" << p << ":" << n_p << "/" << reader->n_samples_  << std::endl;
                        ++n_bused;
                        for (int j = 0; j < n_p; ++j) {
@@ -553,7 +553,7 @@ void ReadVcfGT (const std::string& filename) {
             }
 
             } else {
-                //std::cerr << "using extended model" << std::endl;
+                std::cerr << "using extended model with " << reader->bcf1_->n_allele << " alleles" << std::endl;
                 pmodel1E.pbwt->Update(&gts[0], 2);
                 pmodel2E.pbwt->Update(&gts[1], 2);
                 //std::cerr << "done" << std::endl;
@@ -587,8 +587,8 @@ void ReadVcfGT (const std::string& filename) {
             //std::cerr << "test rc=" << pmodel1.FinishEncoding() << "," << pmodel2.FinishEncoding() << std::endl;
             int p1 = pmodel1.FinishEncoding();
             int p2 = pmodel2.FinishEncoding();
-            int p1E = pmodel1.FinishEncoding();
-            int p2E = pmodel2.FinishEncoding();
+            int p1E = pmodel1E.FinishEncoding();
+            int p2E = pmodel2E.FinishEncoding();
             n_out_gtpbwt += p1;
             n_out_gtpbwt += p2;
             n_out_gtpbwt += p1E;
