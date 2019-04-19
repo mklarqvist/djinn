@@ -12,8 +12,20 @@
 #include "frequency_model.h"
 #include "vcf_reader.h"
 
+#include "model_ad.h"
+
 #include <zstd.h>
 #include <zstd_errors.h>
+
+int ZstdCompress(const uint8_t* in, uint32_t n_in, uint8_t* out, uint32_t out_capacity, const int32_t c_level = 1) {
+    int ret = ZSTD_compress(out, out_capacity, in, n_in, c_level);
+    return(ret);
+}
+
+int ZstdDecompress(const uint8_t* in, uint32_t n_in, uint8_t* out, uint32_t out_capacity) {
+    int ret = ZSTD_decompress(out, out_capacity, in, n_in);
+    return(ret);
+}
 
 const uint8_t TWK_BCF_GT_UNPACK[3] = {2, 0, 1};
 const uint8_t TWK_BCF_GT_UNPACK_GENERAL[16] = {15, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14};
@@ -146,6 +158,31 @@ public:
         return(1);
     }
 
+    int UpdateGeneral(const uint8_t* arr, uint32_t stride = 1) {
+        // Reset queues.
+        memset(n_queue, 0, sizeof(uint32_t)*n_symbols);
+
+        for (int i = 0; i < n_samples; ++i) {
+            const uint8_t& gt = (arr[ppa[i] * stride]);
+            assert(gt < n_symbols);
+            for (int j = 0; j < n_symbols; ++j) {
+                if (gt == j)
+                    queue[j][n_queue[j]++] = ppa[i];
+            }
+            prev[i] = gt;
+        }
+
+        uint32_t of = 0;
+        for (int j = 0; j < n_symbols; ++j) {
+            for (uint32_t i = 0; i < n_queue[j]; ++i, ++of)
+                ppa[of] = queue[j][i];
+        }
+        assert(of == n_samples);
+        ++n_steps;
+
+        return(1);
+    }
+
     std::string ToPrettyString() const {
         std::string ret = "n=" + std::to_string(n_samples) + " {";
         ret += std::to_string(ppa[0]);
@@ -170,6 +207,13 @@ public:
 
 class GeneralPBWTModel {
 public:
+    GeneralPBWTModel() noexcept :
+        max_model_symbols(0),
+        model_context_shift(0),
+        model_context(0),
+        n_buffer(10000000), buffer(new uint8_t[n_buffer])
+    {}
+
     GeneralPBWTModel(int64_t n_samples, int n_symbols) :
         max_model_symbols(n_symbols),
         model_context_shift(ceil(log2(n_symbols))),
@@ -179,6 +223,21 @@ public:
         n_buffer(10000000),
         buffer(new uint8_t[n_buffer])
     {
+        assert(n_symbols > 1);
+        models.resize(MODEL_SIZE);
+        for (int i = 0; i < MODEL_SIZE; ++i) models[i] = std::make_shared<pil::FrequencyModel>();
+
+        Reset();
+    }
+
+    // Constructor outside constructor.
+    void Construct(int64_t n_samples, int n_symbols) {
+        max_model_symbols = n_symbols;
+        model_context_shift = ceil(log2(n_symbols));
+        model_context = 0;
+        pbwt = std::make_shared<PBWT>(n_samples, n_symbols);
+        range_coder = std::make_shared<pil::RangeCoder>();
+
         assert(n_symbols > 1);
         models.resize(MODEL_SIZE);
         for (int i = 0; i < MODEL_SIZE; ++i) models[i] = std::make_shared<pil::FrequencyModel>();
@@ -237,31 +296,264 @@ public:
     std::shared_ptr<pil::RangeCoder> range_coder;
     std::vector < std::shared_ptr<pil::FrequencyModel> > models;
     size_t n_buffer;
-    uint8_t* buffer;
+    uint8_t* buffer; // fix
+};
+
+struct Buffer {
+    Buffer() noexcept : len(0), cap(0), data(nullptr){}
+    Buffer(const size_t size) noexcept : len(0), cap(size), data(new uint8_t[size]){}
+    ~Buffer() { delete[] data; }
+
+    const size_t& size() const { return len; }
+    const size_t& capacity() const { return cap; }
+
+    int resize() {
+        uint8_t* old = data;
+        size_t new_cap = len * 1.2 - len < 65536 ? 65536 : len * 1.2;
+        data = new uint8_t[new_cap];
+        cap = new_cap;
+        memcpy(data,old,len);
+        delete[] old;
+        
+        return 1;
+    }
+
+    int resize(const size_t desired_size) {
+        if (desired_size < cap) {
+            len = desired_size < len ? desired_size : len;
+            return 1;
+        }
+
+        uint8_t* old = data;
+        data = new uint8_t[desired_size];
+        cap = desired_size;
+        memcpy(data,old,len);
+        delete[] old;
+        
+        return(0);
+    }
+
+    void reset() { len = 0; }
+
+    size_t len, cap;
+    uint8_t* data;
 };
 
 class GenotypePermuter {
 public:
-    template <class T>
-    int Encode(const T* arr, uint32_t ploidy = 2);
+    GenotypePermuter(int64_t n_s) :
+        n_samples(n_s),
+        block_size(8192),
+        processed_lines(0),
+        processed_lines_local(0),
+        bytes_in(0), bytes_out(0),
+        models(nullptr)
+    {
+        base_models[0].Construct(n_samples, 2);
+        base_models[1].Construct(n_samples, 2);
+        base_models[2].Construct(n_samples, 3);
+        base_models[3].Construct(n_samples, 3);
+        base_models_complex[0].Construct(n_samples, 16);
+        base_models_complex[1].Construct(n_samples, 16);
 
-    // temp
-    int EncodeDiploidComplete(const uint8_t* arr);
+        buf_general[0].resize(10000000);
+        buf_general[1].resize(10000000);
+        buf_raw.resize(10000000);
+
+        base_models[0].StartEncoding();
+        base_models[1].StartEncoding();
+        base_models[2].StartEncoding();
+        base_models[3].StartEncoding();
+        base_models_complex[0].StartEncoding();
+        base_models_complex[1].StartEncoding();
+    }
+
+    ~GenotypePermuter() {
+        delete[] models;
+    }
+
+    inline bool CheckLimit() const {
+        return (processed_lines_local == 8196 || 
+                base_models[0].range_coder->OutSize() > 9000000 || 
+                base_models[1].range_coder->OutSize() > 9000000 || 
+                base_models[2].range_coder->OutSize() > 9000000 || 
+                base_models[3].range_coder->OutSize() > 9000000 ||
+                base_models_complex[0].range_coder->OutSize() > 9000000 ||
+                base_models_complex[1].range_coder->OutSize() > 9000000 ||
+                buf_raw.len > 9000000);
+    }
+
+    //
+    int Encode(const bcf1_t* bcf) {
+        if (bcf == NULL) return 0;
+
+        bytes_in += bcf->d.fmt[0].p_len;
+        
+        return(Encode2N(bcf));
+    }
+
+private:
+    // Diploid wrapper.
+    int Encode2N(const bcf1_t* bcf) {
+        if (bcf->n_allele == 2) return(Encode2N2M(bcf->d.fmt));
+        else if (bcf->n_allele < 4) return(Encode2NXM(bcf->d.fmt)); 
+        else {
+            // std::cerr << "alleles=" << bcf->n_allele << std::endl;
+            uint8_t* gts = bcf->d.fmt[0].p;
+            for (int i = 0; i < 2*n_samples; ++i) {
+                buf_raw.data[buf_raw.len++] = gts[i];
+            }
+
+            ++processed_lines_local;
+            ++processed_lines;
+        }
+    }
+
+    // Wrapper for 2N2M
+    int Encode2N2M(const bcf_fmt_t* fmt) {
+        if (CheckLimit()) {
+            Compress();
+        }
+
+        // Todo: assert genotypes are set for this variant.
+        const uint8_t* gts = fmt[0].p; // data pointer
+        
+        // Todo: Assert that total number of alleles < 15.
+        uint32_t alts[256] = {0};
+        for (int i = 0; i < 2*n_samples; ++i) {
+            ++alts[BCF_UNPACK_GENOTYPE_GENERAL(gts[i])];
+        }
+
+        if (alts[15] == 0) { // No missing values.
+            return Encode2N2MC(fmt);
+
+        } else { // Having missing values.
+            // std::cerr << "using extended model" << std::endl;
+            return Encode2N2MM(fmt);
+        }
+
+        return 1;
+    }
+
+    // 2N2M complete
+    int Encode2N2MC(const bcf_fmt_t* fmt) {
+        const uint8_t* gts = fmt[0].p; // data pointer
+        
+        base_models[0].pbwt->Update(&gts[0], 2);
+        base_models[1].pbwt->Update(&gts[1], 2);
+
+        base_models[0].ResetContext();
+        for (int j = 0; j < n_samples; ++j) {
+            assert(base_models[0].pbwt->prev[j] < 2);
+            base_models[0].EncodeSymbol(base_models[0].pbwt->prev[j]);
+        }
+    
+        base_models[1].ResetContext();
+        for (int i = 0; i < n_samples; ++i) {
+            assert(base_models[1].pbwt->prev[i] < 2);
+            base_models[1].EncodeSymbol(base_models[1].pbwt->prev[i]);   
+        }
+
+        ++processed_lines_local;
+        ++processed_lines;
+        return 1;
+    }
+
+    // 2N2M with missing
+    int Encode2N2MM(const bcf_fmt_t* fmt) {
+        const uint8_t* gts = fmt[0].p; // data pointer
+        
+        base_models[3].pbwt->Update(&gts[0], 2);
+        base_models[4].pbwt->Update(&gts[1], 2);
+
+        base_models[3].ResetContext();
+        for (int i = 0; i < n_samples; ++i) {
+            assert(base_models[3].pbwt->prev[i] < 3);
+            base_models[3].EncodeSymbol(base_models[3].pbwt->prev[i]);
+        }
+
+        base_models[4].ResetContext();
+        for (int i = 0; i < n_samples; ++i) {
+            assert(base_models[4].pbwt->prev[i] < 3);
+            base_models[4].EncodeSymbol(base_models[4].pbwt->prev[i]);
+        }
+
+        ++processed_lines_local;
+        ++processed_lines;
+        return 1;
+    }
+
+    // 2N any M (up to 16)
+    int Encode2NXM(const bcf_fmt_t* fmt) {
+        if (CheckLimit()) {
+            Compress();
+        }
+
+        // Todo: assert genotypes are set for this variant.
+        const uint8_t* gts = fmt[0].p; // data pointer
+        base_models_complex[0].pbwt->UpdateGeneral(&gts[0], 2);
+        
+        for (int i = 0; i < n_samples; ++i) {
+            assert(base_models_complex[0].pbwt->prev[i] < 16);
+            base_models_complex[0].EncodeSymbol(base_models_complex[0].pbwt->prev[i]);
+        }
+
+        base_models_complex[1].pbwt->UpdateGeneral(&gts[1], 2);
+
+        for (int i = 0; i < n_samples; ++i) {
+            assert(base_models_complex[1].pbwt->prev[i] < 16);
+            base_models_complex[1].EncodeSymbol(base_models_complex[1].pbwt->prev[i]);
+        }
+
+        ++processed_lines_local;
+        ++processed_lines;
+        return 1;
+    }
+
+    int Compress() {
+        // flush: temp
+        int p1  = base_models[0].FinishEncoding();
+        int p2  = base_models[1].FinishEncoding();
+        int p1E = base_models[2].FinishEncoding();
+        int p2E = base_models[3].FinishEncoding();
+        int p2X = base_models_complex[0].FinishEncoding();
+        int p2X2 = base_models_complex[1].FinishEncoding();
+        int praw = ZstdCompress(buf_raw.data, buf_raw.len,
+                                buf_general[0].data, buf_general[0].capacity(),
+                                10);
+
+        base_models[0].Reset();
+        base_models[0].StartEncoding();
+        base_models[1].Reset();
+        base_models[1].StartEncoding();
+        base_models[2].Reset();
+        base_models[2].StartEncoding();
+        base_models[3].Reset();
+        base_models[3].StartEncoding();
+        base_models_complex[0].Reset();
+        base_models_complex[0].StartEncoding();
+        base_models_complex[1].Reset();
+        base_models_complex[1].StartEncoding();
+
+        processed_lines_local = 0;
+        std::cerr << "Flushed: " << p1 << "," << p2 << "," << p1E << "," << p2E << "," << p2X << "," << p2X2 << "," << praw << std::endl;
+        buf_raw.reset();
+        bytes_out += p1+p2+p1E+p2E+p2X+p2X2+praw;
+        std::cerr << "[PROGRESS] " << bytes_in << "->" << bytes_out << " (" << (double)bytes_in/bytes_out << "-fold)" << std::endl;
+    }
 
 public:
     int64_t n_samples;
+    uint32_t block_size;
+    uint32_t processed_lines;
+    uint32_t processed_lines_local;
+    uint64_t bytes_in, bytes_out;
+    GeneralPBWTModel base_models[4];
+    GeneralPBWTModel base_models_complex[2];
+    Buffer buf_general[2];
+    Buffer buf_raw;
     GeneralPBWTModel* models;
 };
-
-int ZstdCompress(const uint8_t* in, uint32_t n_in, uint8_t* out, uint32_t out_capacity, const int32_t c_level = 1) {
-    int ret = ZSTD_compress(out, out_capacity, in, n_in, c_level);
-    return(ret);
-}
-
-int ZstdDecompress(const uint8_t* in, uint32_t n_in, uint8_t* out, uint32_t out_capacity) {
-    int ret = ZSTD_decompress(out, out_capacity, in, n_in);
-    return(ret);
-}
 
 void ReadVcfGT (const std::string& filename) {
     std::unique_ptr<tachyon::io::VcfReader> reader = tachyon::io::VcfReader::FromFile(filename,8);
@@ -321,6 +613,12 @@ void ReadVcfGT (const std::string& filename) {
     pmodel1E.StartEncoding();
     pmodel2E.StartEncoding();
 
+    // AD: temp
+    // FormatAlelleDepth fmt_ad(10000,reader->n_samples_,true);
+
+    GenotypePermuter gtperm(reader->n_samples_);
+    
+    // While there are bcf records available.
     while (reader->Next()) {
         //const char* chrom = bcf_seqname(hr,line) ;
         //if (!p->chrom) p->chrom = strdup (chrom) ;
@@ -329,6 +627,10 @@ void ReadVcfGT (const std::string& filename) {
         //char *ref, *REF;
         //ref = REF = strdup(line->d.allele[0]);
         //while ( (*ref = toupper(*ref)) ) ++ref ;
+
+        // const bcf_fmt_t* fmt = bcf_get_fmt(reader->header_, reader->bcf1_, "AD");
+        // if (reader->bcf1_->n_allele == 2) fmt_ad.AddRecord(fmt);
+         gtperm.Encode(reader->bcf1_);
 
         // 
         if (reader->bcf1_->n_allele > 4) {
@@ -344,10 +646,13 @@ void ReadVcfGT (const std::string& filename) {
         ++n_lines;
         ++n_lines_total;
 
-        n_in += 2*reader->n_samples_;
+        n_in += reader->bcf1_->d.fmt[0].p_len;
 
+       
+        
         if (reader->bcf1_->n_allele != 2) {
-            continue;
+            // Todo: fix
+            // continue;
             //std::cerr << "not2" << std::endl;
             // copy to 4-bit
             uint8_t* gts = reader->bcf1_->d.fmt[0].p;
@@ -385,6 +690,8 @@ void ReadVcfGT (const std::string& filename) {
 
         else
         {
+            
+            
             uint8_t* gts = reader->bcf1_->d.fmt[0].p;
             //pbwt[0].Update(&gts[0], 2);
             //pbwt[1].Update(&gts[1], 2);
@@ -414,51 +721,19 @@ void ReadVcfGT (const std::string& filename) {
                    bitmaps1[i/n_bstep] += (pmodel1.pbwt->prev[i] == 1);
                }
 
-               //uint32_t nset = 0;
-               //for (int i = 0; i < n_bitmaps; ++i) {
-               //    if (bitmaps1[i/n_bstep] !=0)++nset;
-               //}
-               //std::cerr << "nset=" << nset << "/" << n_bitmaps << std::endl;
-
                pmodel1.ResetContext();
 
                //size_t before = rc1.OutSize();
                   uint32_t n_seen = 0;
-                  uint32_t p = 0, n_p = n_bstep, s = 0;
+                  uint32_t p = 0, n_p = n_bstep;
                   for (int i = 0; i < n_bitmaps; ++i) {
-                      //std::cerr << "p=" << p << std::endl;
-                      if (bitmaps1[i]) {
-                          //std::cerr << "i=" << i << "/" << n_bitmaps << " p/np=" << p << ":" << n_p << "/" << reader->n_samples_  << std::endl;
+
                           ++n_bused;
                           for (int j = 0; j < n_p; ++j) {
-                              //std::cerr << p+j << "->" << p+n_p << "/" << reader->n_samples_ << ": " << (int)pbwt[1].prev[p+j] << std::endl;
-                              //assert(p+j < reader->n_samples_);
-                              //n_seen += (pbwt[0].prev[p+j] == 1);
                               n_seen += (pmodel1.pbwt->prev[p+j] == 1);
-                              //assert(pmodel1.model_context == s); // assert parity in context
                               pmodel1.EncodeSymbol(pmodel1.pbwt->prev[p+j]);
-
-                              //fmodel1[s].EncodeSymbol(&rc1, pbwt[0].prev[p+j]);
-                              //s <<= 1;
-                              //s |= pbwt[0].prev[p+j];
-                              //s &= (MODEL_SIZE-1);
-                              //_mm_prefetch((const char *)&fmodel1[s], _MM_HINT_T0);
                           }
-                      } else {
-                          //uint32_t w = 50;
-                          /*for (int j = 0; j < n_p; ++j) {
-                             //fmodel1[s].EncodeSymbol(0,w);
-                             //assert(pbwt[0].prev[p+j] == 0);
-                              fmodel1[s].EncodeSymbol(&rc1, pbwt[0].prev[p+j]);
-                             s <<= 1;
-                             s |= pbwt[0].prev[p+j];
-                             s &= (MODEL_SIZE-1);
-                             _mm_prefetch((const char *)&fmodel1[s], _MM_HINT_T0);
-                         }*/
-
-                          pmodel1.ResetContext();
-                         s = 0;
-                      }
+                        
                       p += n_bstep;
                       n_p = (p + n_bstep > reader->n_samples_ ? reader->n_samples_ - p : n_bstep);
                   }
@@ -468,40 +743,18 @@ void ReadVcfGT (const std::string& filename) {
                   //std::cerr << "Seen=" << n_seen << "/" << pbwt[1].n_queue[1] << std::endl;
                   //assert(n_seen == pbwt[0].n_queue[1]);
                   assert(n_seen == pmodel1.pbwt->n_queue[1]);
-
-               /*size_t before = rc1.OutSize();
-               uint32_t s = 0;
-               for (int i = 0; i < reader->n_samples_; ++i) {
-                   fmodel1[s].EncodeSymbol(&rc1, pbwt[0].prev[i]);
-                   s <<= 1;
-                   s |= pbwt[0].prev[i];
-                   s &= (MODEL_SIZE-1);
-                   _mm_prefetch((const char *)&fmodel1[s], _MM_HINT_T0);
-               }
-               //std::cerr << pbwt[0].n_queue[1] << "\t" << rc1.OutSize() - before << "\t" << (rc1.OutSize() - before) / ((float)pbwt[0].n_queue[1]) << std::endl;
-               */
             }
 
 
             {
-               uint32_t n_bused = 0;
-               memset(bitmaps2, 0, n_bitmaps*sizeof(uint32_t));
-               for (int i = 0; i < reader->n_samples_; ++i) {
-                   //bitmaps2[i/n_bstep] += (pbwt[1].prev[i] == 1);
-                   bitmaps2[i/n_bstep] += (pmodel2.pbwt->prev[i] == 1);
-               }
-
-               //size_t before = rc2.OutSize();
+               
                uint32_t n_seen = 0;
                uint32_t p = 0, n_p = n_bstep, s = 0;
 
                pmodel2.ResetContext();
 
                for (int i = 0; i < n_bitmaps; ++i) {
-                   //std::cerr << "p=" << p << std::endl;
-                   if (bitmaps2[i]) {
                        //std::cerr << "i=" << i << "/" << n_bitmaps << " p/np=" << p << ":" << n_p << "/" << reader->n_samples_  << std::endl;
-                       ++n_bused;
                        for (int j = 0; j < n_p; ++j) {
                            //std::cerr << p+j << "->" << p+n_p << "/" << reader->n_samples_ << ": " << (int)pbwt[1].prev[p+j] << std::endl;
                            //assert(p+j < reader->n_samples_);
@@ -516,22 +769,7 @@ void ReadVcfGT (const std::string& filename) {
                            s &= (MODEL_SIZE - 1);
                            _mm_prefetch((const char *)&fmodel2[s], _MM_HINT_T0);*/
                        }
-                   } else {
-                       /*uint32_t w = 50;
-                       for (int j = 0; j < n_p; ++j) {
-                           //fmodel2[s].EncodeSymbol(0, w);
-                           //fmodel2[0].EncodeSymbol(&rc2, pbwt[1].prev[p+j]);
-                           //assert(pbwt[1].prev[p+j] == 0);
-                           fmodel2[s].EncodeSymbol(&rc2, pbwt[1].prev[p+j]);
-                          n_seen += (pbwt[1].prev[p+j] == 1);
-                          s <<= 1;
-                          s |= pbwt[1].prev[p+j];
-                          s &= (MODEL_SIZE - 1);
-                          _mm_prefetch((const char *)&fmodel2[s], _MM_HINT_T0);
-                       }*/
-                      s = 0;
-                      pmodel2.ResetContext();
-                   }
+                 
                    p += n_bstep;
                    n_p = (p + n_bstep > reader->n_samples_ ? reader->n_samples_ - p : n_bstep);
                }
@@ -553,7 +791,7 @@ void ReadVcfGT (const std::string& filename) {
             }
 
             } else {
-                std::cerr << "using extended model with " << reader->bcf1_->n_allele << " alleles" << std::endl;
+                // std::cerr << "using extended model with " << reader->bcf1_->n_allele << " alleles" << std::endl;
                 pmodel1E.pbwt->Update(&gts[0], 2);
                 pmodel2E.pbwt->Update(&gts[1], 2);
                 //std::cerr << "done" << std::endl;
@@ -568,7 +806,6 @@ void ReadVcfGT (const std::string& filename) {
                     pmodel2E.EncodeSymbol(pmodel2E.pbwt->prev[i]);
                 }
             }
-
         }
 
         if (n_lines == 8196 || pmodel1.range_coder->OutSize() > 9000000 || pmodel2.range_coder->OutSize() > 9000000 || pmodel1E.range_coder->OutSize() > 9000000 || pmodel2E.range_coder->OutSize() > 9000000 || rc_pbwt4.OutSize() > 9000000 || n_out1 > 9000000) {
@@ -601,6 +838,7 @@ void ReadVcfGT (const std::string& filename) {
             pmodel1E.StartEncoding();
             pmodel2E.Reset();
             pmodel2E.StartEncoding();
+
             //
 
             //n_out_gtpbwt += rc_pbwt.OutSize();
@@ -664,10 +902,19 @@ void ReadVcfGT (const std::string& filename) {
 
     std::cerr << "gtPBWT " << n_lines_total << " Compressed=" << n_in << "->" << n_out_gtpbwt << "(" << (float)n_in/n_out_gtpbwt << "-fold)" << std::endl;
 
+    std::cerr << "here" << std::endl;
+    gtperm.Compress(); // final
+    std::cerr << "Final=" << gtperm.bytes_in << "->" << gtperm.bytes_out << " (" << (double)gtperm.bytes_in/gtperm.bytes_out << ")" << std::endl;
+
+    // std::cerr << "AD cost=" << fmt_ad.tot_in << "->" << fmt_ad.tot_out << std::endl;
+
     //delete[] fmodel1; delete[] fmodel2;
     delete[] out1_buffer; delete[] out2_buffer; delete[] out3_buffer;
     delete[] gtpbwt_buffer;
     delete[] gtpbwt_model;
+
+    // delete[] out_bitmap;
+    // delete[] bitmap_model;
 }
 
 int main(int argc, char** argv) {
