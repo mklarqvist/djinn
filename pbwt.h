@@ -32,6 +32,8 @@ const uint8_t TWK_BCF_GT_UNPACK_GENERAL[16] = {15, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9,
 #define BCF_UNPACK_GENOTYPE(A) TWK_BCF_GT_UNPACK[(A >> 1)]
 #define BCF_UNPACK_GENOTYPE_GENERAL(A) TWK_BCF_GT_UNPACK_GENERAL[(A >> 1)]
 
+/*======   Canonical representation   ======*/
+
 class PBWT {
 public:
     PBWT(int64_t n_samples, int n_symbols);
@@ -55,6 +57,8 @@ public:
     uint32_t** queue; // the positional queues themselves
 };
 
+/*======   Higher order   ======*/
+
 #define MODEL_SIZE 65536
 
 class GeneralPBWTModel {
@@ -62,7 +66,7 @@ public:
     GeneralPBWTModel() noexcept;
     GeneralPBWTModel(int64_t n_samples, int n_symbols);
     ~GeneralPBWTModel();
-    
+
     void Construct(int64_t n_samples, int n_symbols);
     void ResetModels();
     void ResetPBWT();

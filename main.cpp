@@ -1,13 +1,3 @@
-#include <cstdlib>
-#include <cmath>
-#include <errno.h>
-
-#include <memory>
-#include <iostream>
-
-#include <bitset>
-#include <vector>
-
 #include "range_coder.h"
 #include "frequency_model.h"
 #include "vcf_reader.h"
@@ -53,7 +43,6 @@ void ReadVcfGT (const std::string& filename) {
         //ref = REF = strdup(line->d.allele[0]);
         //while ( (*ref = toupper(*ref)) ) ++ref ;
 
-        // if (reader->bcf1_->n_allele == 2) fmt_ad.AddRecord(fmt);
          gtperm.Encode(reader->bcf1_, reader->header_);
     }
 
