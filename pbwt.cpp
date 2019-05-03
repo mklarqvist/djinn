@@ -1,5 +1,9 @@
 #include "pbwt.h"
 
+// temp
+#include <iostream>
+#include <bitset>
+
 PBWT::PBWT(int64_t n_samples, int n_symbols) :
     n_symbols(n_symbols),
     n_samples(n_samples),
@@ -100,9 +104,9 @@ int PBWT::Update(const uint8_t* arr, uint32_t stride) {
                 queue[j][n_queue[j]++] = ppa[i];
         }
         prev[i] = gt;
-        //std::cerr << " " << (int)gt;
+        // std::cerr << " " << (int)gt;
     }
-    //std::cerr << std::endl;
+    // std::cerr << std::endl << std::endl;
 
     uint32_t of = 0;
     for (int j = 0; j < n_symbols; ++j) {
@@ -113,12 +117,12 @@ int PBWT::Update(const uint8_t* arr, uint32_t stride) {
     //std::cerr << "of=" << of << "/" << n_samples << std::endl;
     assert(of == n_samples);
     // debug should be sorted here
-    //std::cerr << ToPrettyString() << std::endl;
-    //std::cerr << "Alts=" << n_queue[1] << std::endl;
-    //for (int i = 0; i < n_samples; ++i) {
+    // std::cerr << ToPrettyString() << std::endl;
+    // std::cerr << "Alts=" << n_queue[1] << std::endl;
+    // for (int i = 0; i < n_samples; ++i) {
     //   std::cerr << " " << (int)BCF_UNPACK_GENOTYPE(arr[ppa[i]*stride]);
-    //}
-    //std::cerr << std::endl;
+    // }
+    // std::cerr << std::endl;
     ++n_steps;
 
     return(1);

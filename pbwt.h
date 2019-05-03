@@ -59,7 +59,7 @@ public:
 
 /*======   Higher order   ======*/
 
-#define MODEL_SIZE 65536
+#define MODEL_SIZE 256
 
 class GeneralPBWTModel {
 public:

@@ -19,9 +19,9 @@
 OPTFLAGS  := -O3 -march=native
 CFLAGS     = -std=c99 $(OPTFLAGS) $(DEBUG_FLAGS)
 CPPFLAGS   = -std=c++0x $(OPTFLAGS) $(DEBUG_FLAGS)
-CPP_SOURCE = frequency_model.cpp main.cpp pbwt.cpp range_coder.cpp
+CPP_SOURCE = frequency_model.cpp main.cpp pbwt.cpp range_coder.cpp r32x16b_avx2.cpp
 C_SOURCE   = 
-OBJECTS    = $(CPP_SOURCE:.cpp=.o) $(C_SOURCE:.c=.o)
+OBJECTS    = $(C_SOURCE:.c=.o) $(CPP_SOURCE:.cpp=.o)
 
 # Default target
 all: gt
@@ -34,7 +34,7 @@ all: gt
 	$(CXX) $(CPPFLAGS)-c -o $@ $<
 
 gt: $(OBJECTS)
-	$(CXX) $(CPPFLAGS) $(OBJECTS) -lzstd -lhts -o gt
+	$(CXX) $(CPPFLAGS) $(OBJECTS) -lzstd -llz4 -lhts -o gt
 
 clean:
 	rm -f $(OBJECTS)

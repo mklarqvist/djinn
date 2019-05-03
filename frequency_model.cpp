@@ -6,11 +6,11 @@
 namespace pil {
 
 FrequencyModel::FrequencyModel() :
-    NSYM(0), STEP(2), SHIFT(13),
+    NSYM(0), STEP(2), SHIFT(16),
     TotFreq(0),
     F(nullptr)
 {
-
+    
 }
 
 FrequencyModel::FrequencyModel(int nsym, int max_sym) :

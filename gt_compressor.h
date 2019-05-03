@@ -21,6 +21,32 @@
 #include "vcf_reader.h"
 #include "pbwt.h"
 
+// temp
+#include <bitset>
+
+class MixedCompressor {
+public:
+
+    int Encode(bcf1_t* bcf, const bcf_hdr_t* hdr) {
+
+        // Compression scheme:
+        // If run-length > X then use RLE.
+        // Otherwise use 64-bit bitmap.
+        // Compress with Zstd or LZ4.
+        if (bcf == NULL) return 0;
+        const bcf_fmt_t* fmt = bcf_get_fmt(hdr, bcf, "GT");
+        if (fmt == NULL) return 0;
+
+        uint8_t* gts = fmt->p;
+        for (int i = 0; i < 2504; ++i) {
+            
+        }
+    }
+
+    uint32_t lbuf;
+    uint8_t* buf;
+};
+
 struct Buffer {
     Buffer() noexcept : len(0), cap(0), data(nullptr){}
     Buffer(const size_t size) noexcept : len(0), cap(size), data(new uint8_t[size]){}
@@ -61,6 +87,8 @@ struct Buffer {
     uint8_t* data;
 };
 
+static uint8_t temp_unpack[3] = {2, 0, 1};
+
 class GenotypeCompressor {
 public:
     GenotypeCompressor(int64_t n_s) :
@@ -69,8 +97,12 @@ public:
         processed_lines(0),
         processed_lines_local(0),
         bytes_in(0), bytes_out(0),
+        // debug
+        bytes_in1(0), bytes_out_zstd1(0), bytes_out_lz4(0),
         models(nullptr)
     {
+        gt_width.resize(n_s, 0);
+
         base_models[0].Construct(n_samples, 2);
         base_models[1].Construct(n_samples, 2);
         base_models[2].Construct(n_samples, 3);
@@ -88,6 +120,11 @@ public:
         base_models[3].StartEncoding();
         base_models_complex[0].StartEncoding();
         base_models_complex[1].StartEncoding();
+
+        nonsense[0].Construct(1, 2);
+        nonsense[1].Construct(1, 2);
+        nonsense[0].StartEncoding();
+        nonsense[1].StartEncoding();
     }
 
     ~GenotypeCompressor() {
@@ -111,19 +148,20 @@ public:
         const bcf_fmt_t* fmt = bcf_get_fmt(hdr, bcf, "GT");
         if (fmt == NULL) return 0;
 
-        bytes_in += bcf->d.fmt[0].p_len;
-        
+        bytes_in += bcf->d.fmt->p_len;
+
+        // Todo: extend beyond 2N
         return(Encode2N(bcf));
     }
 
 private:
     // Diploid wrapper.
     int Encode2N(const bcf1_t* bcf) {
-        if (bcf->n_allele == 2) return(Encode2N2M(bcf->d.fmt));
-        else if (bcf->n_allele < 4) return(Encode2NXM(bcf->d.fmt)); 
+        if (bcf->n_allele == 2) return(Encode2N2M(bcf->d.fmt)); // biallelic
+        else if (bcf->n_allele < 4) return(Encode2NXM(bcf->d.fmt));  // #alleles < 4
         else {
             // std::cerr << "alleles=" << bcf->n_allele << std::endl;
-            uint8_t* gts = bcf->d.fmt[0].p;
+            uint8_t* gts = bcf->d.fmt->p;
             for (int i = 0; i < 2*n_samples; ++i) {
                 buf_raw.data[buf_raw.len++] = gts[i];
             }
@@ -131,6 +169,7 @@ private:
             ++processed_lines_local;
             ++processed_lines;
         }
+        return 1;
     }
 
     // Wrapper for 2N2M
@@ -140,14 +179,15 @@ private:
         }
 
         // Todo: assert genotypes are set for this variant.
-        const uint8_t* gts = fmt[0].p; // data pointer
+        const uint8_t* gts = fmt->p; // data pointer
         
         // Todo: Assert that total number of alleles < 15.
         uint32_t alts[256] = {0};
+       
         for (int i = 0; i < 2*n_samples; ++i) {
             ++alts[BCF_UNPACK_GENOTYPE_GENERAL(gts[i])];
         }
-
+        
         if (alts[15] == 0) { // No missing values.
             return Encode2N2MC(fmt);
 
@@ -159,24 +199,195 @@ private:
         return 1;
     }
 
+    int EncodeRLEBitmap(const bcf_fmt_t* fmt) {
+        bytes_in1 += n_samples;
+        if (buf_general[0].len > 9000000 || processed_lines_local == block_size) {
+            int praw = ZstdCompress(buf_general[1].data, buf_general[1].len,
+                                    buf_general[0].data, buf_general[0].capacity(),
+                                    10);
+
+            bytes_out_zstd1 += praw;
+
+            std::cerr << "Zstd->compressed: " << buf_general[1].len << "->" << praw << std::endl;
+            int plz4 = Lz4Compress(buf_general[1].data, buf_general[1].len,
+                                    buf_general[0].data, buf_general[0].capacity(),
+                                    9);
+            std::cerr << "Lz4->compressed: " << buf_general[1].len << "->" << plz4 << std::endl;
+            bytes_out_lz4 += plz4;
+
+            buf_general[1].len = 0;
+        }
+
+        // RLE word -> 1 bit typing, 1 bit allele, word*8-2 bits for rle
+        // If using 32-bit words then run has to be larger then that
+
+        uint8_t ref = base_models[0].pbwt->prev[0];
+        uint32_t rle_len = 1;
+        uint32_t start_rle = 0, end_rle = 1;
+
+        // Debug.
+        uint32_t rle_cost = 0;
+        uint32_t n_objects = 0;
+        uint32_t observed_alts = 0;
+        uint32_t observed_length = 0;
+
+        for (int i = 1; i < n_samples; ++i) {
+            if (base_models[0].pbwt->prev[i] != ref || rle_len == 16384) {
+                end_rle = i;
+                ++n_objects;
+
+                // If the run length is < 30 then the word is considered "dirty"
+                // and a 32-bit bitmap will be used instead.
+                if (end_rle - start_rle < 30) {
+                    // Increment position
+                    i += 30 - (end_rle - start_rle);
+                    // Make sure the end position is within range.
+                    end_rle = start_rle + 30 < n_samples ? start_rle + 30 : n_samples;
+                    // Update observed path.
+                    observed_length += start_rle + 30 < n_samples ? 30 : n_samples - start_rle;
+                    // Assertion.
+                    assert(end_rle <= n_samples);
+                    
+                    // Debug:
+                    // std::cerr << "Use Bitmap=" << (end_rle-start_rle) << "(" << start_rle << "," << end_rle << ")" << std::endl;
+                    
+                    // Construct 32-bit bitmap
+                    uint32_t bitmap = 0;
+                    for (int j = start_rle; j < end_rle; ++j) {
+                        bitmap <<= 1;
+                        bitmap |= (base_models[0].pbwt->prev[j] & 1);
+                    }
+                    observed_alts += __builtin_popcount(bitmap);
+                    
+                    uint32_t* buf_pos = (uint32_t*)&buf_general[1].data[buf_general[1].len];
+                    *buf_pos = bitmap;
+                    buf_general[1].len += sizeof(uint32_t);
+
+                    // std::cerr << "i=" << i << std::endl;
+                    start_rle = i;
+                    // Set new reference.
+                    ref = base_models[0].pbwt->prev[i];
+                    // Set run-length. If this is the final object then set to 0
+                    // for downstream filter.
+                    rle_len = (end_rle == n_samples) ? 0 : 1;
+                    // Update cost.
+                    rle_cost += sizeof(uint32_t);
+                    continue;
+                } else {
+                    // std::cerr << "Use RLE=" << rle_len << ":" << (int)ref << "(" << start_rle << "," << end_rle << ")" << std::endl;
+                }
+
+                uint16_t rle_pack = (1 << 15) | ((ref & 1) << 14) | rle_len;
+                uint16_t* buf_pos = (uint16_t*)&buf_general[1].data[buf_general[1].len];
+                *buf_pos = rle_pack;
+                buf_general[1].len += sizeof(uint16_t);
+                
+                // Update observed alts.
+                observed_alts += (ref == 1) * rle_len; // predicate multiply
+                // Update observed path.
+                observed_length += rle_len;
+
+                // Reset length;
+                rle_len = 0;
+                // Set new reference.
+                ref = base_models[0].pbwt->prev[i];
+                // Update cost.
+                rle_cost += sizeof(uint16_t);
+                // Update start position.
+                start_rle = i;
+            }
+            ++rle_len; 
+        }
+
+        // Add only if last element is an unfinished RLE.
+        if (rle_len) {
+            // std::cerr << "Add final=" << rle_len << std::endl;
+            ++n_objects;
+            rle_cost += sizeof(uint16_t);
+            observed_length += rle_len;
+        }
+        observed_alts += (ref == 1) * rle_len;
+
+        // Ascertain correctness:
+        assert(observed_alts == base_models[0].pbwt->n_queue[1]);
+
+        // std::cerr << "RLE cost=" << rle_cost << " objs=" << n_objects << std::endl;
+        // std::cerr << "Length=" << observed_length << "==" << n_samples << std::endl;
+        assert(observed_length == n_samples);
+
+        ++gt_width[n_objects];
+
+        return 1;
+    }
+
     // 2N2M complete
     int Encode2N2MC(const bcf_fmt_t* fmt) {
-        const uint8_t* gts = fmt[0].p; // data pointer
+        const uint8_t* gts = fmt->p; // data pointer
         
         base_models[0].pbwt->Update(&gts[0], 2);
         base_models[1].pbwt->Update(&gts[1], 2);
 
+        EncodeRLEBitmap(fmt);
+
+#if 1
+        int n_steps = 16;
+        uint32_t step_size = std::ceil((float)n_samples / n_steps);
+        uint64_t bins1 = 0;
+        for (int i = 0; i < n_samples; ++i) {
+            if (base_models[0].pbwt->prev[i]) {
+                bins1 |= (1 << (i/step_size));
+            }
+        }
+
+        base_models[0].ResetContext();
+        nonsense[0].ResetContext();
+        uint32_t offset = 0, offset_end = 0;
+        for (int i = 0; i < n_steps; ++i) {
+            if (bins1 & (1 << i)) {
+                nonsense[0].EncodeSymbol(1);
+                offset_end = offset + step_size < n_samples ? offset + step_size : n_samples;
+                for (int j = offset; j < offset_end; ++j) {
+                    base_models[0].EncodeSymbol(base_models[0].pbwt->prev[j]);
+                }
+            } else nonsense[0].EncodeSymbol(0);
+            offset += step_size;
+        }
+
+        uint64_t bins2 = 0;
+        for (int i = 0; i < n_samples; ++i) {
+            if (base_models[1].pbwt->prev[i]) {
+                bins2 |= (1 << (i/step_size));
+            }
+        }
+   
+        base_models[1].ResetContext();
+        nonsense[1].ResetContext();
+        offset = 0, offset_end = 0;
+        for (int i = 0; i < n_steps; ++i) {
+            if (bins2 & (1 << i)) {
+                nonsense[1].EncodeSymbol(1);
+                offset_end = offset + step_size < n_samples ? offset + step_size : n_samples;
+                for (int j = offset; j < offset_end; ++j) {
+                    base_models[1].EncodeSymbol(base_models[1].pbwt->prev[j]);
+                }
+            } else nonsense[1].EncodeSymbol(0);
+            offset += step_size;
+        }
+#endif
+
+#if 0
         base_models[0].ResetContext();
         for (int j = 0; j < n_samples; ++j) {
-            assert(base_models[0].pbwt->prev[j] < 2);
+            // assert(base_models[0].pbwt->prev[j] < 2);
             base_models[0].EncodeSymbol(base_models[0].pbwt->prev[j]);
         }
     
         base_models[1].ResetContext();
         for (int i = 0; i < n_samples; ++i) {
-            assert(base_models[1].pbwt->prev[i] < 2);
-            base_models[1].EncodeSymbol(base_models[1].pbwt->prev[i]);   
+            // assert(base_models[1].pbwt->prev[i] < 2);
+            base_models[1].EncodeSymbol(base_models[1].pbwt->prev[i]);
         }
+#endif
 
         ++processed_lines_local;
         ++processed_lines;
@@ -185,21 +396,21 @@ private:
 
     // 2N2M with missing
     int Encode2N2MM(const bcf_fmt_t* fmt) {
-        const uint8_t* gts = fmt[0].p; // data pointer
+        const uint8_t* gts = fmt->p; // data pointer
         
-        base_models[3].pbwt->Update(&gts[0], 2);
-        base_models[4].pbwt->Update(&gts[1], 2);
+        base_models[2].pbwt->Update(&gts[0], 2);
+        base_models[3].pbwt->Update(&gts[1], 2);
+
+        base_models[2].ResetContext();
+        for (int i = 0; i < n_samples; ++i) {
+            assert(base_models[2].pbwt->prev[i] < 3);
+            base_models[2].EncodeSymbol(base_models[2].pbwt->prev[i]);
+        }
 
         base_models[3].ResetContext();
         for (int i = 0; i < n_samples; ++i) {
             assert(base_models[3].pbwt->prev[i] < 3);
             base_models[3].EncodeSymbol(base_models[3].pbwt->prev[i]);
-        }
-
-        base_models[4].ResetContext();
-        for (int i = 0; i < n_samples; ++i) {
-            assert(base_models[4].pbwt->prev[i] < 3);
-            base_models[4].EncodeSymbol(base_models[4].pbwt->prev[i]);
         }
 
         ++processed_lines_local;
@@ -214,9 +425,9 @@ private:
         }
 
         // Todo: assert genotypes are set for this variant.
-        const uint8_t* gts = fmt[0].p; // data pointer
+        const uint8_t* gts = fmt->p; // data pointer
         base_models_complex[0].pbwt->UpdateGeneral(&gts[0], 2);
-        
+
         for (int i = 0; i < n_samples; ++i) {
             assert(base_models_complex[0].pbwt->prev[i] < 16);
             base_models_complex[0].EncodeSymbol(base_models_complex[0].pbwt->prev[i]);
@@ -260,11 +471,25 @@ public:
         base_models_complex[1].Reset();
         base_models_complex[1].StartEncoding();
 
+        int extra1 = nonsense[0].FinishEncoding();
+        int extra2 = nonsense[1].FinishEncoding();
+        std::cerr << processed_lines_local << "->" << extra1 << " and " << extra2 << std::endl;
+        nonsense[0].Reset();
+        nonsense[0].StartEncoding();
+        nonsense[1].Reset();
+        nonsense[1].StartEncoding();
+
         processed_lines_local = 0;
         std::cerr << "Flushed: " << p1 << "," << p2 << "," << p1E << "," << p2E << "," << p2X << "," << p2X2 << "," << praw << std::endl;
         buf_raw.reset();
-        bytes_out += p1+p2+p1E+p2E+p2X+p2X2+praw;
+        bytes_out += p1 + p2 + p1E + p2E + p2X + p2X2 + praw + extra1 + extra2;
+        // bytes_out += p1 + p2 + p1E + p2E + extra1 + extra2;
         std::cerr << "[PROGRESS] " << bytes_in << "->" << bytes_out << " (" << (double)bytes_in/bytes_out << "-fold)" << std::endl;
+
+        std::cerr << "[PROGRESS ZSTD] " << bytes_in1 << "->" << bytes_out_zstd1 << " (" << (double)bytes_in1/bytes_out_zstd1 << "-fold)" << std::endl;
+        std::cerr << "[PROGRESS LZ4] " << bytes_in1 << "->" << bytes_out_lz4 << " (" << (double)bytes_in1/bytes_out_lz4 << "-fold)" << std::endl;
+
+        return 1;
     }
 
 public:
@@ -273,11 +498,18 @@ public:
     uint32_t processed_lines;
     uint32_t processed_lines_local;
     uint64_t bytes_in, bytes_out;
+    uint64_t bytes_in1;
+    uint64_t bytes_out_zstd1, bytes_out_lz4;
     GeneralPBWTModel base_models[4];
     GeneralPBWTModel base_models_complex[2];
+    
+    GeneralPBWTModel nonsense[2];
+
     Buffer buf_general[2];
     Buffer buf_raw;
     GeneralPBWTModel* models;
+
+    std::vector<uint32_t> gt_width;
 };
 
 #endif
