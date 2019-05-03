@@ -202,32 +202,47 @@ private:
         return 1;
     }
 
+    // Ascertain that the binary output can be used to restore the input data.
     int DebugRLEBitmap(const int target) {
-        uint32_t n_run = 0;
-        uint32_t offset = 0;
+        // Data.
         const uint8_t* data = buf_wah[target].data;
         const uint32_t data_len = buf_wah[target].len;
+        
+        // Setup.
+        uint32_t n_run = 0;
+        uint32_t offset = 0;
         uint32_t n_variants = 0;
+        uint32_t n_alts = 0;
 
         while (true) {
-            // Looking at most-significant byte for target type.
+            // Looking at most-significant byte for the target compression type.
             const uint8_t type = (data[offset] & 1);
             if (type == 0) {
                 // assert((*reinterpret_cast<const uint32_t*>(&data[offset]) & 1) == 0);
+                n_alts += __builtin_popcount(*reinterpret_cast<const uint32_t*>(&data[offset]) >> 1);
                 offset += sizeof(uint32_t);
-                n_run += 31;
+                n_run  += 31;
                 if (n_run >= n_samples) {
                     ++n_variants;
                     n_run = 0;
+                    // std::cerr << "n_alts=" << n_alts << std::endl;
+                    assert(n_alts <= n_samples);
+                    n_alts = 0;
                 }
             }
             else if (type == 1) {
-                n_run += (*reinterpret_cast<const uint16_t*>(&data[offset]) >> 2);
+                uint16_t val = *reinterpret_cast<const uint16_t*>(&data[offset]);
+                n_run  += (val >> 2);
+                n_alts += ((val >> 1) & 1) * (val >> 2);
+
                 // assert((*reinterpret_cast<const uint16_t*>(&data[offset]) & 1) == 1);
                 offset += sizeof(uint16_t);
                 if (n_run >= n_samples) {
                     ++n_variants;
                     n_run = 0;
+                    // std::cerr << "n_alts=" << n_alts << std::endl;
+                    assert(n_alts <= n_samples);
+                    n_alts = 0;
                 }
             }
             
@@ -252,6 +267,7 @@ private:
 
         bytes_in1 += n_samples;
         if (buf_wah[target].len > 9000000 || processed_lines_local == block_size) {
+            // Temporary debug before compressing.
             DebugRLEBitmap(target);
 
             int praw = ZstdCompress(buf_wah[target].data, buf_wah[target].len,
@@ -261,16 +277,22 @@ private:
             bytes_out_zstd1 += praw;
 
             std::cerr << "Zstd->compressed: " << buf_wah[target].len << "->" << praw << std::endl;
-            int plz4 = Lz4Compress(buf_wah[target].data, buf_wah[target].len,
+            size_t plz4 = Lz4Compress(buf_wah[target].data, buf_wah[target].len,
                                     buf_general[0].data, buf_general[0].capacity(),
                                     9);
+            
+            std::cout.write((char*)&buf_wah[target].len, sizeof(size_t));
+            std::cout.write((char*)&plz4, sizeof(size_t));
+            std::cout.write((char*)buf_general[0].data, plz4);
+            std::cout.flush();                                    
+            
             std::cerr << "Lz4->compressed: " << buf_wah[target].len << "->" << plz4 << std::endl;
             bytes_out_lz4 += plz4;
 
             buf_wah[target].len = 0;
         }
 
-        // RLE word -> 1 bit typing, 1 bit allele, word*8-2 bits for rle
+        // RLE word -> 1 bit typing, 1 bit allele, word*8-2 bits for RLE
         const uint8_t* prev = base_models[target].pbwt->prev;
         uint8_t* data = buf_wah[target].data;
         size_t& data_len = buf_wah[target].len;
@@ -520,7 +542,7 @@ public:
         int p2X2 = base_models_complex[1].FinishEncoding();
         int praw = ZstdCompress(buf_raw.data, buf_raw.len,
                                 buf_general[0].data, buf_general[0].capacity(),
-                                10);
+                                20);
 
         base_models[0].Reset();
         base_models[0].StartEncoding();
@@ -550,6 +572,7 @@ public:
         // bytes_out += p1 + p2 + p1E + p2E + extra1 + extra2;
         std::cerr << "[PROGRESS] " << bytes_in << "->" << bytes_out << " (" << (double)bytes_in/bytes_out << "-fold)" << std::endl;
 
+        // Debug compression:
         std::cerr << "[PROGRESS ZSTD] " << bytes_in1 << "->" << bytes_out_zstd1 << " (" << (double)bytes_in1/bytes_out_zstd1 << "-fold)" << std::endl;
         std::cerr << "[PROGRESS LZ4] " << bytes_in1 << "->" << bytes_out_lz4 << " (" << (double)bytes_in1/bytes_out_lz4 << "-fold)" << std::endl;
 

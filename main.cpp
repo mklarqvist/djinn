@@ -9,6 +9,10 @@
 #include <zstd.h>
 #include <zstd_errors.h>
 
+// temp
+#include <fstream>
+#include <iostream>
+
 int ZstdCompress(const uint8_t* in, uint32_t n_in, uint8_t* out, uint32_t out_capacity, const int32_t c_level = 1) {
     int ret = ZSTD_compress(out, out_capacity, in, n_in, c_level);
     return(ret);
@@ -39,10 +43,21 @@ int Lz4Compress(const uint8_t* in, uint32_t n_in, uint8_t* out, uint32_t out_cap
     return(compressed_data_size);
 }
 
-// int Lz4Decompress(const uint8_t* in, uint32_t n_in, uint8_t* out, uint32_t out_capacity) {
-//     int ret = ZSTD_decompress(out, out_capacity, in, n_in);
-//     return(ret);
-// }
+int Lz4Decompress(const uint8_t* in, uint32_t n_in, uint8_t* out, uint32_t out_capacity) {
+    int32_t decompressed_size = LZ4_decompress_safe((char*)in, (char*)out, n_in, out_capacity);
+    // int decompressed_data_size = LZ4_decompress((const char*)in, (char*)out, n_in, out_capacity);
+    if (decompressed_size < 0) {
+        std::cerr << "A negative result from LZ4_decompress_safe indicates a failure trying to decompress the data.  See exit code (echo $?) for value returned." << std::endl;
+        exit(1);
+    }
+    if (decompressed_size == 0) {
+        std::cerr << "I'm not sure this function can ever return 0.  Documentation in lz4.h doesn't indicate so.";
+        exit(1);
+    }
+
+
+    return(decompressed_size);
+}
 
 
 #include "gt_compressor.h"
@@ -127,15 +142,36 @@ void ReadVcfGT (const std::string& filename) {
     // delete[] buf_in2;
     // delete[] buf_out;
 
-    gtperm.Compress(); // final
+    gtperm.Compress(); // Final
     std::cerr << "Final=" << gtperm.bytes_in << "->" << gtperm.bytes_out << " (" << (double)gtperm.bytes_in/gtperm.bytes_out << ")" << std::endl;
     for (int j = 0; j < gtperm.gt_width.size(); ++j) {
         if (gtperm.gt_width[j] != 0) std::cout << j << "\t" << gtperm.gt_width[j] << std::endl;
     }
-
 }
 
 int main(int argc, char** argv) {
+#if 1
+    std::ifstream f("/Users/Mivagallery/Downloads/gtperm.bin.lz4", std::ios::in | std::ios::binary);
+    if (f.good() == false) {
+        std::cerr << "Failed to open" << std::endl;
+        return 1;
+    }
+
+    size_t uncompressed_size = 0, compressed_size = 0;
+    uint8_t* buffer = new uint8_t[10000000];
+
+    while (f.good()) {
+        f.read((char*)&uncompressed_size, sizeof(size_t));
+        f.read((char*)&compressed_size, sizeof(size_t));
+        f.read((char*)buffer, compressed_size);
+        std::cerr << compressed_size << std::endl;
+    }
+    std::cerr << "done" << std::endl;
+    delete[] buffer;
+
+    return 0;
+#endif
+
     if (argc == 1) return(1);
     else {
         std::cerr << std::string(argv[1]) << std::endl;
