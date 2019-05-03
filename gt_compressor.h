@@ -207,12 +207,29 @@ private:
         uint32_t offset = 0;
         const uint8_t* data = buf_wah[target].data;
         const uint32_t data_len = buf_wah[target].len;
+        uint32_t n_variants = 0;
 
         while (true) {
             // Looking at most-significant byte for target type.
             const uint8_t type = (data[offset] & 1);
-            if (type == 0) offset += sizeof(uint32_t);
-            if (type == 1) offset += sizeof(uint16_t);
+            if (type == 0) {
+                // assert((*reinterpret_cast<const uint32_t*>(&data[offset]) & 1) == 0);
+                offset += sizeof(uint32_t);
+                n_run += 31;
+                if (n_run >= n_samples) {
+                    ++n_variants;
+                    n_run = 0;
+                }
+            }
+            else if (type == 1) {
+                n_run += (*reinterpret_cast<const uint16_t*>(&data[offset]) >> 2);
+                // assert((*reinterpret_cast<const uint16_t*>(&data[offset]) & 1) == 1);
+                offset += sizeof(uint16_t);
+                if (n_run >= n_samples) {
+                    ++n_variants;
+                    n_run = 0;
+                }
+            }
             
             // Exit conditions.
             if (offset == data_len) {
@@ -224,6 +241,8 @@ private:
                 exit(1);
             }
         }
+
+        std::cerr << "Number of variants=" << n_variants << std::endl;
 
         return 1;
     }
@@ -295,14 +314,10 @@ private:
                     }
                     assert((bitmap & 1) == 0);
                     observed_alts += __builtin_popcount(bitmap);
-                    // assert((bitmap >> 31) == 0);
                     
-                    // uint8_t* buf_pos = &data[data_len];
                     memcpy(&data[data_len], &bitmap, sizeof(uint32_t));
-                    // *buf_pos = bitmap;
                     data_len += sizeof(uint32_t);
 
-                    // std::cerr << "i=" << i << std::endl;
                     start_rle = i;
                     // Set new reference.
                     ref = prev[i];
@@ -317,18 +332,12 @@ private:
                     // std::cerr << "Use RLE=" << rle_len << ":" << (int)ref << "(" << start_rle << "," << end_rle << ")" << std::endl;
                     
                     // Model:
-                    // Highest bit => 1 iff RLE, 0 otherwise
-                    // If RLE => bit 14 is the reference
+                    // Lowest bit => 1 iff RLE, 0 otherwise
+                    // If RLE => bit 2 is the reference
                     // Remainder => data (bitmap / run-length)
-                    // uint16_t rle_pack = (1 << 15) | ((ref & 1) << 14) | rle_len;
                     uint16_t rle_pack = (rle_len << 2) | ((ref & 1) << 1) | 1;
-
-                    // uint8_t* buf_pos = &data[data_len];
                     memcpy(&data[data_len], &rle_pack, sizeof(uint16_t));
-                    //*buf_pos = rle_pack;
-                    // assert(data[data_len] >> 7 == 1);
                     data_len += sizeof(uint16_t);
-                    assert((rle_pack & 1) == 1);
                     
                     // Update observed alts.
                     observed_alts += (ref == 1) * rle_len; // predicate multiply
@@ -353,16 +362,8 @@ private:
             // std::cerr << "Add final=" << rle_len << std::endl;
             ++n_objects;
 
-            // uint16_t rle_pack = (1 << 15) | ((ref & 1) << 14) | rle_len;
             uint16_t rle_pack = (rle_len << 2) | ((ref & 1) << 1) | 1;
- 
-            // uint16_t* buf_pos = (uint16_t*)&data[data_len];
             memcpy(&data[data_len], &rle_pack, sizeof(uint16_t));
-            // buf_pos[0] = rle_pack;
-            // std::cerr << std::bitset<16>(buf_pos[0]) << std::endl;
-            // std::cerr << std::bitset<8>(data[data_len]) << std::endl;
-            assert((rle_pack & 1) == 1);
-            assert((data[data_len] & 1) == 1);
             data_len += sizeof(uint16_t);
 
             rle_cost += sizeof(uint16_t);
