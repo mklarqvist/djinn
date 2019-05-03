@@ -113,6 +113,9 @@ public:
         buf_general[0].resize(10000000);
         buf_general[1].resize(10000000);
         buf_raw.resize(10000000);
+        //
+        buf_wah[0].resize(10000000);
+        buf_wah[1].resize(10000000);
 
         base_models[0].StartEncoding();
         base_models[1].StartEncoding();
@@ -199,29 +202,62 @@ private:
         return 1;
     }
 
-    int EncodeRLEBitmap(const bcf_fmt_t* fmt) {
+    int DebugRLEBitmap(const int target) {
+        uint32_t n_run = 0;
+        uint32_t offset = 0;
+        const uint8_t* data = buf_wah[target].data;
+        const uint32_t data_len = buf_wah[target].len;
+
+        while (true) {
+            // Looking at most-significant byte for target type.
+            const uint8_t type = (data[offset] & 1);
+            if (type == 0) offset += sizeof(uint32_t);
+            if (type == 1) offset += sizeof(uint16_t);
+            
+            // Exit conditions.
+            if (offset == data_len) {
+                std::cerr << "exit correct" << std::endl;
+                break;
+            }
+            if (offset > data_len) {
+                std::cerr << "overflow error: " << offset << "/" << data_len << std::endl;
+                exit(1);
+            }
+        }
+
+        return 1;
+    }
+
+    int EncodeRLEBitmap(const int target) {
+        assert(target == 0 || target == 1);
+
         bytes_in1 += n_samples;
-        if (buf_general[0].len > 9000000 || processed_lines_local == block_size) {
-            int praw = ZstdCompress(buf_general[1].data, buf_general[1].len,
+        if (buf_wah[target].len > 9000000 || processed_lines_local == block_size) {
+            DebugRLEBitmap(target);
+
+            int praw = ZstdCompress(buf_wah[target].data, buf_wah[target].len,
                                     buf_general[0].data, buf_general[0].capacity(),
-                                    10);
+                                    20);
 
             bytes_out_zstd1 += praw;
 
-            std::cerr << "Zstd->compressed: " << buf_general[1].len << "->" << praw << std::endl;
-            int plz4 = Lz4Compress(buf_general[1].data, buf_general[1].len,
+            std::cerr << "Zstd->compressed: " << buf_wah[target].len << "->" << praw << std::endl;
+            int plz4 = Lz4Compress(buf_wah[target].data, buf_wah[target].len,
                                     buf_general[0].data, buf_general[0].capacity(),
                                     9);
-            std::cerr << "Lz4->compressed: " << buf_general[1].len << "->" << plz4 << std::endl;
+            std::cerr << "Lz4->compressed: " << buf_wah[target].len << "->" << plz4 << std::endl;
             bytes_out_lz4 += plz4;
 
-            buf_general[1].len = 0;
+            buf_wah[target].len = 0;
         }
 
         // RLE word -> 1 bit typing, 1 bit allele, word*8-2 bits for rle
-        // If using 32-bit words then run has to be larger then that
+        const uint8_t* prev = base_models[target].pbwt->prev;
+        uint8_t* data = buf_wah[target].data;
+        size_t& data_len = buf_wah[target].len;
 
-        uint8_t ref = base_models[0].pbwt->prev[0];
+        // Setup.
+        uint8_t ref = prev[0];
         uint32_t rle_len = 1;
         uint32_t start_rle = 0, end_rle = 1;
 
@@ -232,7 +268,7 @@ private:
         uint32_t observed_length = 0;
 
         for (int i = 1; i < n_samples; ++i) {
-            if (base_models[0].pbwt->prev[i] != ref || rle_len == 16384) {
+            if (prev[i] != ref || rle_len == 16384) {
                 end_rle = i;
                 ++n_objects;
 
@@ -240,11 +276,11 @@ private:
                 // and a 32-bit bitmap will be used instead.
                 if (end_rle - start_rle < 30) {
                     // Increment position
-                    i += 30 - (end_rle - start_rle);
+                    i += 31 - (end_rle - start_rle);
                     // Make sure the end position is within range.
-                    end_rle = start_rle + 30 < n_samples ? start_rle + 30 : n_samples;
+                    end_rle = start_rle + 31 < n_samples ? start_rle + 31 : n_samples;
                     // Update observed path.
-                    observed_length += start_rle + 30 < n_samples ? 30 : n_samples - start_rle;
+                    observed_length += start_rle + 31 < n_samples ? 31 : n_samples - start_rle;
                     // Assertion.
                     assert(end_rle <= n_samples);
                     
@@ -254,47 +290,60 @@ private:
                     // Construct 32-bit bitmap
                     uint32_t bitmap = 0;
                     for (int j = start_rle; j < end_rle; ++j) {
+                        bitmap |= (prev[j] & 1);
                         bitmap <<= 1;
-                        bitmap |= (base_models[0].pbwt->prev[j] & 1);
                     }
+                    assert((bitmap & 1) == 0);
                     observed_alts += __builtin_popcount(bitmap);
+                    // assert((bitmap >> 31) == 0);
                     
-                    uint32_t* buf_pos = (uint32_t*)&buf_general[1].data[buf_general[1].len];
-                    *buf_pos = bitmap;
-                    buf_general[1].len += sizeof(uint32_t);
+                    // uint8_t* buf_pos = &data[data_len];
+                    memcpy(&data[data_len], &bitmap, sizeof(uint32_t));
+                    // *buf_pos = bitmap;
+                    data_len += sizeof(uint32_t);
 
                     // std::cerr << "i=" << i << std::endl;
                     start_rle = i;
                     // Set new reference.
-                    ref = base_models[0].pbwt->prev[i];
+                    ref = prev[i];
                     // Set run-length. If this is the final object then set to 0
                     // for downstream filter.
                     rle_len = (end_rle == n_samples) ? 0 : 1;
                     // Update cost.
                     rle_cost += sizeof(uint32_t);
                     continue;
+                   
                 } else {
                     // std::cerr << "Use RLE=" << rle_len << ":" << (int)ref << "(" << start_rle << "," << end_rle << ")" << std::endl;
+                    
+                    // Model:
+                    // Highest bit => 1 iff RLE, 0 otherwise
+                    // If RLE => bit 14 is the reference
+                    // Remainder => data (bitmap / run-length)
+                    // uint16_t rle_pack = (1 << 15) | ((ref & 1) << 14) | rle_len;
+                    uint16_t rle_pack = (rle_len << 2) | ((ref & 1) << 1) | 1;
+
+                    // uint8_t* buf_pos = &data[data_len];
+                    memcpy(&data[data_len], &rle_pack, sizeof(uint16_t));
+                    //*buf_pos = rle_pack;
+                    // assert(data[data_len] >> 7 == 1);
+                    data_len += sizeof(uint16_t);
+                    assert((rle_pack & 1) == 1);
+                    
+                    // Update observed alts.
+                    observed_alts += (ref == 1) * rle_len; // predicate multiply
+                    // Update observed path.
+                    observed_length += rle_len;
+
+                    // Reset length;
+                    rle_len = 0;
+                    // Set new reference.
+                    ref = prev[i];
+                    // Update cost.
+                    rle_cost += sizeof(uint16_t);
+                    // Update start position.
+                    start_rle = i;
                 }
-
-                uint16_t rle_pack = (1 << 15) | ((ref & 1) << 14) | rle_len;
-                uint16_t* buf_pos = (uint16_t*)&buf_general[1].data[buf_general[1].len];
-                *buf_pos = rle_pack;
-                buf_general[1].len += sizeof(uint16_t);
-                
-                // Update observed alts.
-                observed_alts += (ref == 1) * rle_len; // predicate multiply
-                // Update observed path.
-                observed_length += rle_len;
-
-                // Reset length;
-                rle_len = 0;
-                // Set new reference.
-                ref = base_models[0].pbwt->prev[i];
-                // Update cost.
-                rle_cost += sizeof(uint16_t);
-                // Update start position.
-                start_rle = i;
             }
             ++rle_len; 
         }
@@ -303,13 +352,26 @@ private:
         if (rle_len) {
             // std::cerr << "Add final=" << rle_len << std::endl;
             ++n_objects;
+
+            // uint16_t rle_pack = (1 << 15) | ((ref & 1) << 14) | rle_len;
+            uint16_t rle_pack = (rle_len << 2) | ((ref & 1) << 1) | 1;
+ 
+            // uint16_t* buf_pos = (uint16_t*)&data[data_len];
+            memcpy(&data[data_len], &rle_pack, sizeof(uint16_t));
+            // buf_pos[0] = rle_pack;
+            // std::cerr << std::bitset<16>(buf_pos[0]) << std::endl;
+            // std::cerr << std::bitset<8>(data[data_len]) << std::endl;
+            assert((rle_pack & 1) == 1);
+            assert((data[data_len] & 1) == 1);
+            data_len += sizeof(uint16_t);
+
             rle_cost += sizeof(uint16_t);
             observed_length += rle_len;
         }
         observed_alts += (ref == 1) * rle_len;
 
         // Ascertain correctness:
-        assert(observed_alts == base_models[0].pbwt->n_queue[1]);
+        assert(observed_alts == base_models[target].pbwt->n_queue[1]);
 
         // std::cerr << "RLE cost=" << rle_cost << " objs=" << n_objects << std::endl;
         // std::cerr << "Length=" << observed_length << "==" << n_samples << std::endl;
@@ -327,7 +389,8 @@ private:
         base_models[0].pbwt->Update(&gts[0], 2);
         base_models[1].pbwt->Update(&gts[1], 2);
 
-        EncodeRLEBitmap(fmt);
+        EncodeRLEBitmap(0);
+        EncodeRLEBitmap(1);
 
 #if 1
         int n_steps = 16;
@@ -509,6 +572,7 @@ public:
     Buffer buf_raw;
     GeneralPBWTModel* models;
 
+    Buffer buf_wah[2];
     std::vector<uint32_t> gt_width;
 };
 
