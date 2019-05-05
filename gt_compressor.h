@@ -91,14 +91,102 @@ static uint8_t temp_unpack[3] = {2, 0, 1};
 
 class GenotypeCompressor {
 public:
-    GenotypeCompressor(int64_t n_s) :
+     GenotypeCompressor(int64_t n_s) :
         n_samples(n_s),
         block_size(8192),
         processed_lines(0),
         processed_lines_local(0),
         bytes_in(0), bytes_out(0),
         // debug
-        bytes_in1(0), bytes_out_zstd1(0), bytes_out_lz4(0),
+        bytes_in1(0), bytes_out_zstd1(0), bytes_out_lz4(0)
+    {
+        
+    }
+
+    virtual ~GenotypeCompressor() {}
+    
+    // Encode data using literals.
+    // virtual int Encode(bcf1_t* bcf, const bcf_hdr_t* hdr) =0;
+    virtual int Encode2N(uint8_t* data, const int32_t n_data, const int32_t n_alleles) =0;
+    virtual int Encode2N2M(uint8_t* data, const int32_t n_data) =0;
+    virtual int Encode2N2MC(uint8_t* data, const int32_t n_data) =0;
+    virtual int Encode2N2MM(uint8_t* data, const int32_t n_data) =0;
+    virtual int Encode2NXM(uint8_t* data, const int32_t n_data) =0;
+
+    // Encode data using htslib.
+    virtual 
+    int Encode(bcf1_t* bcf, const bcf_hdr_t* hdr) {
+        if (bcf == NULL) return 0;
+        if (hdr == NULL) return 0;
+
+        const bcf_fmt_t* fmt = bcf_get_fmt(hdr, bcf, "GT");
+        if (fmt == NULL) return 0;
+        if (fmt->p_len / n_samples != 2) {
+            std::cerr << "input is not divisible by 2" << std::endl;
+            return 0;
+        }
+
+        bytes_in += fmt->p_len;
+
+        // Todo: extend beyond 2N
+        return(Encode2N(fmt->p, fmt->p_len, bcf->n_allele));
+    }
+    virtual int Encode2N(bcf1_t* bcf, const bcf_hdr_t* hdr) =0;
+
+    //
+    int32_t RemapGenotypeEOV(uint8_t* data, const uint32_t len) {
+        if (data == NULL) {
+            std::cerr << "data==NULL" << std::endl;
+            return -1;
+        }
+
+        memset(alts, 0, 256*sizeof(uint32_t));
+        
+        uint8_t max_val = 0;
+        for (int i = 0; i < 2*n_samples; ++i) {
+            uint8_t val = BCF_UNPACK_GENOTYPE_GENERAL(data[i]);
+            ++alts[val];
+            val = (val == 64 ? 0 : val);
+            max_val = val > max_val ? val : max_val;
+        }
+        
+        int32_t n_replaced = 0;
+        if (alts[64]) {
+            std::cerr << "replacing 64 with " << (int32_t)max_val << std::endl;
+            for (int i = 0; i < len; ++i) {
+                if (BCF_UNPACK_GENOTYPE_GENERAL(data[i]) == 64) {
+                    data[i] = max_val;
+                    ++n_replaced;
+                }
+            }
+            std::cerr << "replaced=" << n_replaced << std::endl;
+        }
+
+        return n_replaced;
+    }
+    
+public:
+    int64_t n_samples;
+    uint32_t block_size;
+    uint32_t processed_lines;
+    uint32_t processed_lines_local;
+    
+    uint64_t bytes_in, bytes_out;
+    
+    Buffer buf_general[2];
+    Buffer buf_raw;
+
+    uint64_t bytes_in1;
+    uint64_t bytes_out_zstd1, bytes_out_lz4;
+    Buffer buf_wah[2];
+    std::vector<uint32_t> gt_width;
+
+    uint32_t alts[256];
+};
+
+class GenotypeCompressorModelling : public GenotypeCompressor {
+public:
+    GenotypeCompressorModelling(int64_t n_s) : GenotypeCompressor(n_s),
         models(nullptr)
     {
         gt_width.resize(n_s, 0);
@@ -130,12 +218,12 @@ public:
         nonsense[1].StartEncoding();
     }
 
-    ~GenotypeCompressor() {
+    ~GenotypeCompressorModelling() {
         delete[] models;
     }
 
-    inline bool CheckLimit() const {
-        return (processed_lines_local == 8196 || 
+    bool CheckLimit() const {
+        return (processed_lines_local == block_size || 
                 base_models[0].range_coder->OutSize() > 9000000 || 
                 base_models[1].range_coder->OutSize() > 9000000 || 
                 base_models[2].range_coder->OutSize() > 9000000 || 
@@ -146,25 +234,63 @@ public:
     }
 
     //
-    int Encode(bcf1_t* bcf, const bcf_hdr_t* hdr) {
+    int Encode(bcf1_t* bcf, const bcf_hdr_t* hdr) override {
         if (bcf == NULL) return 0;
+        if (hdr == NULL) return 0;
+        
         const bcf_fmt_t* fmt = bcf_get_fmt(hdr, bcf, "GT");
         if (fmt == NULL) return 0;
+        if (fmt->p_len / n_samples != 2) {
+            std::cerr << "input is not divisible by 2" << std::endl;
+            return 0;
+        }
 
         bytes_in += bcf->d.fmt->p_len;
 
         // Todo: extend beyond 2N
-        return(Encode2N(bcf));
+        return(Encode2N(bcf,hdr));
     }
 
 private:
     // Diploid wrapper.
-    int Encode2N(const bcf1_t* bcf) {
-        if (bcf->n_allele == 2) return(Encode2N2M(bcf->d.fmt)); // biallelic
-        else if (bcf->n_allele < 4) return(Encode2NXM(bcf->d.fmt));  // #alleles < 4
+    int Encode2N(bcf1_t* bcf, const bcf_hdr_t* hdr) override {
+        if (bcf == NULL) return 0;
+        if (hdr == NULL) return 0;
+        
+        const bcf_fmt_t* fmt = bcf_get_fmt(hdr, bcf, "GT");
+        if (fmt == NULL) return 0;
+        if (fmt->p_len / n_samples != 2) {
+            std::cerr << "input is not divisible by 2" << std::endl;
+            return 0;
+        }
+
+        if (bcf->n_allele == 2) return(Encode2N2M(fmt->p, fmt->p_len)); // biallelic
+        else if (bcf->n_allele < 4) {
+
+            int replaced = RemapGenotypeEOV(fmt->p, fmt->p_len);
+            
+            std::cerr << "second path taken for " << bcf->n_allele << std::endl; 
+            return(Encode2NXM(fmt->p, fmt->p_len));  // #alleles < 4
+        }
         else {
             // std::cerr << "alleles=" << bcf->n_allele << std::endl;
-            uint8_t* gts = bcf->d.fmt->p;
+            uint8_t* gts = fmt->p;
+            for (int i = 0; i < 2*n_samples; ++i) {
+                buf_raw.data[buf_raw.len++] = gts[i];
+            }
+
+            ++processed_lines_local;
+            ++processed_lines;
+        }
+        return 1;
+    }
+
+    int Encode2N(uint8_t* data, const int32_t n_data, const int32_t n_alleles) {
+        if (n_alleles == 2) return(Encode2N2M(data, n_data)); // biallelic
+        else if (n_alleles < 4) return(Encode2NXM(data, n_data));  // #alleles < 4
+        else {
+            // std::cerr << "alleles=" << n_alleles << std::endl;
+            const uint8_t* gts = data;
             for (int i = 0; i < 2*n_samples; ++i) {
                 buf_raw.data[buf_raw.len++] = gts[i];
             }
@@ -176,88 +302,24 @@ private:
     }
 
     // Wrapper for 2N2M
-    int Encode2N2M(const bcf_fmt_t* fmt) {
+    int Encode2N2M(uint8_t* data, const int32_t n_data) override {
         if (CheckLimit()) {
             Compress();
         }
 
         // Todo: assert genotypes are set for this variant.
-        const uint8_t* gts = fmt->p; // data pointer
-        
-        // Todo: Assert that total number of alleles < 15.
-        uint32_t alts[256] = {0};
-       
-        for (int i = 0; i < 2*n_samples; ++i) {
-            ++alts[BCF_UNPACK_GENOTYPE_GENERAL(gts[i])];
+        int replaced = RemapGenotypeEOV(data, n_data);
+        if (replaced) {
+            std::cerr << "replaced: divert to missing with " << replaced << std::endl;
+            return Encode2NXM(data ,n_data);
         }
-        
-        if (alts[15] == 0) { // No missing values.
-            return Encode2N2MC(fmt);
 
+        if (alts[130] == 0) { // No missing values.
+            return Encode2N2MC(data, n_data);
         } else { // Having missing values.
             // std::cerr << "using extended model" << std::endl;
-            return Encode2N2MM(fmt);
+            return Encode2N2MM(data, n_data);
         }
-
-        return 1;
-    }
-
-    // Ascertain that the binary output can be used to restore the input data.
-    int DebugRLEBitmap(const int target) {
-        // Data.
-        const uint8_t* data = buf_wah[target].data;
-        const uint32_t data_len = buf_wah[target].len;
-        
-        // Setup.
-        uint32_t n_run = 0;
-        uint32_t offset = 0;
-        uint32_t n_variants = 0;
-        uint32_t n_alts = 0;
-
-        while (true) {
-            // Looking at most-significant byte for the target compression type.
-            const uint8_t type = (data[offset] & 1);
-            if (type == 0) {
-                // assert((*reinterpret_cast<const uint32_t*>(&data[offset]) & 1) == 0);
-                n_alts += __builtin_popcount(*reinterpret_cast<const uint32_t*>(&data[offset]) >> 1);
-                offset += sizeof(uint32_t);
-                n_run  += 31;
-                if (n_run >= n_samples) {
-                    ++n_variants;
-                    n_run = 0;
-                    // std::cerr << "n_alts=" << n_alts << std::endl;
-                    assert(n_alts <= n_samples);
-                    n_alts = 0;
-                }
-            }
-            else if (type == 1) {
-                uint16_t val = *reinterpret_cast<const uint16_t*>(&data[offset]);
-                n_run  += (val >> 2);
-                n_alts += ((val >> 1) & 1) * (val >> 2);
-
-                // assert((*reinterpret_cast<const uint16_t*>(&data[offset]) & 1) == 1);
-                offset += sizeof(uint16_t);
-                if (n_run >= n_samples) {
-                    ++n_variants;
-                    n_run = 0;
-                    // std::cerr << "n_alts=" << n_alts << std::endl;
-                    assert(n_alts <= n_samples);
-                    n_alts = 0;
-                }
-            }
-            
-            // Exit conditions.
-            if (offset == data_len) {
-                std::cerr << "exit correct" << std::endl;
-                break;
-            }
-            if (offset > data_len) {
-                std::cerr << "overflow error: " << offset << "/" << data_len << std::endl;
-                exit(1);
-            }
-        }
-
-        std::cerr << "Number of variants=" << n_variants << std::endl;
 
         return 1;
     }
@@ -266,36 +328,11 @@ private:
         assert(target == 0 || target == 1);
 
         bytes_in1 += n_samples;
-        if (buf_wah[target].len > 9000000 || processed_lines_local == block_size) {
-            // Temporary debug before compressing.
-            DebugRLEBitmap(target);
-
-            int praw = ZstdCompress(buf_wah[target].data, buf_wah[target].len,
-                                    buf_general[0].data, buf_general[0].capacity(),
-                                    20);
-
-            bytes_out_zstd1 += praw;
-
-            std::cerr << "Zstd->compressed: " << buf_wah[target].len << "->" << praw << std::endl;
-            size_t plz4 = Lz4Compress(buf_wah[target].data, buf_wah[target].len,
-                                    buf_general[0].data, buf_general[0].capacity(),
-                                    9);
-            
-            std::cout.write((char*)&buf_wah[target].len, sizeof(size_t));
-            std::cout.write((char*)&plz4, sizeof(size_t));
-            std::cout.write((char*)buf_general[0].data, plz4);
-            std::cout.flush();                                    
-            
-            std::cerr << "Lz4->compressed: " << buf_wah[target].len << "->" << plz4 << std::endl;
-            bytes_out_lz4 += plz4;
-
-            buf_wah[target].len = 0;
-        }
 
         // RLE word -> 1 bit typing, 1 bit allele, word*8-2 bits for RLE
         const uint8_t* prev = base_models[target].pbwt->prev;
-        uint8_t* data = buf_wah[target].data;
-        size_t& data_len = buf_wah[target].len;
+        uint8_t* data = buf_wah[0].data;
+        size_t& data_len = buf_wah[0].len;
 
         // Setup.
         uint8_t ref = prev[0];
@@ -309,7 +346,7 @@ private:
         uint32_t observed_length = 0;
 
         for (int i = 1; i < n_samples; ++i) {
-            if (prev[i] != ref || rle_len == 16384) {
+            if (prev[i] != ref || rle_len == 16383) {
                 end_rle = i;
                 ++n_objects;
 
@@ -406,9 +443,12 @@ private:
     }
 
     // 2N2M complete
-    int Encode2N2MC(const bcf_fmt_t* fmt) {
-        const uint8_t* gts = fmt->p; // data pointer
+    int Encode2N2MC(uint8_t* data, const int32_t n_data) {
+        if (CheckLimit()) {
+            Compress();
+        }
         
+        const uint8_t* gts = data; // data pointer
         base_models[0].pbwt->Update(&gts[0], 2);
         base_models[1].pbwt->Update(&gts[1], 2);
 
@@ -481,8 +521,8 @@ private:
     }
 
     // 2N2M with missing
-    int Encode2N2MM(const bcf_fmt_t* fmt) {
-        const uint8_t* gts = fmt->p; // data pointer
+    int Encode2N2MM(uint8_t* data, const int32_t n_data) {
+        const uint8_t* gts = data; // data pointer
         
         base_models[2].pbwt->Update(&gts[0], 2);
         base_models[3].pbwt->Update(&gts[1], 2);
@@ -505,13 +545,35 @@ private:
     }
 
     // 2N any M (up to 16)
-    int Encode2NXM(const bcf_fmt_t* fmt) {
+    int Encode2NXM(uint8_t* data, const int32_t n_data) {
         if (CheckLimit()) {
             Compress();
         }
 
+        const uint8_t* gts = data; // data pointer
+        // uint32_t alts[256] = {0};
+        // memset(alts, 0, 256*sizeof(uint32_t));
+        
+        // uint32_t n_special = 0;
+
+        // for (int i = 0; i < 2*n_samples; ++i) {
+        //     ++alts[BCF_UNPACK_GENOTYPE_GENERAL(gts[i])];
+        //     // n_special += (gts[i] == 129);
+        // }
+
+        // std::cerr << "2NXM special=" << n_special << ",";
+        // for (int i = 0; i < 256; ++i) {
+        //     if (alts[i]) std::cerr << i << ":" << alts[i] << ",";
+        // }
+        // std::cerr << std::endl;
+
+        // Todo: fix
+        // if (alts[64]) { // This is the EOF marker.
+        //     std::cerr << "got=" << alts[64] << std::endl;
+        //     return 1;
+        // }
+
         // Todo: assert genotypes are set for this variant.
-        const uint8_t* gts = fmt->p; // data pointer
         base_models_complex[0].pbwt->UpdateGeneral(&gts[0], 2);
 
         for (int i = 0; i < n_samples; ++i) {
@@ -533,6 +595,36 @@ private:
 
 public:
     int Compress() {
+        // RLE-bitmap hybrid.
+        if (buf_wah[0].len) {
+            // Temporary debug before compressing.
+            DebugRLEBitmap(buf_wah[0].data, buf_wah[0].len, n_samples);
+
+            int praw = ZstdCompress(buf_wah[0].data, buf_wah[0].len,
+                                    buf_general[0].data, buf_general[0].capacity(),
+                                    20);
+
+            bytes_out_zstd1 += praw;
+
+            std::cerr << "Zstd->compressed: " << buf_wah[0].len << "->" << praw << std::endl;
+            size_t plz4 = Lz4Compress(buf_wah[0].data, buf_wah[0].len,
+                                      buf_general[0].data, buf_general[0].capacity(),
+                                      9);
+            
+            // std::cerr << "writing=" << buf_wah[0].len << " and " << plz4 << std::endl; 
+            
+            // Temp: emit data to cout.
+            std::cout.write((char*)&buf_wah[0].len, sizeof(size_t));
+            std::cout.write((char*)&plz4, sizeof(size_t));
+            std::cout.write((char*)buf_general[0].data, plz4);
+            std::cout.flush();                      
+            
+            std::cerr << "Lz4->compressed: " << buf_wah[0].len << "->" << plz4 << std::endl;
+            bytes_out_lz4 += plz4;
+
+            buf_wah[0].len = 0;
+        }
+
         // flush: temp
         int p1  = base_models[0].FinishEncoding();
         int p2  = base_models[1].FinishEncoding();
@@ -580,24 +672,15 @@ public:
     }
 
 public:
-    int64_t n_samples;
-    uint32_t block_size;
-    uint32_t processed_lines;
-    uint32_t processed_lines_local;
-    uint64_t bytes_in, bytes_out;
-    uint64_t bytes_in1;
-    uint64_t bytes_out_zstd1, bytes_out_lz4;
     GeneralPBWTModel base_models[4];
     GeneralPBWTModel base_models_complex[2];
-    
     GeneralPBWTModel nonsense[2];
-
-    Buffer buf_general[2];
-    Buffer buf_raw;
     GeneralPBWTModel* models;
+};
 
-    Buffer buf_wah[2];
-    std::vector<uint32_t> gt_width;
+class GenotypeCompressorRLEBitmap : public GenotypeCompressor {
+public:
+
 };
 
 #endif

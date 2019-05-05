@@ -28,7 +28,10 @@
 #include "frequency_model.h"
 
 const uint8_t TWK_BCF_GT_UNPACK[3] = {2, 0, 1};
-const uint8_t TWK_BCF_GT_UNPACK_GENERAL[16] = {15, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14};
+// const uint8_t TWK_BCF_GT_UNPACK_GENERAL[16] = {15, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14};
+const uint8_t TWK_BCF_GT_UNPACK_GENERAL[131] = 
+{15,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98,99,100,101,102,103,104,105,106,107,108,109,110,111,112,113,114,115,116,117,118,119,120,121,122,123,124,125,126,127,128,129};
+
 #define BCF_UNPACK_GENOTYPE(A) TWK_BCF_GT_UNPACK[(A >> 1)]
 #define BCF_UNPACK_GENOTYPE_GENERAL(A) TWK_BCF_GT_UNPACK_GENERAL[(A >> 1)]
 
@@ -44,6 +47,10 @@ public:
     int Update(const int* arr);
     int Update(const uint8_t* arr, uint32_t stride = 1);
     int UpdateGeneral(const uint8_t* arr, uint32_t stride = 1);
+    // Todo:
+    // Update the PBWT given the following positions.
+    // Only useful for biallelic PBWTs.
+    int Update(uint32_t* alt_pos, const uint32_t len);
 
     std::string ToPrettyString() const;
 

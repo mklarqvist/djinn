@@ -116,7 +116,7 @@ int PBWT::Update(const uint8_t* arr, uint32_t stride) {
     //for (int i = 0; i < n_q2; ++i, ++of) ppa[of] = q2[i];
     //std::cerr << "of=" << of << "/" << n_samples << std::endl;
     assert(of == n_samples);
-    // debug should be sorted here
+    // Debug: data is sorted at this point.
     // std::cerr << ToPrettyString() << std::endl;
     // std::cerr << "Alts=" << n_queue[1] << std::endl;
     // for (int i = 0; i < n_samples; ++i) {
@@ -134,6 +134,9 @@ int PBWT::UpdateGeneral(const uint8_t* arr, uint32_t stride) {
 
     for (int i = 0; i < n_samples; ++i) {
         const uint8_t& gt = BCF_UNPACK_GENOTYPE_GENERAL(arr[ppa[i] * stride]);
+        if ( gt >= n_symbols) {
+            std::cerr << "error=" << (int)gt << "/" << n_symbols << std::endl;
+        }
         assert(gt < n_symbols);
         for (int j = 0; j < n_symbols; ++j) {
             if (gt == j)

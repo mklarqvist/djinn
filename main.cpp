@@ -2,6 +2,71 @@
 #include "range_coder.h"
 #include "frequency_model.h"
 #include "vcf_reader.h"
+
+// Ascertain that the binary output can be used to restore the input data.
+// Computes allele counts as an example.
+static
+int64_t DebugRLEBitmap(const uint8_t* data, const uint32_t data_len, const uint32_t n_samples, const bool print = false) {
+    // Data.
+    // const uint8_t* data = buf_wah[target].data;
+    // const uint32_t data_len = buf_wah[target].len;
+    
+    // Setup.
+    uint32_t n_run = 0;
+    uint32_t offset = 0;
+    int64_t n_variants = 0;
+    uint32_t n_alts = 0;
+
+    while (true) {
+        // Looking at most-significant byte for the target compression type.
+        const uint8_t type = (data[offset] & 1);
+        if (type == 0) {
+            // assert((*reinterpret_cast<const uint32_t*>(&data[offset]) & 1) == 0);
+            n_alts += __builtin_popcount(*reinterpret_cast<const uint32_t*>(&data[offset]) >> 1);
+            offset += sizeof(uint32_t);
+            n_run  += 31;
+            if (n_run >= n_samples) {
+                ++n_variants;
+                n_run = 0;
+                // std::cout << "AC=" << n_alts << '\n';
+                if (print) printf("AC=%d\n",n_alts);
+                assert(n_alts <= n_samples);
+                n_alts = 0;
+            }
+        }
+        else if (type == 1) {
+            uint16_t val = *reinterpret_cast<const uint16_t*>(&data[offset]);
+            n_run  += (val >> 2);
+            n_alts += ((val >> 1) & 1) * (val >> 2);
+
+            // assert((*reinterpret_cast<const uint16_t*>(&data[offset]) & 1) == 1);
+            offset += sizeof(uint16_t);
+            if (n_run >= n_samples) {
+                ++n_variants;
+                n_run = 0;
+                // std::cout << "AC=" << n_alts << '\n';
+                if (print) printf("AC=%d\n",n_alts);
+                assert(n_alts <= n_samples);
+                n_alts = 0;
+            }
+        }
+        
+        // Exit conditions.
+        if (offset == data_len) {
+            // std::cerr << "exit correct" << std::endl;
+            break;
+        }
+        if (offset > data_len) {
+            std::cerr << "overflow error: " << offset << "/" << data_len << std::endl;
+            exit(1);
+        }
+    }
+
+    std::cerr << "Number of variants=" << n_variants << std::endl;
+
+    return n_variants;
+}
+
 #include "pbwt.h"
 
 // #include "model_ad.h"
@@ -12,6 +77,7 @@
 // temp
 #include <fstream>
 #include <iostream>
+#include <chrono>
 
 int ZstdCompress(const uint8_t* in, uint32_t n_in, uint8_t* out, uint32_t out_capacity, const int32_t c_level = 1) {
     int ret = ZSTD_compress(out, out_capacity, in, n_in, c_level);
@@ -69,10 +135,12 @@ void ReadVcfGT (const std::string& filename) {
         exit(1);
     }
 
+    // std::cerr << "samples=" << reader->n_samples_ << std::endl;
+
     // AD: temp
     // FormatAlelleDepth fmt_ad(10000,reader->n_samples_,true);
 
-    GenotypeCompressor gtperm(reader->n_samples_);
+    GenotypeCompressorModelling gtperm(reader->n_samples_);
 
     // temp
     // unsigned char* buf_in1 = new unsigned char[20000000];
@@ -133,7 +201,8 @@ void ReadVcfGT (const std::string& filename) {
         // }
         //
 
-         gtperm.Encode(reader->bcf1_, reader->header_);
+        // std::cerr << reader->bcf1_->pos+1 << std::endl;
+        gtperm.Encode(reader->bcf1_, reader->header_);
     }
 
     // std::cerr << "total=" << in1 << "," << in2 << std::endl;
@@ -143,31 +212,49 @@ void ReadVcfGT (const std::string& filename) {
     // delete[] buf_out;
 
     gtperm.Compress(); // Final
-    std::cerr << "Final=" << gtperm.bytes_in << "->" << gtperm.bytes_out << " (" << (double)gtperm.bytes_in/gtperm.bytes_out << ")" << std::endl;
-    for (int j = 0; j < gtperm.gt_width.size(); ++j) {
-        if (gtperm.gt_width[j] != 0) std::cout << j << "\t" << gtperm.gt_width[j] << std::endl;
-    }
+    // std::cerr << "Final=" << gtperm.bytes_in << "->" << gtperm.bytes_out << " (" << (double)gtperm.bytes_in/gtperm.bytes_out << ")" << std::endl;
+    // for (int j = 0; j < gtperm.gt_width.size(); ++j) {
+    //     if (gtperm.gt_width[j] != 0) std::cout << j << "\t" << gtperm.gt_width[j] << std::endl;
+    // }
 }
 
+
 int main(int argc, char** argv) {
-#if 1
-    std::ifstream f("/Users/Mivagallery/Downloads/gtperm.bin.lz4", std::ios::in | std::ios::binary);
+#if 0
+    std::ifstream f("/media/mdrk/NVMe/gt_hrc11.bin2.lz4", std::ios::in | std::ios::binary | std::ios::ate);
     if (f.good() == false) {
         std::cerr << "Failed to open" << std::endl;
         return 1;
     }
+    uint64_t filesize = f.tellg();
+    f.seekg(0);
 
     size_t uncompressed_size = 0, compressed_size = 0;
-    uint8_t* buffer = new uint8_t[10000000];
+    size_t dest_capacity = 10000000;
+    uint8_t* buffer     = new uint8_t[dest_capacity];
+    uint8_t* out_buffer = new uint8_t[dest_capacity];
+    int64_t n_variants  = 0;
+
+    uint64_t tot_decomp = 0;
+    std::chrono::high_resolution_clock::time_point t1 = std::chrono::high_resolution_clock::now();
 
     while (f.good()) {
         f.read((char*)&uncompressed_size, sizeof(size_t));
         f.read((char*)&compressed_size, sizeof(size_t));
         f.read((char*)buffer, compressed_size);
-        std::cerr << compressed_size << std::endl;
+        std::cerr << uncompressed_size << "," << compressed_size << " -> " << f.tellg() << "/" << filesize << std::endl;
+        int ret = Lz4Decompress(buffer, compressed_size, out_buffer, dest_capacity);
+        assert(ret == uncompressed_size);
+        n_variants += DebugRLEBitmap(out_buffer, uncompressed_size, 32470);
+
+        if (f.tellg() == filesize) break;
     }
-    std::cerr << "done" << std::endl;
+    std::chrono::high_resolution_clock::time_point t2 = std::chrono::high_resolution_clock::now();
+    auto time_span = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1);
+    std::cerr << "[LZ4] Time elapsed " << time_span.count() << " ms " << tot_decomp << " variants=" << n_variants/2 << " (" << n_variants*32470 << " genotypes: " << n_variants*32470/((double)time_span.count()/1000)/1e9 << " billion/s)" << std::endl;
+
     delete[] buffer;
+    delete[] out_buffer;
 
     return 0;
 #endif
