@@ -3,128 +3,14 @@
 #include "frequency_model.h"
 #include "vcf_reader.h"
 
-// Ascertain that the binary output can be used to restore the input data.
-// Computes allele counts as an example.
-static
-int64_t DebugRLEBitmap(const uint8_t* data, const uint32_t data_len, const uint32_t n_samples, const bool print = false) {
-    // Data.
-    // const uint8_t* data = buf_wah[target].data;
-    // const uint32_t data_len = buf_wah[target].len;
-    
-    // Setup.
-    uint32_t n_run = 0;
-    uint32_t offset = 0;
-    int64_t n_variants = 0;
-    uint32_t n_alts = 0;
-
-    while (true) {
-        // Looking at most-significant byte for the target compression type.
-        const uint8_t type = (data[offset] & 1);
-        if (type == 0) {
-            // assert((*reinterpret_cast<const uint32_t*>(&data[offset]) & 1) == 0);
-            n_alts += __builtin_popcount(*reinterpret_cast<const uint32_t*>(&data[offset]) >> 1);
-            offset += sizeof(uint32_t);
-            n_run  += 31;
-            if (n_run >= n_samples) {
-                ++n_variants;
-                n_run = 0;
-                // std::cout << "AC=" << n_alts << '\n';
-                if (print) printf("AC=%d\n",n_alts);
-                assert(n_alts <= n_samples);
-                n_alts = 0;
-            }
-        }
-        else if (type == 1) {
-            uint16_t val = *reinterpret_cast<const uint16_t*>(&data[offset]);
-            n_run  += (val >> 2);
-            n_alts += ((val >> 1) & 1) * (val >> 2);
-
-            // assert((*reinterpret_cast<const uint16_t*>(&data[offset]) & 1) == 1);
-            offset += sizeof(uint16_t);
-            if (n_run >= n_samples) {
-                ++n_variants;
-                n_run = 0;
-                // std::cout << "AC=" << n_alts << '\n';
-                if (print) printf("AC=%d\n",n_alts);
-                assert(n_alts <= n_samples);
-                n_alts = 0;
-            }
-        }
-        
-        // Exit conditions.
-        if (offset == data_len) {
-            // std::cerr << "exit correct" << std::endl;
-            break;
-        }
-        if (offset > data_len) {
-            std::cerr << "overflow error: " << offset << "/" << data_len << std::endl;
-            exit(1);
-        }
-    }
-
-    std::cerr << "Number of variants=" << n_variants << std::endl;
-
-    return n_variants;
-}
-
 #include "pbwt.h"
 
 // #include "model_ad.h"
-
-#include <zstd.h>
-#include <zstd_errors.h>
 
 // temp
 #include <fstream>
 #include <iostream>
 #include <chrono>
-
-int ZstdCompress(const uint8_t* in, uint32_t n_in, uint8_t* out, uint32_t out_capacity, const int32_t c_level = 1) {
-    int ret = ZSTD_compress(out, out_capacity, in, n_in, c_level);
-    return(ret);
-}
-
-int ZstdDecompress(const uint8_t* in, uint32_t n_in, uint8_t* out, uint32_t out_capacity) {
-    int ret = ZSTD_decompress(out, out_capacity, in, n_in);
-    return(ret);
-}
-
-#include "lz4.h" // lz4
-#include "lz4hc.h"
-
-int Lz4Compress(const uint8_t* in, uint32_t n_in, uint8_t* out, uint32_t out_capacity, const int32_t c_level = 1) {
-    int compressed_data_size = LZ4_compress_HC((const char*)in, (char*)out, n_in, out_capacity, c_level);
-
-    if (compressed_data_size < 0) {
-        std::cerr << "A negative result from LZ4_compress_default indicates a failure trying to compress the data.  See exit code (echo $?) for value returned." << std::endl;
-        exit(1);
-    }
-        
-    if (compressed_data_size == 0) {
-        std::cerr << "A result of 0 means compression worked, but was stopped because the destination buffer couldn't hold all the information." << std::endl;
-        exit(1);
-    }
-
-
-    return(compressed_data_size);
-}
-
-int Lz4Decompress(const uint8_t* in, uint32_t n_in, uint8_t* out, uint32_t out_capacity) {
-    int32_t decompressed_size = LZ4_decompress_safe((char*)in, (char*)out, n_in, out_capacity);
-    // int decompressed_data_size = LZ4_decompress((const char*)in, (char*)out, n_in, out_capacity);
-    if (decompressed_size < 0) {
-        std::cerr << "A negative result from LZ4_decompress_safe indicates a failure trying to decompress the data.  See exit code (echo $?) for value returned." << std::endl;
-        exit(1);
-    }
-    if (decompressed_size == 0) {
-        std::cerr << "I'm not sure this function can ever return 0.  Documentation in lz4.h doesn't indicate so.";
-        exit(1);
-    }
-
-
-    return(decompressed_size);
-}
-
 
 #include "gt_compressor.h"
 
@@ -140,7 +26,10 @@ void ReadVcfGT (const std::string& filename) {
     // AD: temp
     // FormatAlelleDepth fmt_ad(10000,reader->n_samples_,true);
 
-    GenotypeCompressorModelling gtperm(reader->n_samples_);
+    // GenotypeCompressorModelling gtperm(reader->n_samples_);
+    // GenotypeCompressorRLEBitmap gtperm2(reader->n_samples_);
+    GTCompressor gtcomp;
+    gtcomp.SetStrategy(GTCompressor::CompressionStrategy::CONTEXT_MODEL, reader->n_samples_);
 
     // temp
     // unsigned char* buf_in1 = new unsigned char[20000000];
@@ -202,7 +91,9 @@ void ReadVcfGT (const std::string& filename) {
         //
 
         // std::cerr << reader->bcf1_->pos+1 << std::endl;
-        gtperm.Encode(reader->bcf1_, reader->header_);
+        // gtperm.Encode(reader->bcf1_, reader->header_);
+        // gtperm2.Encode(reader->bcf1_, reader->header_);
+        gtcomp.Encode(reader->bcf1_, reader->header_);
     }
 
     // std::cerr << "total=" << in1 << "," << in2 << std::endl;
@@ -211,7 +102,8 @@ void ReadVcfGT (const std::string& filename) {
     // delete[] buf_in2;
     // delete[] buf_out;
 
-    gtperm.Compress(); // Final
+    // gtperm.Compress(); // Final
+    // gtperm2.Compress(); // Final
     // std::cerr << "Final=" << gtperm.bytes_in << "->" << gtperm.bytes_out << " (" << (double)gtperm.bytes_in/gtperm.bytes_out << ")" << std::endl;
     // for (int j = 0; j < gtperm.gt_width.size(); ++j) {
     //     if (gtperm.gt_width[j] != 0) std::cout << j << "\t" << gtperm.gt_width[j] << std::endl;

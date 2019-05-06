@@ -4,6 +4,18 @@
 #include <iostream>
 #include <bitset>
 
+PBWT::PBWT() :
+    n_symbols(0),
+    n_samples(0),
+    n_steps(0),
+    prev(nullptr),
+    ppa(nullptr),
+    n_queue(nullptr),
+    queue(nullptr)
+{
+
+}
+
 PBWT::PBWT(int64_t n_samples, int n_symbols) :
     n_symbols(n_symbols),
     n_samples(n_samples),
@@ -33,19 +45,28 @@ PBWT::~PBWT() {
     delete[] n_queue;
 }
 
-void PBWT::Initiate(int64_t n_samples) {
-    exit(1);
-    delete[] prev;
-    delete[] ppa;
-    for (int i = 0; i < n_symbols; ++i)
-        delete[] queue[i];
+void PBWT::Initiate(int64_t n_s, int n_sym) {
+    assert(n_sym > 1);
 
-    this->n_samples = n_samples;
+    n_samples = n_s;
+    n_steps = 0;
+    delete[] prev; delete[] ppa;
+    delete[] n_queue;
+    if (queue != nullptr) {
+        for (int i = 0; i < n_symbols; ++i)
+            delete[] queue[i];
+    }
+    n_symbols = n_sym;
+
     prev = new uint8_t[n_samples];
-    ppa  = new uint32_t[n_samples];
+    ppa = new uint32_t[n_samples];
+    n_queue = new uint32_t[n_symbols];
+    queue = new uint32_t*[n_symbols];
+
     for (int i = 0; i < n_symbols; ++i)
         queue[i] = new uint32_t[n_samples];
 
+    memset(n_queue, 0, sizeof(uint32_t)*n_symbols);
     reset();
 }
 

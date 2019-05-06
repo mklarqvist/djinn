@@ -39,10 +39,11 @@ const uint8_t TWK_BCF_GT_UNPACK_GENERAL[131] =
 
 class PBWT {
 public:
+    PBWT();
     PBWT(int64_t n_samples, int n_symbols);
     ~PBWT();
 
-    void Initiate(int64_t n_samples);
+    void Initiate(int64_t n_s, int n_sym);
     void reset();
     int Update(const int* arr);
     int Update(const uint8_t* arr, uint32_t stride = 1);
@@ -50,12 +51,12 @@ public:
     // Todo:
     // Update the PBWT given the following positions.
     // Only useful for biallelic PBWTs.
-    int Update(uint32_t* alt_pos, const uint32_t len);
+    int Update(const uint32_t* alt_pos, const uint32_t len);
 
     std::string ToPrettyString() const;
 
 public:
-    const int  n_symbols; // universe of symbols (number of unique symbols)
+    int        n_symbols; // universe of symbols (number of unique symbols)
     int64_t    n_samples; // number of samples (free interpretation)
     uint64_t   n_steps; // number of updates made (debugging)
     uint8_t*   prev; // previous output array
