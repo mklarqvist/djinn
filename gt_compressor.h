@@ -97,13 +97,29 @@ public:
         processed_lines(0),
         processed_lines_local(0),
         bytes_in(0), bytes_out(0),
-        // debug
-        bytes_in1(0), bytes_out_zstd1(0), bytes_out_lz4(0)
+        models(nullptr)
     {
-        
+
+        base_models[0].Construct(n_samples, 2);
+        base_models[1].Construct(n_samples, 2);
+        base_models[2].Construct(n_samples, 3);
+        base_models[3].Construct(n_samples, 3);
+        base_models_complex[0].Construct(n_samples, 16);
+        base_models_complex[1].Construct(n_samples, 16);
+
+        buf_general[0].resize(10000000);
+        buf_general[1].resize(10000000);
+        buf_raw.resize(10000000);
+
+        base_models[0].StartEncoding();
+        base_models[1].StartEncoding();
+        base_models[2].StartEncoding();
+        base_models[3].StartEncoding();
+        base_models_complex[0].StartEncoding();
+        base_models_complex[1].StartEncoding();
     }
 
-    virtual ~GenotypeCompressor() {}
+    virtual ~GenotypeCompressor() { delete[] models; }
     
     // Encode data using literals.
     // virtual int Encode(bcf1_t* bcf, const bcf_hdr_t* hdr) =0;
@@ -176,42 +192,19 @@ public:
     Buffer buf_general[2];
     Buffer buf_raw;
 
-    uint64_t bytes_in1;
-    uint64_t bytes_out_zstd1, bytes_out_lz4;
-    Buffer buf_wah[2];
-    std::vector<uint32_t> gt_width;
+    
 
     uint32_t alts[256];
+
+    GeneralPBWTModel base_models[4];
+    GeneralPBWTModel base_models_complex[2];
+    GeneralPBWTModel* models;
 };
 
 class GenotypeCompressorModelling : public GenotypeCompressor {
 public:
-    GenotypeCompressorModelling(int64_t n_s) : GenotypeCompressor(n_s),
-        models(nullptr)
+    GenotypeCompressorModelling(int64_t n_s) : GenotypeCompressor(n_s)
     {
-        gt_width.resize(n_s, 0);
-
-        base_models[0].Construct(n_samples, 2);
-        base_models[1].Construct(n_samples, 2);
-        base_models[2].Construct(n_samples, 3);
-        base_models[3].Construct(n_samples, 3);
-        base_models_complex[0].Construct(n_samples, 16);
-        base_models_complex[1].Construct(n_samples, 16);
-
-        buf_general[0].resize(10000000);
-        buf_general[1].resize(10000000);
-        buf_raw.resize(10000000);
-        //
-        buf_wah[0].resize(10000000);
-        buf_wah[1].resize(10000000);
-
-        base_models[0].StartEncoding();
-        base_models[1].StartEncoding();
-        base_models[2].StartEncoding();
-        base_models[3].StartEncoding();
-        base_models_complex[0].StartEncoding();
-        base_models_complex[1].StartEncoding();
-
         nonsense[0].Construct(1, 2);
         nonsense[1].Construct(1, 2);
         nonsense[0].StartEncoding();
@@ -219,7 +212,7 @@ public:
     }
 
     ~GenotypeCompressorModelling() {
-        delete[] models;
+        
     }
 
     bool CheckLimit() const {
@@ -269,7 +262,7 @@ private:
 
             int replaced = RemapGenotypeEOV(fmt->p, fmt->p_len);
             
-            std::cerr << "second path taken for " << bcf->n_allele << std::endl; 
+            // std::cerr << "second path taken for " << bcf->n_allele << std::endl; 
             return(Encode2NXM(fmt->p, fmt->p_len));  // #alleles < 4
         }
         else {
@@ -322,6 +315,257 @@ private:
         }
 
         return 1;
+    }
+
+    // 2N2M complete
+    int Encode2N2MC(uint8_t* data, const int32_t n_data) {
+        if (CheckLimit()) {
+            Compress();
+        }
+        
+        const uint8_t* gts = data; // data pointer
+        base_models[0].pbwt->Update(&gts[0], 2);
+        base_models[1].pbwt->Update(&gts[1], 2);
+
+        // EncodeRLEBitmap(0);
+        // EncodeRLEBitmap(1);
+
+#if 1
+        int n_steps = 16;
+        uint32_t step_size = std::ceil((float)n_samples / n_steps);
+        uint64_t bins1 = 0;
+        for (int i = 0; i < n_samples; ++i) {
+            if (base_models[0].pbwt->prev[i]) {
+                bins1 |= (1 << (i/step_size));
+            }
+        }
+
+        base_models[0].ResetContext();
+        nonsense[0].ResetContext();
+        uint32_t offset = 0, offset_end = 0;
+        for (int i = 0; i < n_steps; ++i) {
+            if (bins1 & (1 << i)) {
+                nonsense[0].EncodeSymbol(1);
+                offset_end = offset + step_size < n_samples ? offset + step_size : n_samples;
+                for (int j = offset; j < offset_end; ++j) {
+                    base_models[0].EncodeSymbol(base_models[0].pbwt->prev[j]);
+                }
+            } else nonsense[0].EncodeSymbol(0);
+            offset += step_size;
+        }
+
+        uint64_t bins2 = 0;
+        for (int i = 0; i < n_samples; ++i) {
+            if (base_models[1].pbwt->prev[i]) {
+                bins2 |= (1 << (i/step_size));
+            }
+        }
+   
+        base_models[1].ResetContext();
+        nonsense[1].ResetContext();
+        offset = 0, offset_end = 0;
+        for (int i = 0; i < n_steps; ++i) {
+            if (bins2 & (1 << i)) {
+                nonsense[1].EncodeSymbol(1);
+                offset_end = offset + step_size < n_samples ? offset + step_size : n_samples;
+                for (int j = offset; j < offset_end; ++j) {
+                    base_models[1].EncodeSymbol(base_models[1].pbwt->prev[j]);
+                }
+            } else nonsense[1].EncodeSymbol(0);
+            offset += step_size;
+        }
+#endif
+
+#if 0
+        base_models[0].ResetContext();
+        for (int j = 0; j < n_samples; ++j) {
+            // assert(base_models[0].pbwt->prev[j] < 2);
+            base_models[0].EncodeSymbol(base_models[0].pbwt->prev[j]);
+        }
+    
+        base_models[1].ResetContext();
+        for (int i = 0; i < n_samples; ++i) {
+            // assert(base_models[1].pbwt->prev[i] < 2);
+            base_models[1].EncodeSymbol(base_models[1].pbwt->prev[i]);
+        }
+#endif
+
+        ++processed_lines_local;
+        ++processed_lines;
+        return 1;
+    }
+
+    // 2N2M with missing
+    int Encode2N2MM(uint8_t* data, const int32_t n_data) {
+        const uint8_t* gts = data; // data pointer
+        
+        base_models[2].pbwt->Update(&gts[0], 2);
+        base_models[3].pbwt->Update(&gts[1], 2);
+
+        base_models[2].ResetContext();
+        for (int i = 0; i < n_samples; ++i) {
+            assert(base_models[2].pbwt->prev[i] < 3);
+            base_models[2].EncodeSymbol(base_models[2].pbwt->prev[i]);
+        }
+
+        base_models[3].ResetContext();
+        for (int i = 0; i < n_samples; ++i) {
+            assert(base_models[3].pbwt->prev[i] < 3);
+            base_models[3].EncodeSymbol(base_models[3].pbwt->prev[i]);
+        }
+
+        ++processed_lines_local;
+        ++processed_lines;
+        return 1;
+    }
+
+    // 2N any M (up to 16)
+    int Encode2NXM(uint8_t* data, const int32_t n_data) {
+        if (CheckLimit()) {
+            Compress();
+        }
+
+        const uint8_t* gts = data; // data pointer
+
+        // Todo: assert genotypes are set for this variant.
+        base_models_complex[0].pbwt->UpdateGeneral(&gts[0], 2);
+
+        for (int i = 0; i < n_samples; ++i) {
+            assert(base_models_complex[0].pbwt->prev[i] < 16);
+            base_models_complex[0].EncodeSymbol(base_models_complex[0].pbwt->prev[i]);
+        }
+
+        base_models_complex[1].pbwt->UpdateGeneral(&gts[1], 2);
+
+        for (int i = 0; i < n_samples; ++i) {
+            assert(base_models_complex[1].pbwt->prev[i] < 16);
+            base_models_complex[1].EncodeSymbol(base_models_complex[1].pbwt->prev[i]);
+        }
+
+        ++processed_lines_local;
+        ++processed_lines;
+        return 1;
+    }
+
+public:
+    int Compress() {
+        // flush: temp
+        int p1  = base_models[0].FinishEncoding();
+        int p2  = base_models[1].FinishEncoding();
+        int p1E = base_models[2].FinishEncoding();
+        int p2E = base_models[3].FinishEncoding();
+        int p2X = base_models_complex[0].FinishEncoding();
+        int p2X2 = base_models_complex[1].FinishEncoding();
+        int praw = ZstdCompress(buf_raw.data, buf_raw.len,
+                                buf_general[0].data, buf_general[0].capacity(),
+                                20);
+
+        base_models[0].Reset();
+        base_models[0].StartEncoding();
+        base_models[1].Reset();
+        base_models[1].StartEncoding();
+        base_models[2].Reset();
+        base_models[2].StartEncoding();
+        base_models[3].Reset();
+        base_models[3].StartEncoding();
+        base_models_complex[0].Reset();
+        base_models_complex[0].StartEncoding();
+        base_models_complex[1].Reset();
+        base_models_complex[1].StartEncoding();
+
+        int extra1 = nonsense[0].FinishEncoding();
+        int extra2 = nonsense[1].FinishEncoding();
+        std::cerr << processed_lines_local << "->" << extra1 << " and " << extra2 << std::endl;
+        nonsense[0].Reset();
+        nonsense[0].StartEncoding();
+        nonsense[1].Reset();
+        nonsense[1].StartEncoding();
+
+        processed_lines_local = 0;
+        std::cerr << "Flushed: " << p1 << "," << p2 << "," << p1E << "," << p2E << "," << p2X << "," << p2X2 << "," << praw << std::endl;
+        buf_raw.reset();
+        bytes_out += p1 + p2 + p1E + p2E + p2X + p2X2 + praw + extra1 + extra2;
+        // bytes_out += p1 + p2 + p1E + p2E + extra1 + extra2;
+        std::cerr << "[PROGRESS] " << bytes_in << "->" << bytes_out << " (" << (double)bytes_in/bytes_out << "-fold)" << std::endl;
+
+        // Debug compression:
+        // std::cerr << "[PROGRESS ZSTD] " << bytes_in1 << "->" << bytes_out_zstd1 << " (" << (double)bytes_in1/bytes_out_zstd1 << "-fold)" << std::endl;
+        // std::cerr << "[PROGRESS LZ4] " << bytes_in1 << "->" << bytes_out_lz4 << " (" << (double)bytes_in1/bytes_out_lz4 << "-fold)" << std::endl;
+
+        return 1;
+    }
+
+public:
+    GeneralPBWTModel nonsense[2];
+};
+
+class GenotypeCompressorRLEBitmap : public GenotypeCompressor {
+public:
+    GenotypeCompressorRLEBitmap(int64_t n_s) : GenotypeCompressor(n_s),
+        bytes_in1(0), bytes_out_zstd1(0), bytes_out_lz4(0)
+    {
+        gt_width.resize(n_s, 0);
+        buf_wah[0].resize(10000000);
+        buf_wah[1].resize(10000000);
+    }
+
+    int Encode2N(uint8_t* data, const int32_t n_data, const int32_t n_alleles) override;
+    int Encode2N2M(uint8_t* data, const int32_t n_data) override;
+    int Encode2N2MC(uint8_t* data, const int32_t n_data) override;
+    int Encode2N2MM(uint8_t* data, const int32_t n_data) override;
+    int Encode2NXM(uint8_t* data, const int32_t n_data) override;
+
+    // Encode data using htslib.
+    int Encode2N(bcf1_t* bcf, const bcf_hdr_t* hdr) override;
+
+    int Compress() {
+        // RLE-bitmap hybrid.
+        if (buf_wah[0].len) {
+            // Temporary debug before compressing.
+            DebugRLEBitmap(buf_wah[0].data, buf_wah[0].len, n_samples);
+
+            int praw = ZstdCompress(buf_wah[0].data, buf_wah[0].len,
+                                    buf_general[0].data, buf_general[0].capacity(),
+                                    20);
+
+            bytes_out_zstd1 += praw;
+
+            std::cerr << "Zstd->compressed: " << buf_wah[0].len << "->" << praw << std::endl;
+            size_t plz4 = Lz4Compress(buf_wah[0].data, buf_wah[0].len,
+                                      buf_general[0].data, buf_general[0].capacity(),
+                                      9);
+            
+            // std::cerr << "writing=" << buf_wah[0].len << " and " << plz4 << std::endl; 
+            
+            // Temp: emit data to cout.
+            std::cout.write((char*)&buf_wah[0].len, sizeof(size_t));
+            std::cout.write((char*)&plz4, sizeof(size_t));
+            std::cout.write((char*)buf_general[0].data, plz4);
+            std::cout.flush();                      
+            
+            std::cerr << "Lz4->compressed: " << buf_wah[0].len << "->" << plz4 << std::endl;
+            bytes_out_lz4 += plz4;
+
+            buf_wah[0].len = 0;
+        }
+
+        base_models[0].Reset();
+        base_models[1].Reset();
+        base_models[2].Reset();
+        base_models[3].Reset();
+        base_models_complex[0].Reset();
+        base_models_complex[1].Reset();
+
+        processed_lines_local = 0;
+        buf_raw.reset();
+        // bytes_out += p1 + p2 + p1E + p2E + p2X + p2X2 + praw + extra1 + extra2;
+        // bytes_out += p1 + p2 + p1E + p2E + extra1 + extra2;
+        std::cerr << "[PROGRESS] " << bytes_in << "->" << bytes_out << " (" << (double)bytes_in/bytes_out << "-fold)" << std::endl;
+
+        // Debug compression:
+        std::cerr << "[PROGRESS ZSTD] " << bytes_in1 << "->" << bytes_out_zstd1 << " (" << (double)bytes_in1/bytes_out_zstd1 << "-fold)" << std::endl;
+        std::cerr << "[PROGRESS LZ4] " << bytes_in1 << "->" << bytes_out_lz4 << " (" << (double)bytes_in1/bytes_out_lz4 << "-fold)" << std::endl;
+
     }
 
     int EncodeRLEBitmap(const int target) {
@@ -432,9 +676,6 @@ private:
 
         // Ascertain correctness:
         assert(observed_alts == base_models[target].pbwt->n_queue[1]);
-
-        // std::cerr << "RLE cost=" << rle_cost << " objs=" << n_objects << std::endl;
-        // std::cerr << "Length=" << observed_length << "==" << n_samples << std::endl;
         assert(observed_length == n_samples);
 
         ++gt_width[n_objects];
@@ -442,244 +683,11 @@ private:
         return 1;
     }
 
-    // 2N2M complete
-    int Encode2N2MC(uint8_t* data, const int32_t n_data) {
-        if (CheckLimit()) {
-            Compress();
-        }
-        
-        const uint8_t* gts = data; // data pointer
-        base_models[0].pbwt->Update(&gts[0], 2);
-        base_models[1].pbwt->Update(&gts[1], 2);
-
-        EncodeRLEBitmap(0);
-        EncodeRLEBitmap(1);
-
-#if 1
-        int n_steps = 16;
-        uint32_t step_size = std::ceil((float)n_samples / n_steps);
-        uint64_t bins1 = 0;
-        for (int i = 0; i < n_samples; ++i) {
-            if (base_models[0].pbwt->prev[i]) {
-                bins1 |= (1 << (i/step_size));
-            }
-        }
-
-        base_models[0].ResetContext();
-        nonsense[0].ResetContext();
-        uint32_t offset = 0, offset_end = 0;
-        for (int i = 0; i < n_steps; ++i) {
-            if (bins1 & (1 << i)) {
-                nonsense[0].EncodeSymbol(1);
-                offset_end = offset + step_size < n_samples ? offset + step_size : n_samples;
-                for (int j = offset; j < offset_end; ++j) {
-                    base_models[0].EncodeSymbol(base_models[0].pbwt->prev[j]);
-                }
-            } else nonsense[0].EncodeSymbol(0);
-            offset += step_size;
-        }
-
-        uint64_t bins2 = 0;
-        for (int i = 0; i < n_samples; ++i) {
-            if (base_models[1].pbwt->prev[i]) {
-                bins2 |= (1 << (i/step_size));
-            }
-        }
-   
-        base_models[1].ResetContext();
-        nonsense[1].ResetContext();
-        offset = 0, offset_end = 0;
-        for (int i = 0; i < n_steps; ++i) {
-            if (bins2 & (1 << i)) {
-                nonsense[1].EncodeSymbol(1);
-                offset_end = offset + step_size < n_samples ? offset + step_size : n_samples;
-                for (int j = offset; j < offset_end; ++j) {
-                    base_models[1].EncodeSymbol(base_models[1].pbwt->prev[j]);
-                }
-            } else nonsense[1].EncodeSymbol(0);
-            offset += step_size;
-        }
-#endif
-
-#if 0
-        base_models[0].ResetContext();
-        for (int j = 0; j < n_samples; ++j) {
-            // assert(base_models[0].pbwt->prev[j] < 2);
-            base_models[0].EncodeSymbol(base_models[0].pbwt->prev[j]);
-        }
-    
-        base_models[1].ResetContext();
-        for (int i = 0; i < n_samples; ++i) {
-            // assert(base_models[1].pbwt->prev[i] < 2);
-            base_models[1].EncodeSymbol(base_models[1].pbwt->prev[i]);
-        }
-#endif
-
-        ++processed_lines_local;
-        ++processed_lines;
-        return 1;
-    }
-
-    // 2N2M with missing
-    int Encode2N2MM(uint8_t* data, const int32_t n_data) {
-        const uint8_t* gts = data; // data pointer
-        
-        base_models[2].pbwt->Update(&gts[0], 2);
-        base_models[3].pbwt->Update(&gts[1], 2);
-
-        base_models[2].ResetContext();
-        for (int i = 0; i < n_samples; ++i) {
-            assert(base_models[2].pbwt->prev[i] < 3);
-            base_models[2].EncodeSymbol(base_models[2].pbwt->prev[i]);
-        }
-
-        base_models[3].ResetContext();
-        for (int i = 0; i < n_samples; ++i) {
-            assert(base_models[3].pbwt->prev[i] < 3);
-            base_models[3].EncodeSymbol(base_models[3].pbwt->prev[i]);
-        }
-
-        ++processed_lines_local;
-        ++processed_lines;
-        return 1;
-    }
-
-    // 2N any M (up to 16)
-    int Encode2NXM(uint8_t* data, const int32_t n_data) {
-        if (CheckLimit()) {
-            Compress();
-        }
-
-        const uint8_t* gts = data; // data pointer
-        // uint32_t alts[256] = {0};
-        // memset(alts, 0, 256*sizeof(uint32_t));
-        
-        // uint32_t n_special = 0;
-
-        // for (int i = 0; i < 2*n_samples; ++i) {
-        //     ++alts[BCF_UNPACK_GENOTYPE_GENERAL(gts[i])];
-        //     // n_special += (gts[i] == 129);
-        // }
-
-        // std::cerr << "2NXM special=" << n_special << ",";
-        // for (int i = 0; i < 256; ++i) {
-        //     if (alts[i]) std::cerr << i << ":" << alts[i] << ",";
-        // }
-        // std::cerr << std::endl;
-
-        // Todo: fix
-        // if (alts[64]) { // This is the EOF marker.
-        //     std::cerr << "got=" << alts[64] << std::endl;
-        //     return 1;
-        // }
-
-        // Todo: assert genotypes are set for this variant.
-        base_models_complex[0].pbwt->UpdateGeneral(&gts[0], 2);
-
-        for (int i = 0; i < n_samples; ++i) {
-            assert(base_models_complex[0].pbwt->prev[i] < 16);
-            base_models_complex[0].EncodeSymbol(base_models_complex[0].pbwt->prev[i]);
-        }
-
-        base_models_complex[1].pbwt->UpdateGeneral(&gts[1], 2);
-
-        for (int i = 0; i < n_samples; ++i) {
-            assert(base_models_complex[1].pbwt->prev[i] < 16);
-            base_models_complex[1].EncodeSymbol(base_models_complex[1].pbwt->prev[i]);
-        }
-
-        ++processed_lines_local;
-        ++processed_lines;
-        return 1;
-    }
-
 public:
-    int Compress() {
-        // RLE-bitmap hybrid.
-        if (buf_wah[0].len) {
-            // Temporary debug before compressing.
-            DebugRLEBitmap(buf_wah[0].data, buf_wah[0].len, n_samples);
-
-            int praw = ZstdCompress(buf_wah[0].data, buf_wah[0].len,
-                                    buf_general[0].data, buf_general[0].capacity(),
-                                    20);
-
-            bytes_out_zstd1 += praw;
-
-            std::cerr << "Zstd->compressed: " << buf_wah[0].len << "->" << praw << std::endl;
-            size_t plz4 = Lz4Compress(buf_wah[0].data, buf_wah[0].len,
-                                      buf_general[0].data, buf_general[0].capacity(),
-                                      9);
-            
-            // std::cerr << "writing=" << buf_wah[0].len << " and " << plz4 << std::endl; 
-            
-            // Temp: emit data to cout.
-            std::cout.write((char*)&buf_wah[0].len, sizeof(size_t));
-            std::cout.write((char*)&plz4, sizeof(size_t));
-            std::cout.write((char*)buf_general[0].data, plz4);
-            std::cout.flush();                      
-            
-            std::cerr << "Lz4->compressed: " << buf_wah[0].len << "->" << plz4 << std::endl;
-            bytes_out_lz4 += plz4;
-
-            buf_wah[0].len = 0;
-        }
-
-        // flush: temp
-        int p1  = base_models[0].FinishEncoding();
-        int p2  = base_models[1].FinishEncoding();
-        int p1E = base_models[2].FinishEncoding();
-        int p2E = base_models[3].FinishEncoding();
-        int p2X = base_models_complex[0].FinishEncoding();
-        int p2X2 = base_models_complex[1].FinishEncoding();
-        int praw = ZstdCompress(buf_raw.data, buf_raw.len,
-                                buf_general[0].data, buf_general[0].capacity(),
-                                20);
-
-        base_models[0].Reset();
-        base_models[0].StartEncoding();
-        base_models[1].Reset();
-        base_models[1].StartEncoding();
-        base_models[2].Reset();
-        base_models[2].StartEncoding();
-        base_models[3].Reset();
-        base_models[3].StartEncoding();
-        base_models_complex[0].Reset();
-        base_models_complex[0].StartEncoding();
-        base_models_complex[1].Reset();
-        base_models_complex[1].StartEncoding();
-
-        int extra1 = nonsense[0].FinishEncoding();
-        int extra2 = nonsense[1].FinishEncoding();
-        std::cerr << processed_lines_local << "->" << extra1 << " and " << extra2 << std::endl;
-        nonsense[0].Reset();
-        nonsense[0].StartEncoding();
-        nonsense[1].Reset();
-        nonsense[1].StartEncoding();
-
-        processed_lines_local = 0;
-        std::cerr << "Flushed: " << p1 << "," << p2 << "," << p1E << "," << p2E << "," << p2X << "," << p2X2 << "," << praw << std::endl;
-        buf_raw.reset();
-        bytes_out += p1 + p2 + p1E + p2E + p2X + p2X2 + praw + extra1 + extra2;
-        // bytes_out += p1 + p2 + p1E + p2E + extra1 + extra2;
-        std::cerr << "[PROGRESS] " << bytes_in << "->" << bytes_out << " (" << (double)bytes_in/bytes_out << "-fold)" << std::endl;
-
-        // Debug compression:
-        std::cerr << "[PROGRESS ZSTD] " << bytes_in1 << "->" << bytes_out_zstd1 << " (" << (double)bytes_in1/bytes_out_zstd1 << "-fold)" << std::endl;
-        std::cerr << "[PROGRESS LZ4] " << bytes_in1 << "->" << bytes_out_lz4 << " (" << (double)bytes_in1/bytes_out_lz4 << "-fold)" << std::endl;
-
-        return 1;
-    }
-
-public:
-    GeneralPBWTModel base_models[4];
-    GeneralPBWTModel base_models_complex[2];
-    GeneralPBWTModel nonsense[2];
-    GeneralPBWTModel* models;
-};
-
-class GenotypeCompressorRLEBitmap : public GenotypeCompressor {
-public:
+    uint64_t bytes_in1;
+    uint64_t bytes_out_zstd1, bytes_out_lz4;
+    Buffer buf_wah[2];
+    std::vector<uint32_t> gt_width;
 
 };
 
