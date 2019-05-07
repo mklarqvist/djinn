@@ -34,7 +34,7 @@ all: gt
 	$(CXX) $(CPPFLAGS)-c -o $@ $<
 
 gt: $(OBJECTS)
-	$(CXX) $(CPPFLAGS) $(OBJECTS) -lzstd -llz4 -lhts -o gt
+	$(CXX) $(CPPFLAGS) $(OBJECTS) -lzstd -llz4 -lhts -lcrypto -o gt
 
 clean:
 	rm -f $(OBJECTS)

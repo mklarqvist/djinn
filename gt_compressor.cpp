@@ -1,68 +1,7 @@
 #include "gt_compressor.h"
 
-// Ascertain that the binary output can be used to restore the input data.
-// Computes allele counts as an example.
-static
-int64_t DebugRLEBitmap(const uint8_t* data, const uint32_t data_len, const uint32_t n_samples, const bool print = false) {
-    // Data.
-    // const uint8_t* data = buf_wah[target].data;
-    // const uint32_t data_len = buf_wah[target].len;
-    
-    // Setup.
-    uint32_t n_run = 0;
-    uint32_t offset = 0;
-    int64_t n_variants = 0;
-    uint32_t n_alts = 0;
-
-    while (true) {
-        // Looking at most-significant byte for the target compression type.
-        const uint8_t type = (data[offset] & 1);
-        if (type == 0) {
-            // assert((*reinterpret_cast<const uint32_t*>(&data[offset]) & 1) == 0);
-            n_alts += __builtin_popcount(*reinterpret_cast<const uint32_t*>(&data[offset]) >> 1);
-            offset += sizeof(uint32_t);
-            n_run  += 31;
-            if (n_run >= n_samples) {
-                ++n_variants;
-                n_run = 0;
-                // std::cout << "AC=" << n_alts << '\n';
-                if (print) printf("AC=%d\n",n_alts);
-                assert(n_alts <= n_samples);
-                n_alts = 0;
-            }
-        }
-        else if (type == 1) {
-            uint16_t val = *reinterpret_cast<const uint16_t*>(&data[offset]);
-            n_run  += (val >> 2);
-            n_alts += ((val >> 1) & 1) * (val >> 2);
-
-            // assert((*reinterpret_cast<const uint16_t*>(&data[offset]) & 1) == 1);
-            offset += sizeof(uint16_t);
-            if (n_run >= n_samples) {
-                ++n_variants;
-                n_run = 0;
-                // std::cout << "AC=" << n_alts << '\n';
-                if (print) printf("AC=%d\n",n_alts);
-                assert(n_alts <= n_samples);
-                n_alts = 0;
-            }
-        }
-        
-        // Exit conditions.
-        if (offset == data_len) {
-            // std::cerr << "exit correct" << std::endl;
-            break;
-        }
-        if (offset > data_len) {
-            std::cerr << "overflow error: " << offset << "/" << data_len << std::endl;
-            exit(1);
-        }
-    }
-
-    std::cerr << "Number of variants=" << n_variants << std::endl;
-
-    return n_variants;
-}
+#include <cstdio>//printf: debug
+#include "gt_decompressor.h" //debug
 
 /*======   Base model   ======*/
 
@@ -90,6 +29,10 @@ GenotypeCompressor::GenotypeCompressor(int64_t n_s) :
     base_models[3].StartEncoding();
     base_models_complex[0].StartEncoding();
     base_models_complex[1].StartEncoding();
+#if DEBUG_PBWT
+    debug_pbwt[0].resize(n_s*block_size + 65536);
+    debug_pbwt[1].resize(n_s*block_size + 65536);
+#endif
 }
 
 GenotypeCompressor::~GenotypeCompressor() { delete[] models; }
@@ -168,22 +111,22 @@ bool GenotypeCompressorModelling::CheckLimit() const {
 }
 
 //
-int GenotypeCompressorModelling::Encode(bcf1_t* bcf, const bcf_hdr_t* hdr) {
-    if (bcf == NULL) return 0;
-    if (hdr == NULL) return 0;
+// int GenotypeCompressorModelling::Encode(bcf1_t* bcf, const bcf_hdr_t* hdr) {
+//     if (bcf == NULL) return 0;
+//     if (hdr == NULL) return 0;
     
-    const bcf_fmt_t* fmt = bcf_get_fmt(hdr, bcf, "GT");
-    if (fmt == NULL) return 0;
-    if (fmt->p_len / n_samples != 2) {
-        std::cerr << "input is not divisible by 2" << std::endl;
-        return 0;
-    }
+//     const bcf_fmt_t* fmt = bcf_get_fmt(hdr, bcf, "GT");
+//     if (fmt == NULL) return 0;
+//     if (fmt->p_len / n_samples != 2) {
+//         std::cerr << "input is not divisible by 2" << std::endl;
+//         return 0;
+//     }
 
-    bytes_in += bcf->d.fmt->p_len;
+//     bytes_in += bcf->d.fmt->p_len;
 
-    // Todo: extend beyond 2N
-    return(Encode2N(bcf,hdr));
-}
+//     // Todo: extend beyond 2N
+//     return(Encode2N(bcf,hdr));
+// }
 
 int GenotypeCompressorModelling::Encode2N(bcf1_t* bcf, const bcf_hdr_t* hdr) {
     if (bcf == NULL) return 0;
@@ -453,11 +396,44 @@ int GenotypeCompressorRLEBitmap::Encode2N(uint8_t* data, const int32_t n_data, c
         if (CheckLimit()) {
             Compress();
         }
+
+#if DEBUG_PBWT
+        assert(debug_pbwt[0].UpdateDigestStride(&data[0], n_data, 2));
+        assert(debug_pbwt[1].UpdateDigestStride(&data[1], n_data, 2));
+#endif
+
         const uint8_t* gts = data; // data pointer
         base_pbwt[0].Update(&gts[0], 2);
         base_pbwt[1].Update(&gts[1], 2);
+    
+#if DEBUG_WAH
+        uint32_t buf_wah_before = buf_wah[0].len;
+#endif
         EncodeRLEBitmap(0);
+
+#if DEBUG_WAH // Debug RLE-bitmap
+        std::shared_ptr<GenotypeDecompressorRLEBitmap> debug1 = std::make_shared<GenotypeDecompressorRLEBitmap>(&buf_wah[0].data[buf_wah_before], n_samples, 1, n_samples);
+        int32_t alts1 = debug1->DecodeRLEBitmap(buf_compress.data);
+        assert(alts1 == base_pbwt[0].n_queue[1]);
+        for (int i = 0; i < n_samples; ++i) {
+            // std::cerr << i << " -> " << (int)base_pbwt[0].prev[i] << "==" << (int)buf_compress.data[i] << std::endl;
+            assert(base_pbwt[0].prev[i] == buf_compress.data[i]);
+        }
+        buf_wah_before = buf_wah[0].len;
+#endif
+
         EncodeRLEBitmap(1);
+
+#if DEBUG_WAH // Debug RLE-bitmap
+        debug1 = std::make_shared<GenotypeDecompressorRLEBitmap>(&buf_wah[0].data[buf_wah_before], n_samples, 1, n_samples);
+        int32_t alts2 = debug1->DecodeRLEBitmap(buf_compress.data);
+        assert(alts2 == base_pbwt[1].n_queue[1]);
+        for (int i = 0; i < n_samples; ++i) {
+            // std::cerr << i << " -> " << (int)base_pbwt[1].prev[i] << "==" << (int)buf_compress.data[i] << std::endl;
+            assert(base_pbwt[1].prev[i] == buf_compress.data[i]);
+        }
+#endif
+
         ++processed_lines_local;
         ++processed_lines;
         return 1;
@@ -480,7 +456,24 @@ int GenotypeCompressorRLEBitmap::Compress() {
     // RLE-bitmap hybrid.
     if (buf_wah[0].len) {
         // Temporary debug before compressing.
-        DebugRLEBitmap(buf_wah[0].data, buf_wah[0].len, n_samples);
+        // DebugRLEBitmap(buf_wah[0].data, buf_wah[0].len, n_samples);
+
+#if DEBUG_PBWT
+        std::shared_ptr<GenotypeDecompressorRLEBitmap> debug1 = std::make_shared<GenotypeDecompressorRLEBitmap>(buf_wah[0].data, buf_wah[0].len, 2*processed_lines_local, n_samples);
+        PBWT pbwt1(n_samples, 2);
+        PBWT pbwt2(n_samples, 2);
+
+        uint8_t* out = new uint8_t[n_samples];
+        uint32_t n_debug = 0;
+        std::cerr << std::dec;
+        while (debug1->DecodeRLEBitmap(out)) {
+            if (n_debug % 2 == 0) pbwt1.ReverseUpdate(out);
+            else pbwt2.ReverseUpdate(out);
+            ++n_debug;
+        }
+        delete[] out;
+        std::cerr << "debug=" << n_debug << std::endl;
+#endif
 
         if (strategy == CompressionStrategy::ZSTD) {
             int praw = ZstdCompress(buf_wah[0].data, buf_wah[0].len,
@@ -491,6 +484,7 @@ int GenotypeCompressorRLEBitmap::Compress() {
             std::cerr << "Zstd->compressed: " << buf_wah[0].len << "->" << praw << " (" << (float)buf_wah[0].len/praw << ")" << std::endl;
             
             // Temp: emit data to cout.
+            std::cout.write((char*)&processed_lines_local, sizeof(uint32_t));
             std::cout.write((char*)&buf_wah[0].len, sizeof(size_t));
             std::cout.write((char*)&praw, sizeof(size_t));
             std::cout.write((char*)buf_compress.data, praw);
@@ -507,6 +501,7 @@ int GenotypeCompressorRLEBitmap::Compress() {
             bytes_out_lz4 += plz4; 
 
             // Temp: emit data to cout.
+            std::cout.write((char*)&processed_lines_local, sizeof(uint32_t));
             std::cout.write((char*)&buf_wah[0].len, sizeof(size_t));
             std::cout.write((char*)&plz4, sizeof(size_t));
             std::cout.write((char*)buf_compress.data, plz4);
@@ -515,6 +510,18 @@ int GenotypeCompressorRLEBitmap::Compress() {
         // Reset
         buf_wah[0].len = 0;
     }
+
+#if DEBUG_PBWT
+        debug_pbwt[0].FinalizeDigest();
+        debug_pbwt[1].FinalizeDigest();
+        
+        std::cerr << "Digest=" << std::hex << (int)debug_pbwt[0].digest[0];
+        for (int i = 1; i < 64; ++i) std::cerr << std::hex << (int)debug_pbwt[0].digest[i];
+        std::cerr << std::endl;
+        std::cerr << "Digest=" << std::hex << (int)debug_pbwt[1].digest[0];
+        for (int i = 1; i < 64; ++i) std::cerr << std::hex << (int)debug_pbwt[1].digest[i];
+        std::cerr << std::endl;
+#endif
 
     base_pbwt[0].reset();
     base_pbwt[1].reset();
@@ -575,9 +582,6 @@ int GenotypeCompressorRLEBitmap::EncodeRLEBitmap(const int target) {
                 // Assertion.
                 assert(end_rle <= n_samples);
                 
-                // Debug:
-                // std::cerr << "Use Bitmap=" << (end_rle-start_rle) << "(" << start_rle << "," << end_rle << ")" << std::endl;
-                
                 // Construct 32-bit bitmap
                 uint32_t bitmap = 0;
                 for (int j = start_rle; j < end_rle; ++j) {
@@ -586,6 +590,9 @@ int GenotypeCompressorRLEBitmap::EncodeRLEBitmap(const int target) {
                 }
                 assert((bitmap & 1) == 0);
                 observed_alts += __builtin_popcount(bitmap);
+                
+                // Debug:
+                // std::cerr << "Use Bitmap=" << (end_rle-start_rle) << "(" << start_rle << "," << end_rle << ") " << std::bitset<32>(bitmap) << std::endl;
                 
                 memcpy(&dst[dst_len], &bitmap, sizeof(uint32_t));
                 dst_len += sizeof(uint32_t);
@@ -612,7 +619,7 @@ int GenotypeCompressorRLEBitmap::EncodeRLEBitmap(const int target) {
                 dst_len += sizeof(uint16_t);
                 
                 // Update observed alts.
-                observed_alts += (ref == 1) * rle_len; // predicate multiply
+                observed_alts += ((rle_pack >> 1) & 1) * rle_len; // predicate multiply
                 // Update observed path.
                 observed_length += rle_len;
 
@@ -631,7 +638,7 @@ int GenotypeCompressorRLEBitmap::EncodeRLEBitmap(const int target) {
 
     // Add only if last element is an unfinished RLE.
     if (rle_len) {
-        // std::cerr << "Add final=" << rle_len << std::endl;
+        // std::cerr << "Use RLE=" << rle_len << ":" << (int)ref << "(" << start_rle << "," << end_rle << ")" << std::endl;
         ++n_objects;
 
         uint16_t rle_pack = (rle_len << 2) | ((ref & 1) << 1) | 1;

@@ -25,6 +25,153 @@
 
 // temp
 #include <bitset>
+#include "gt_decompressor.h"
+
+
+#include <openssl/sha.h>
+
+// #define DEBUG_PBWT 1
+#define DEBUG_WAH 1
+
+struct DataDigest {
+    DataDigest() : len(0), capac(0), buffer(nullptr), has_initialized(false) {}
+    DataDigest(uint32_t l) : len(0), capac(l), buffer(new uint8_t[l]), has_initialized(false) {}
+    ~DataDigest() { delete[] buffer; }
+
+    void resize(uint32_t l) {
+        delete[] buffer;
+        len = 0; capac = l;
+        buffer = new uint8_t[l];
+        has_initialized = false;
+    }
+
+    void reset() { len = 0; has_initialized = false; }
+
+    inline bool InitDigest() {
+		if (!SHA512_Init(&context)) return false;
+        has_initialized = true;
+		return true;
+	}
+
+    bool UpdateDigest(const uint8_t* data, const uint32_t data_len) {
+		if (!has_initialized) {
+            bool init_passed = this->InitDigest();
+            if (!init_passed) return false;
+        }
+        // std::cerr << "Adding: " << len << "->" << len+data_len << "(" << data_len << ")" << "/" << capac << std::endl;
+        assert(len+data_len < capac);
+        memcpy(&buffer[len], data, data_len);
+        len += data_len;
+
+		if (!SHA512_Update(&context, data, data_len))
+			return false;
+
+		return true;
+	}
+
+    bool UpdateDigestStride(const uint8_t* data, const uint32_t data_len, const int stride = 1) {
+		if (!has_initialized) {
+            bool init_passed = this->InitDigest();
+            if (!init_passed) return false;
+        }
+        // std::cerr << "Adding: " << len << "->" << len+data_len << "(" << data_len << ")" << "/" << capac << std::endl;
+        // assert(len+data_len < capac);
+        // memcpy(&buffer[len], data, data_len);
+        // len += data_len;
+        for (int i = 0; i + stride <= data_len; i += stride) {
+            buffer[len++] = data[i];
+        }
+
+		if (!SHA512_Update(&context, data, data_len))
+			return false;
+
+		return true;
+	}
+
+    bool FinalizeDigest() {
+		if (!has_initialized) return false;
+
+		if (!SHA512_Final(&digest[0], &context))
+			return false;
+
+        has_initialized = false;
+        len = 0;
+		return true;
+	}
+
+    uint32_t len;
+    uint32_t capac;
+    uint8_t* buffer;
+
+    bool has_initialized;
+    SHA512_CTX context;
+	uint8_t    digest[64];
+};
+
+// temp
+// Ascertain that the binary output can be used to restore the input data.
+// Computes allele counts as an example.
+static
+int64_t DebugRLEBitmap(const uint8_t* data, const uint32_t data_len, const uint32_t n_samples, const bool print = false) {
+    // Data.
+    // const uint8_t* data = buf_wah[target].data;
+    // const uint32_t data_len = buf_wah[target].len;
+    
+    // Setup.
+    uint32_t n_run = 0;
+    uint32_t offset = 0;
+    int64_t n_variants = 0;
+    uint32_t n_alts = 0;
+
+    while (true) {
+        // Looking at most-significant byte for the target compression type.
+        const uint8_t type = (data[offset] & 1);
+        if (type == 0) {
+            // assert((*reinterpret_cast<const uint32_t*>(&data[offset]) & 1) == 0);
+            n_alts += __builtin_popcount(*reinterpret_cast<const uint32_t*>(&data[offset]) >> 1);
+            offset += sizeof(uint32_t);
+            n_run  += 31;
+            if (n_run >= n_samples) {
+                ++n_variants;
+                n_run = 0;
+                // std::cout << "AC=" << n_alts << '\n';
+                if (print && (n_variants % 2) == 0) printf("AC=%d\n",n_alts);
+                assert(n_alts <= 2*n_samples);
+                if ((n_variants % 2) == 0) n_alts = 0;
+            }
+        }
+        else if (type == 1) {
+            uint16_t val = *reinterpret_cast<const uint16_t*>(&data[offset]);
+            n_run  += (val >> 2);
+            n_alts += ((val >> 1) & 1) * (val >> 2);
+
+            // assert((*reinterpret_cast<const uint16_t*>(&data[offset]) & 1) == 1);
+            offset += sizeof(uint16_t);
+            if (n_run >= n_samples) {
+                ++n_variants;
+                n_run = 0;
+                // std::cout << "AC=" << n_alts << '\n';
+                if (print && (n_variants % 2) == 0) printf("AC=%d\n",n_alts);
+                assert(n_alts <= 2*n_samples);
+                if ((n_variants % 2) == 0) n_alts = 0;
+            }
+        }
+        
+        // Exit conditions.
+        if (offset == data_len) {
+            // std::cerr << "exit correct" << std::endl;
+            break;
+        }
+        if (offset > data_len) {
+            std::cerr << "overflow error: " << offset << "/" << data_len << std::endl;
+            exit(1);
+        }
+    }
+
+    // std::cerr << "Number of variants=" << (n_variants>>1) << std::endl;
+
+    return n_variants;
+}
 
 struct Buffer {
     Buffer() noexcept : len(0), cap(0), data(nullptr){}
@@ -87,8 +234,30 @@ public:
 
     //
     int32_t RemapGenotypeEOV(uint8_t* data, const uint32_t len);
+
+    //
+#if DEBUG_PBWT
+    int32_t DebugPBWT() {
+        std::shared_ptr<PBWT> pbwt1 = std::make_shared<PBWT>(n_samples, 2);  
+        std::shared_ptr<PBWT> pbwt2 = std::make_shared<PBWT>(n_samples, 2);  
+
+        uint32_t offset1 = 0, offset2 = 0;
+        for (int i = 0; i < processed_lines_local; ++i) {
+            pbwt1->ReverseUpdate(&debug_pbwt[0].buffer[offset1]);
+            pbwt2->ReverseUpdate(&debug_pbwt[1].buffer[offset2]);
+            offset1 += n_samples;
+            offset2 += n_samples;
+        }
+
+        return 1;
+    }
+#endif
+
+    //
+    virtual bool CheckLimit() const =0;
+    virtual int Compress() =0;
     
-public:
+protected:
     int64_t  n_samples;
     uint32_t block_size;
     uint32_t processed_lines;
@@ -101,9 +270,12 @@ public:
 
     uint32_t alts[256];
 
-    GeneralPBWTModel base_models[4];
-    GeneralPBWTModel base_models_complex[2];
+    GeneralPBWTModel base_models[4]; // 0-1: diploid biallelic no-missing; 2-3: diploid biallelic missing
+    GeneralPBWTModel base_models_complex[2]; // 0-1: diploid n-allelic
     GeneralPBWTModel* models;
+#if DEBUG_PBWT
+    DataDigest debug_pbwt[2];
+#endif
 };
 
 class GenotypeCompressorModelling : public GenotypeCompressor {
@@ -111,10 +283,10 @@ public:
     GenotypeCompressorModelling(int64_t n_s);
     ~GenotypeCompressorModelling();
 
-    bool CheckLimit() const;
+    bool CheckLimit() const override;
 
     //
-    int Encode(bcf1_t* bcf, const bcf_hdr_t* hdr) override;
+    // int Encode(bcf1_t* bcf, const bcf_hdr_t* hdr) override;
 
 private:
     // Diploid wrapper.
@@ -129,9 +301,9 @@ private:
     // 2N any M (up to 16)
     int Encode2NXM(uint8_t* data, const int32_t n_data) override;
 
-    int Compress();
+    int Compress() override;
 
-public:
+private:
     GeneralPBWTModel nonsense[2];
 };
 
@@ -150,22 +322,22 @@ public:
     // Encode data using htslib.
     int Encode2N(bcf1_t* bcf, const bcf_hdr_t* hdr) override { return(-1); }
 
-    bool CheckLimit() const;
+    bool CheckLimit() const override;
 
-    int Compress();
+    int Compress() override;
     int EncodeRLEBitmap(const int target);
 
-protected:
+private:
     // Compression strategy used.
     enum class CompressionStrategy : uint32_t { ZSTD = 0, LZ4 = 1 };
 
-public:
+private:
     CompressionStrategy strategy;
-    uint64_t bytes_in1;
-    uint64_t bytes_out_zstd1, bytes_out_lz4;
+    uint64_t bytes_in1;//debug
+    uint64_t bytes_out_zstd1, bytes_out_lz4;//debug
     Buffer buf_wah[2];
-    std::vector<uint32_t> gt_width;
-    PBWT base_pbwt[2];
+    std::vector<uint32_t> gt_width; // debug
+    PBWT base_pbwt[2]; // diploid biallelic no-missing models
 };
 
 class GTCompressor {

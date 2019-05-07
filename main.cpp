@@ -1,4 +1,3 @@
-// #include "r32x16b_avx2.h"
 #include "range_coder.h"
 #include "frequency_model.h"
 #include "vcf_reader.h"
@@ -13,6 +12,7 @@
 #include <chrono>
 
 #include "gt_compressor.h"
+#include "gt_decompressor.h"
 
 void ReadVcfGT (const std::string& filename) {
     std::unique_ptr<tachyon::io::VcfReader> reader = tachyon::io::VcfReader::FromFile(filename,8);
@@ -21,7 +21,7 @@ void ReadVcfGT (const std::string& filename) {
         exit(1);
     }
 
-    // std::cerr << "samples=" << reader->n_samples_ << std::endl;
+    std::cerr << "Samples in VCF=" << reader->n_samples_ << std::endl;
 
     // AD: temp
     // FormatAlelleDepth fmt_ad(10000,reader->n_samples_,true);
@@ -29,16 +29,7 @@ void ReadVcfGT (const std::string& filename) {
     // GenotypeCompressorModelling gtperm(reader->n_samples_);
     // GenotypeCompressorRLEBitmap gtperm2(reader->n_samples_);
     GTCompressor gtcomp;
-    gtcomp.SetStrategy(GTCompressor::CompressionStrategy::CONTEXT_MODEL, reader->n_samples_);
-
-    // temp
-    // unsigned char* buf_in1 = new unsigned char[20000000];
-    // unsigned char* buf_in2 = new unsigned char[20000000];
-    // unsigned char* buf_out = new unsigned char[25000000];
-    // unsigned int n_buf1_in = 0, n_buf2_in = 0;
-    // unsigned int n_buf_out = 0;
-
-    // uint64_t in1 = 0, in2 = 0;
+    gtcomp.SetStrategy(GTCompressor::CompressionStrategy::RLE_BITMAP, reader->n_samples_);
     
     // While there are bcf records available.
     while (reader->Next()) {
@@ -50,57 +41,11 @@ void ReadVcfGT (const std::string& filename) {
         //ref = REF = strdup(line->d.allele[0]);
         //while ( (*ref = toupper(*ref)) ) ++ref ;
 
-        //
-        // const uint8_t* gts = reader->bcf1_->d.fmt[0].p;
-        // uint8_t gt1 = 0, gt2 = 0;
-        // for (int i = 0; i + 16 <= 2*reader->n_samples_; i += 16) {
-        //     for (int j = 0; j + 2 < 16; j += 2) {
-        //         gt1 <<= 1;
-        //         gt1 = (gt1 | ((gts[i+j] >> 1) - 1));
-        //     }
-
-        //     for (int j = 1; j + 2 < 16; j += 2) {
-        //         gt2 <<= 1;
-        //         gt2 = (gt2 | ((gts[i+j] >> 1) - 1));
-        //     }
-
-        //     buf_in1[n_buf1_in++] = gt1;
-        //     buf_in2[n_buf2_in++] = gt2;
-        //     // std::cerr << std::bitset<8>(gt1) << " " << std::bitset<8>(gt2) << std::endl;
-        //     gt1 = 0, gt2 = 0;
-        // }
-
-        // if (n_buf1_in > (20000000 - 10000)) {
-        //     unsigned int out_size = 25000000;
-        //     std::cerr << "here=" << n_buf1_in << std::endl;
-        //     memset(buf_out, 0, 25000000);
-        //     uint8_t* ret = rans_compress_O0_32x16(buf_in1, n_buf1_in, buf_out, &out_size);
-        //     // int ret = rans_test(buf_in1, n_buf1_in, buf_out, &out_size);
-        //     // std::cerr << "ret=" << ret << std::endl;
-        //     std::cerr << "cleft= " << n_buf1_in*8 << "->" << out_size << " (" << (float)(n_buf1_in*8)/out_size << "-fold)" << std::endl;
-        //     in1 += out_size;
-        //     out_size = 25000000;
-        //     memset(buf_out, 0, 25000000);
-        //     ret = rans_compress_O0_32x16(buf_in2, n_buf2_in, buf_out, &out_size);
-        //     std::cerr << "cright= " << n_buf2_in*8 << "->" << out_size << " (" << (float)(n_buf2_in*8)/out_size << "-fold)" << std::endl;
-        //     in2 += out_size;
-
-        //     n_buf1_in = 0;
-        //     n_buf2_in = 0;
-        // }
-        //
-
         // std::cerr << reader->bcf1_->pos+1 << std::endl;
         // gtperm.Encode(reader->bcf1_, reader->header_);
         // gtperm2.Encode(reader->bcf1_, reader->header_);
         gtcomp.Encode(reader->bcf1_, reader->header_);
     }
-
-    // std::cerr << "total=" << in1 << "," << in2 << std::endl;
-
-    // delete[] buf_in1;
-    // delete[] buf_in2;
-    // delete[] buf_out;
 
     // gtperm.Compress(); // Final
     // gtperm2.Compress(); // Final
@@ -113,7 +58,7 @@ void ReadVcfGT (const std::string& filename) {
 
 int main(int argc, char** argv) {
 #if 0
-    std::ifstream f("/media/mdrk/NVMe/gt_hrc11.bin2.lz4", std::ios::in | std::ios::binary | std::ios::ate);
+    std::ifstream f("/media/mdrk/NVMe/gt_hrc20.bin2.lz4", std::ios::in | std::ios::binary | std::ios::ate);
     if (f.good() == false) {
         std::cerr << "Failed to open" << std::endl;
         return 1;
@@ -126,18 +71,73 @@ int main(int argc, char** argv) {
     uint8_t* buffer     = new uint8_t[dest_capacity];
     uint8_t* out_buffer = new uint8_t[dest_capacity];
     int64_t n_variants  = 0;
+    uint32_t n_variants_block  = 0;
 
     uint64_t tot_decomp = 0;
+    uint8_t* out = new uint8_t[32470];
+    uint8_t* vcf_buffer = new uint8_t[32470*8];
+    PBWT pbwt1(32470, 2);
+    PBWT pbwt2(32470, 2);
+
     std::chrono::high_resolution_clock::time_point t1 = std::chrono::high_resolution_clock::now();
 
     while (f.good()) {
+        f.read((char*)&n_variants_block,  sizeof(uint32_t));
         f.read((char*)&uncompressed_size, sizeof(size_t));
-        f.read((char*)&compressed_size, sizeof(size_t));
+        f.read((char*)&compressed_size,   sizeof(size_t));
         f.read((char*)buffer, compressed_size);
         std::cerr << uncompressed_size << "," << compressed_size << " -> " << f.tellg() << "/" << filesize << std::endl;
         int ret = Lz4Decompress(buffer, compressed_size, out_buffer, dest_capacity);
         assert(ret == uncompressed_size);
-        n_variants += DebugRLEBitmap(out_buffer, uncompressed_size, 32470);
+        // n_variants += DebugRLEBitmap(out_buffer, uncompressed_size, 32470, true);
+
+        //
+        std::shared_ptr<GenotypeDecompressorRLEBitmap> debug1 = std::make_shared<GenotypeDecompressorRLEBitmap>(out_buffer, uncompressed_size, 2*n_variants_block, 32470);
+        
+        pbwt1.reset();
+        pbwt2.reset();
+
+        uint32_t n_debug = 0;
+        // std::cerr << std::dec;
+        while (true) {
+            int32_t alts1 = debug1->DecodeRLEBitmap(out);
+            if (alts1 < 0) break;
+            pbwt1.ReverseUpdate(out);
+            assert(alts1 == pbwt1.n_queue[1]);
+            int32_t alts2 = debug1->DecodeRLEBitmap(out);
+            pbwt2.ReverseUpdate(out);
+            assert(alts2 == pbwt2.n_queue[1]);
+            ++n_variants; ++n_debug;
+            std::cerr << "AC=" << alts1+alts2 << std::endl;
+
+            vcf_buffer[0] = pbwt1.prev[0] + '0';
+            vcf_buffer[1] = '|';
+            vcf_buffer[2] = pbwt2.prev[0] + '0';
+            // vcf_buffer[2] = '0';
+            
+            int j = 3;
+            for (int i = 1; i < 32470; ++i, j += 4) {
+                vcf_buffer[j+0] = '\t';
+                vcf_buffer[j+1] = pbwt1.prev[i] + '0';
+                vcf_buffer[j+2] = '|';
+                vcf_buffer[j+3] = pbwt2.prev[i] + '0';
+                // vcf_buffer[j+3] = '0';
+            }
+            vcf_buffer[j++] = '\n';
+            std::cout.write((char*)vcf_buffer, j);
+
+            // int j = 0;
+            // for (int i = 0; i < 32470; ++i, j += 2) {
+            //     vcf_buffer[j+0] = pbwt1.prev[i];
+            //     vcf_buffer[j+1] = pbwt2.prev[i];
+            // }
+            // std::cout.write((char*)vcf_buffer, j);
+
+        }
+        assert(n_variants_block == n_debug);
+       
+        // std::cerr << "debug=" << n_debug << std::endl;
+        //
 
         if (f.tellg() == filesize) break;
     }
@@ -147,14 +147,16 @@ int main(int argc, char** argv) {
 
     delete[] buffer;
     delete[] out_buffer;
+    delete[] out;
+    delete[] vcf_buffer;
 
-    return 0;
+    return EXIT_SUCCESS;
 #endif
 
-    if (argc == 1) return(1);
+    if (argc == 1) return(EXIT_FAILURE);
     else {
         std::cerr << std::string(argv[1]) << std::endl;
         ReadVcfGT(std::string(argv[1]));
-        return(0);
+        return(EXIT_SUCCESS);
     }
 }

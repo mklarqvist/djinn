@@ -120,10 +120,7 @@ int PBWT::Update(const uint8_t* arr, uint32_t stride) {
     for (int i = 0; i < n_samples; ++i) {
         const uint8_t& gt = BCF_UNPACK_GENOTYPE(arr[ppa[i] * stride]);
         assert(gt < n_symbols);
-        for (int j = 0; j < n_symbols; ++j) {
-            if (gt == j)
-                queue[j][n_queue[j]++] = ppa[i];
-        }
+        queue[gt][n_queue[gt]++] = ppa[i];
         prev[i] = gt;
         // std::cerr << " " << (int)gt;
     }
