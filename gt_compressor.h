@@ -59,8 +59,9 @@ struct DataDigest {
             bool init_passed = this->InitDigest();
             if (!init_passed) return false;
         }
+
         // std::cerr << "Adding: " << len << "->" << len+data_len << "(" << data_len << ")" << "/" << capac << std::endl;
-        assert(len+data_len < capac);
+        assert(len + data_len < capac);
         memcpy(&buffer[len], data, data_len);
         len += data_len;
 
@@ -75,13 +76,15 @@ struct DataDigest {
             bool init_passed = this->InitDigest();
             if (!init_passed) return false;
         }
-        // std::cerr << "Adding: " << len << "->" << len+data_len << "(" << data_len << ")" << "/" << capac << std::endl;
-        // assert(len+data_len < capac);
+
+        // if (len + (data_len/stride) >= capac) std::cerr << "Adding: " << len << "->" << len+(data_len/stride) << "(" << data_len/stride << ")" << "/" << capac << std::endl;
+        assert(len + (data_len/stride) < capac);
         // memcpy(&buffer[len], data, data_len);
         // len += data_len;
         for (int i = 0; i + stride <= data_len; i += stride) {
             buffer[len++] = data[i];
         }
+        // assert(len < capac);
 
 		if (!SHA512_Update(&context, data, data_len))
 			return false;
@@ -96,7 +99,7 @@ struct DataDigest {
 			return false;
 
         has_initialized = false;
-        len = 0;
+        // len = 0;
 		return true;
 	}
 
@@ -238,7 +241,7 @@ private:
     GeneralPBWTModel base_models[4]; // 0-1: diploid biallelic no-missing; 2-3: diploid biallelic missing
     GeneralPBWTModel base_models_complex[2]; // 0-1: diploid n-allelic
     GeneralPBWTModel* models;
-    GeneralPBWTModel nonsense[2];
+    GeneralPBWTModel base_model_bitmaps[2];
 };
 
 class GenotypeCompressorRLEBitmap : public GenotypeCompressor {

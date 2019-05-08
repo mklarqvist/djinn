@@ -29,8 +29,8 @@ void ReadVcfGT (const std::string& filename) {
     // GenotypeCompressorModelling gtperm(reader->n_samples_);
     // GenotypeCompressorRLEBitmap gtperm2(reader->n_samples_);
     GTCompressor gtcomp;
-    gtcomp.SetStrategy(GTCompressor::CompressionStrategy::RLE_BITMAP, reader->n_samples_);
-    gtcomp.SetStrategy(GenotypeCompressor::CompressionStrategy::LZ4);
+    gtcomp.SetStrategy(GTCompressor::CompressionStrategy::CONTEXT_MODEL, reader->n_samples_);
+    // gtcomp.SetStrategy(GenotypeCompressor::CompressionStrategy::LZ4);
     
     // While there are bcf records available.
     while (reader->Next()) {

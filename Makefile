@@ -27,7 +27,7 @@ DEBUG_FLAGS =
 # Default target
 all: gt
 
-debug: DEBUG_FLAGS += -DDEBUG_PBWT -DDEBUG_WAH -g
+debug: DEBUG_FLAGS += -DDEBUG_PBWT -DDEBUG_WAH -DDEBUG_CONTEXT -g
 debug: gt
 
 # Generic rules
