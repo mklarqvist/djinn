@@ -22,16 +22,20 @@ CPPFLAGS   = -std=c++0x $(OPTFLAGS) $(DEBUG_FLAGS)
 CPP_SOURCE = frequency_model.cpp main.cpp pbwt.cpp range_coder.cpp gt_compressor.cpp
 C_SOURCE   = 
 OBJECTS    = $(C_SOURCE:.c=.o) $(CPP_SOURCE:.cpp=.o)
+DEBUG_FLAGS =
 
 # Default target
 all: gt
 
+debug: DEBUG_FLAGS += -DDEBUG_PBWT -DDEBUG_WAH -g
+debug: gt
+
 # Generic rules
 %.o: %.c
-	$(CC) $(CFLAGS)-c -o $@ $<
+	$(CC) $(CFLAGS) -c -o $@ $<
 
 %.o: %.cpp
-	$(CXX) $(CPPFLAGS)-c -o $@ $<
+	$(CXX) $(CPPFLAGS) -c -o $@ $<
 
 gt: $(OBJECTS)
 	$(CXX) $(CPPFLAGS) $(OBJECTS) -lzstd -llz4 -lhts -lcrypto -o gt
@@ -40,4 +44,4 @@ clean:
 	rm -f $(OBJECTS)
 	rm -f gt
 
-.PHONY: all clean
+.PHONY: all clean debug

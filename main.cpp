@@ -30,6 +30,7 @@ void ReadVcfGT (const std::string& filename) {
     // GenotypeCompressorRLEBitmap gtperm2(reader->n_samples_);
     GTCompressor gtcomp;
     gtcomp.SetStrategy(GTCompressor::CompressionStrategy::RLE_BITMAP, reader->n_samples_);
+    gtcomp.SetStrategy(GenotypeCompressor::CompressionStrategy::LZ4);
     
     // While there are bcf records available.
     while (reader->Next()) {
@@ -58,7 +59,7 @@ void ReadVcfGT (const std::string& filename) {
 
 int main(int argc, char** argv) {
 #if 0
-    std::ifstream f("/media/mdrk/NVMe/gt_hrc20.bin2.lz4", std::ios::in | std::ios::binary | std::ios::ate);
+    std::ifstream f("/media/mdrk/NVMe/gt_hrc11.bin2.lz4", std::ios::in | std::ios::binary | std::ios::ate);
     if (f.good() == false) {
         std::cerr << "Failed to open" << std::endl;
         return 1;
@@ -108,12 +109,11 @@ int main(int argc, char** argv) {
             pbwt2.ReverseUpdate(out);
             assert(alts2 == pbwt2.n_queue[1]);
             ++n_variants; ++n_debug;
-            std::cerr << "AC=" << alts1+alts2 << std::endl;
+            // std::cerr << "AC=" << alts1+alts2 << std::endl;
 
             vcf_buffer[0] = pbwt1.prev[0] + '0';
             vcf_buffer[1] = '|';
             vcf_buffer[2] = pbwt2.prev[0] + '0';
-            // vcf_buffer[2] = '0';
             
             int j = 3;
             for (int i = 1; i < 32470; ++i, j += 4) {
@@ -121,7 +121,6 @@ int main(int argc, char** argv) {
                 vcf_buffer[j+1] = pbwt1.prev[i] + '0';
                 vcf_buffer[j+2] = '|';
                 vcf_buffer[j+3] = pbwt2.prev[i] + '0';
-                // vcf_buffer[j+3] = '0';
             }
             vcf_buffer[j++] = '\n';
             std::cout.write((char*)vcf_buffer, j);

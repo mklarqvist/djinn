@@ -30,8 +30,9 @@
 
 #include <openssl/sha.h>
 
+// Use make debug instead.
 // #define DEBUG_PBWT 1
-#define DEBUG_WAH 1
+// #define DEBUG_WAH 1
 
 struct DataDigest {
     DataDigest() : len(0), capac(0), buffer(nullptr), has_initialized(false) {}
@@ -108,71 +109,6 @@ struct DataDigest {
 	uint8_t    digest[64];
 };
 
-// temp
-// Ascertain that the binary output can be used to restore the input data.
-// Computes allele counts as an example.
-static
-int64_t DebugRLEBitmap(const uint8_t* data, const uint32_t data_len, const uint32_t n_samples, const bool print = false) {
-    // Data.
-    // const uint8_t* data = buf_wah[target].data;
-    // const uint32_t data_len = buf_wah[target].len;
-    
-    // Setup.
-    uint32_t n_run = 0;
-    uint32_t offset = 0;
-    int64_t n_variants = 0;
-    uint32_t n_alts = 0;
-
-    while (true) {
-        // Looking at most-significant byte for the target compression type.
-        const uint8_t type = (data[offset] & 1);
-        if (type == 0) {
-            // assert((*reinterpret_cast<const uint32_t*>(&data[offset]) & 1) == 0);
-            n_alts += __builtin_popcount(*reinterpret_cast<const uint32_t*>(&data[offset]) >> 1);
-            offset += sizeof(uint32_t);
-            n_run  += 31;
-            if (n_run >= n_samples) {
-                ++n_variants;
-                n_run = 0;
-                // std::cout << "AC=" << n_alts << '\n';
-                if (print && (n_variants % 2) == 0) printf("AC=%d\n",n_alts);
-                assert(n_alts <= 2*n_samples);
-                if ((n_variants % 2) == 0) n_alts = 0;
-            }
-        }
-        else if (type == 1) {
-            uint16_t val = *reinterpret_cast<const uint16_t*>(&data[offset]);
-            n_run  += (val >> 2);
-            n_alts += ((val >> 1) & 1) * (val >> 2);
-
-            // assert((*reinterpret_cast<const uint16_t*>(&data[offset]) & 1) == 1);
-            offset += sizeof(uint16_t);
-            if (n_run >= n_samples) {
-                ++n_variants;
-                n_run = 0;
-                // std::cout << "AC=" << n_alts << '\n';
-                if (print && (n_variants % 2) == 0) printf("AC=%d\n",n_alts);
-                assert(n_alts <= 2*n_samples);
-                if ((n_variants % 2) == 0) n_alts = 0;
-            }
-        }
-        
-        // Exit conditions.
-        if (offset == data_len) {
-            // std::cerr << "exit correct" << std::endl;
-            break;
-        }
-        if (offset > data_len) {
-            std::cerr << "overflow error: " << offset << "/" << data_len << std::endl;
-            exit(1);
-        }
-    }
-
-    // std::cerr << "Number of variants=" << (n_variants>>1) << std::endl;
-
-    return n_variants;
-}
-
 struct Buffer {
     Buffer() noexcept : len(0), cap(0), data(nullptr){}
     Buffer(const size_t size) noexcept : len(0), cap(size), data(new uint8_t[size]){}
@@ -213,7 +149,9 @@ struct Buffer {
     uint8_t* data;
 };
 
-static uint8_t temp_unpack[3] = {2, 0, 1};
+
+// Forward declare for friendship
+class GTCompressor;
 
 class GenotypeCompressor {
 public:
@@ -226,36 +164,31 @@ public:
     virtual int Encode2N2M(uint8_t* data, const int32_t n_data) =0;
     virtual int Encode2N2MC(uint8_t* data, const int32_t n_data) =0;
     virtual int Encode2N2MM(uint8_t* data, const int32_t n_data) =0;
-    virtual int Encode2NXM(uint8_t* data, const int32_t n_data) =0;
+    virtual int Encode2NXM(uint8_t* data, const int32_t n_data, const int32_t n_alleles) =0;
 
     // Encode data using htslib.
     virtual int Encode(bcf1_t* bcf, const bcf_hdr_t* hdr);
     virtual int Encode2N(bcf1_t* bcf, const bcf_hdr_t* hdr) =0;
 
+    // Return compressed output
+    // virtual int Compress2N2MC(uint8_t* out, uint32_t l_out) =0;
+    // virtual int Compress2N2MM(uint8_t* out, uint32_t l_out) =0;
+    // virtual int Compress2NXM(uint8_t* out, uint32_t l_out) =0;
+    // virtual uint8_t* Compress2N2MC() =0;
+    // virtual uint8_t* Compress2N2MM() =0;
+    // virtual uint8_t* Compress2NXM() =0;
+
     //
     int32_t RemapGenotypeEOV(uint8_t* data, const uint32_t len);
 
     //
-#if DEBUG_PBWT
-    int32_t DebugPBWT() {
-        std::shared_ptr<PBWT> pbwt1 = std::make_shared<PBWT>(n_samples, 2);  
-        std::shared_ptr<PBWT> pbwt2 = std::make_shared<PBWT>(n_samples, 2);  
-
-        uint32_t offset1 = 0, offset2 = 0;
-        for (int i = 0; i < processed_lines_local; ++i) {
-            pbwt1->ReverseUpdate(&debug_pbwt[0].buffer[offset1]);
-            pbwt2->ReverseUpdate(&debug_pbwt[1].buffer[offset2]);
-            offset1 += n_samples;
-            offset2 += n_samples;
-        }
-
-        return 1;
-    }
-#endif
-
-    //
     virtual bool CheckLimit() const =0;
     virtual int Compress() =0;
+
+public:
+    // Compression strategy used.
+    friend GTCompressor; // Wrapper class friendship.
+    enum class CompressionStrategy : uint32_t { ZSTD = 0, LZ4 = 1, CONTEXT = 2 };
     
 protected:
     int64_t  n_samples;
@@ -264,17 +197,15 @@ protected:
     uint32_t processed_lines_local;
     
     uint64_t bytes_in, bytes_out;
+    CompressionStrategy strategy;
     
     Buffer buf_compress;
     Buffer buf_raw;
 
     uint32_t alts[256];
 
-    GeneralPBWTModel base_models[4]; // 0-1: diploid biallelic no-missing; 2-3: diploid biallelic missing
-    GeneralPBWTModel base_models_complex[2]; // 0-1: diploid n-allelic
-    GeneralPBWTModel* models;
 #if DEBUG_PBWT
-    DataDigest debug_pbwt[2];
+    DataDigest debug_pbwt[6]; // 2 complete, 2 missing, 2 complex
 #endif
 };
 
@@ -299,11 +230,14 @@ private:
     int Encode2N2MM(uint8_t* data, const int32_t n_data) override;
 
     // 2N any M (up to 16)
-    int Encode2NXM(uint8_t* data, const int32_t n_data) override;
+    int Encode2NXM(uint8_t* data, const int32_t n_data, const int32_t n_alleles) override;
 
     int Compress() override;
 
 private:
+    GeneralPBWTModel base_models[4]; // 0-1: diploid biallelic no-missing; 2-3: diploid biallelic missing
+    GeneralPBWTModel base_models_complex[2]; // 0-1: diploid n-allelic
+    GeneralPBWTModel* models;
     GeneralPBWTModel nonsense[2];
 };
 
@@ -313,11 +247,10 @@ public:
     ~GenotypeCompressorRLEBitmap();
 
     int Encode2N(uint8_t* data, const int32_t n_data, const int32_t n_alleles) override;
-
-    int Encode2N2M(uint8_t* data, const int32_t n_data) override { return(-1); }
-    int Encode2N2MC(uint8_t* data, const int32_t n_data) override { return(-1); }
-    int Encode2N2MM(uint8_t* data, const int32_t n_data) override { return(-1); }
-    int Encode2NXM(uint8_t* data, const int32_t n_data) override { return(-1); }
+    int Encode2N2M(uint8_t* data, const int32_t n_data) override;
+    int Encode2N2MC(uint8_t* data, const int32_t n_data) override;
+    int Encode2N2MM(uint8_t* data, const int32_t n_data) override;
+    int Encode2NXM(uint8_t* data, const int32_t n_data, const int32_t n_alleles) override;
 
     // Encode data using htslib.
     int Encode2N(bcf1_t* bcf, const bcf_hdr_t* hdr) override { return(-1); }
@@ -325,19 +258,17 @@ public:
     bool CheckLimit() const override;
 
     int Compress() override;
-    int EncodeRLEBitmap(const int target);
+    int EncodeRLEBitmap2N2MC(const int target);
+    int EncodeRLEBitmap2N2MM(const int target);
+    int EncodeRLEBitmap2NXM(const int target);
 
 private:
-    // Compression strategy used.
-    enum class CompressionStrategy : uint32_t { ZSTD = 0, LZ4 = 1 };
-
-private:
-    CompressionStrategy strategy;
     uint64_t bytes_in1;//debug
     uint64_t bytes_out_zstd1, bytes_out_lz4;//debug
-    Buffer buf_wah[2];
+    Buffer buf_wah[3];
     std::vector<uint32_t> gt_width; // debug
-    PBWT base_pbwt[2]; // diploid biallelic no-missing models
+    PBWT base_pbwt[4]; // diploid biallelic no-missing models, missing + EOV
+    PBWT complex_pbwt[2]; // diploid n-allelic
 };
 
 class GTCompressor {
@@ -356,6 +287,17 @@ public:
             instance = std::make_shared<GenotypeCompressorRLEBitmap>(n_samples);
             this->strategy = strategy;
             break;
+        }
+        return *this;
+    }
+
+    GTCompressor& SetStrategy(GenotypeCompressor::CompressionStrategy strategy) {
+        if (instance.get() == nullptr) return(*this);
+
+        switch(strategy) {
+            case(GenotypeCompressor::CompressionStrategy::CONTEXT) : instance->strategy = GenotypeCompressor::CompressionStrategy::CONTEXT; break;
+            case(GenotypeCompressor::CompressionStrategy::LZ4) : instance->strategy = GenotypeCompressor::CompressionStrategy::LZ4; break;
+            case(GenotypeCompressor::CompressionStrategy::ZSTD) : instance->strategy = GenotypeCompressor::CompressionStrategy::ZSTD; break;
         }
         return *this;
     }

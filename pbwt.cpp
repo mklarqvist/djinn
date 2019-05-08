@@ -119,6 +119,7 @@ int PBWT::Update(const uint8_t* arr, uint32_t stride) {
 
     for (int i = 0; i < n_samples; ++i) {
         const uint8_t& gt = BCF_UNPACK_GENOTYPE(arr[ppa[i] * stride]);
+        if (gt >= n_symbols) std::cerr << "error=" << (int)arr[ppa[i]*stride] << "->" << (int)gt << ">=" << n_symbols << std::endl;
         assert(gt < n_symbols);
         queue[gt][n_queue[gt]++] = ppa[i];
         prev[i] = gt;
@@ -183,6 +184,39 @@ std::string PBWT::ToPrettyString() const {
     ret += "}";
     return(ret);
 }
+
+int PBWT::ReverseUpdate(const uint8_t* arr) {
+    memset(prev, 0, n_samples); // O(n)
+    memset(n_queue, 0, sizeof(uint32_t)*n_symbols);
+
+    // Restore + update PPA
+    // uint32_t n_skips = 0;
+    for (int i = 0; i < n_samples; ++i) { // Worst case O(n), average case O(n) with a smallish constant.
+        queue[arr[i]][n_queue[arr[i]]++] = ppa[i];
+        if (arr[i] == 0) {
+            // ++n_skips;
+            continue;
+        }
+        prev[ppa[i]] = arr[i]; // Unpermute data.
+    }
+
+    // Merge PPA queues.
+    uint32_t of = 0;
+    for (int j = 0; j < n_symbols; ++j) { // O(n)
+        memcpy(&ppa[of], queue[j], sizeof(uint32_t)*n_queue[j]);
+        // for (int i = 0; i < n_queue[j]; ++i, ++of) {
+        //     ppa[of] = queue[j][i];
+        // }
+        of += n_queue[j];
+    }
+    assert(of == n_samples);
+    ++n_steps;
+
+    // std::cerr << "nskips=" << n_skips << std::endl;
+
+    return 1;
+}
+
 
 /*======   Canonical representation   ======*/
 

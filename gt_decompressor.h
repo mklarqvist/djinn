@@ -77,7 +77,7 @@ public:
     bool GetGenotypeArrayCopy(uint8_t*& data) override { return false; }
 
     // Returns the number of alternative alleles if >= 0, otherwise is an error.
-    int DecodeRLEBitmap(uint8_t* out) {
+    int Decode2N2MC(uint8_t* out) {
         if (out == nullptr) return -1;
         if (cur_variant >= n_variants) return -2;
         if (cur_offset >= l_data) return -3;
@@ -85,7 +85,7 @@ public:
         uint32_t offset = cur_offset;
         uint32_t n_run = 0;
         uint32_t out_offset = 0;
-
+        // Number of alternative alleles observed.
         uint32_t n_alts = 0;
 
         while (true) {
@@ -99,7 +99,6 @@ public:
                 uint32_t val = *reinterpret_cast<const uint32_t*>(&data[offset]);
                 for (int i = 0; i < ulimit; ++i) {
                     val >>= 1;
-                    // out[out_offset++] = (val & 1);
                     out[out_offset + (ulimit - i - 1)] = (val & 1); // unpack in reverse order
                 }
                 out_offset += ulimit;
@@ -132,9 +131,127 @@ public:
         cur_offset = offset;
         ++cur_variant;
 
-        // std::cerr << "n_alts=" << n_alts << std::endl;
-
         return n_alts;
+    }
+
+    int Decode2N2MM(uint8_t* out) {
+        if (out == nullptr) return -1;
+        if (cur_variant >= n_variants) return -2;
+        if (cur_offset >= l_data) return -3;
+        
+        uint32_t offset = cur_offset;
+        uint32_t n_run = 0;
+        uint32_t out_offset = 0;
+        // Number of alternative alleles observed.
+        uint32_t n_alts = 0;
+
+        while (true) {
+            // Looking at most-significant byte for the target compression type.
+            const uint8_t type = (data[offset] & 1);
+            if (type == 0) {
+                uint32_t val = *reinterpret_cast<const uint32_t*>(&data[offset]);
+                assert((val & 1) == 0);
+                // std::cerr << "bitmap " << std::bitset<32>(val) << std::endl;
+                // n_alts += __builtin_popcount(*reinterpret_cast<const uint64_t*>(&data[offset]) >> 1);
+
+                const uint32_t ulimit = out_offset + 15 >= n_samples ? n_samples - out_offset : 15;
+                val >>= 1;
+                for (int i = 0; i < ulimit; ++i) {
+                    out[out_offset + (ulimit - i - 1)] = (val & 3); // unpack in reverse order
+                    val >>= 2;
+                }
+                out_offset += ulimit;
+                offset += sizeof(uint32_t);
+                
+                n_run  += 15;
+                if (n_run >= n_samples) {
+                    break;
+                }
+            }
+            else if (type == 1) {
+                uint16_t val = *reinterpret_cast<const uint16_t*>(&data[offset]);
+                assert((val & 1) == 1);
+                const uint16_t run_length = (val >> 3);
+                // std::cerr << "rle " << run_length << ":" << ((val >> 1) & 3) << std::endl;
+                n_run  += run_length;
+                // n_alts += ((val >> 1) & 1) * (val >> 2);
+
+                const uint8_t ref = (val >> 1) & 3;
+                // std::cerr << "addRLE=" << run_length << "->" << out_offset+run_length << "/" << n_samples << std::endl;
+                memset(&out[out_offset], ref, run_length);
+                out_offset += run_length;
+                offset += sizeof(uint16_t);
+
+                if (n_run >= n_samples) {
+                    break;
+                }
+            }
+        }
+
+        cur_offset = offset;
+        ++cur_variant;
+
+        return 1;
+    }
+
+    int Decode2NXM(uint8_t* out) {
+        if (out == nullptr) return -1;
+        if (cur_variant >= n_variants) return -2;
+        if (cur_offset >= l_data) return -3;
+        
+        uint32_t offset = cur_offset;
+        uint32_t n_run = 0;
+        uint32_t out_offset = 0;
+        // Number of alternative alleles observed.
+        uint32_t n_alts = 0;
+
+        while (true) {
+            // Looking at most-significant byte for the target compression type.
+            const uint8_t type = (data[offset] & 1);
+            if (type == 0) {
+                uint64_t val = *reinterpret_cast<const uint64_t*>(&data[offset]);
+                assert((val & 1) == 0);
+                // std::cerr << "bitmap " << std::bitset<64>(val) << std::endl;
+                // n_alts += __builtin_popcount(*reinterpret_cast<const uint64_t*>(&data[offset]) >> 1);
+
+                const uint64_t ulimit = out_offset + 15 >= n_samples ? n_samples - out_offset : 15;
+                val >>= 1;
+                for (int i = 0; i < ulimit; ++i) {
+                    out[out_offset + (ulimit - i - 1)] = (val & 15); // unpack in reverse order
+                    val >>= 4;
+                }
+                out_offset += ulimit;
+                offset += sizeof(uint64_t);
+                
+                n_run  += 15;
+                if (n_run >= n_samples) {
+                    break;
+                }
+            }
+            else if (type == 1) {
+                uint32_t val = *reinterpret_cast<const uint32_t*>(&data[offset]);
+                assert((val & 1) == 1);
+                const uint32_t run_length = (val >> 5);;
+                // std::cerr << "rle " << run_length << ":" << ((val >> 1) & 15) << std::endl;
+                n_run  += run_length;
+                // n_alts += ((val >> 1) & 1) * (val >> 2);
+
+                const uint8_t ref = (val >> 1) & 15;
+                // std::cerr << "addRLE=" << run_length << "->" << out_offset+run_length << "/" << n_samples << std::endl;
+                memset(&out[out_offset], ref, run_length);
+                out_offset += run_length;
+                offset += sizeof(uint32_t);
+
+                if (n_run >= n_samples) {
+                    break;
+                }
+            }
+        }
+
+        cur_offset = offset;
+        ++cur_variant;
+
+        return 1;
     }
 
 };
