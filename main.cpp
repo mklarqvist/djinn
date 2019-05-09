@@ -34,7 +34,7 @@ void ReadVcfGT (const std::string& filename) {
     GTCompressor gtcomp;
     // gtcomp.SetStrategy(GTCompressor::CompressionStrategy::CONTEXT_MODEL, reader->n_samples_);
     gtcomp.SetStrategy(GTCompressor::CompressionStrategy::RLE_BITMAP, reader->n_samples_);
-    gtcomp.SetStrategy(GenotypeCompressor::CompressionStrategy::LZ4);
+    gtcomp.SetStrategy(GenotypeCompressor::CompressionStrategy::ZSTD);
     // HaplotypeCompressor hcomp(2*reader->n_samples_);
     
     // While there are bcf records available.
@@ -66,7 +66,7 @@ void ReadVcfGT (const std::string& filename) {
 }
 
 int DecompressTest(const std::string& file, int type) {
-    uint32_t n_samples = 2548;
+    uint32_t n_samples = 32470;
 
     std::ifstream f(file, std::ios::in | std::ios::binary | std::ios::ate);
     if (f.good() == false) {
@@ -205,28 +205,28 @@ int DecompressTest(const std::string& file, int type) {
                 
                 // std::cerr << "AC=" << alts1+alts2 << std::endl;
 
-                vcf_buffer[0] = pbwt1.prev[0] + '0';
-                vcf_buffer[1] = '|';
-                vcf_buffer[2] = pbwt2.prev[0] + '0';
+                // vcf_buffer[0] = pbwt1.prev[0] + '0';
+                // vcf_buffer[1] = '|';
+                // vcf_buffer[2] = pbwt2.prev[0] + '0';
                 
-                int j = 3;
-                for (int i = 1; i < n_samples; ++i, j += 4) {
-                    vcf_buffer[j+0] = '\t';
-                    vcf_buffer[j+1] = pbwt1.prev[i] + '0';
-                    vcf_buffer[j+2] = '|';
-                    vcf_buffer[j+3] = pbwt2.prev[i] + '0';
-                }
-                vcf_buffer[j++] = '\n';
-                std::cout.write((char*)vcf_buffer, j);
-
-                // int j = 0;
-                // for (int i = 0; i < n_samples; ++i, j += 2) {
-                //     vcf_buffer[j+0] = pbwt1.prev[i];
-                //     vcf_buffer[j+1] = pbwt2.prev[i];
+                // int j = 3;
+                // for (int i = 1; i < n_samples; ++i, j += 4) {
+                //     vcf_buffer[j+0] = '\t';
+                //     vcf_buffer[j+1] = pbwt1.prev[i] + '0';
+                //     vcf_buffer[j+2] = '|';
+                //     vcf_buffer[j+3] = pbwt2.prev[i] + '0';
                 // }
-                
+                // vcf_buffer[j++] = '\n';
                 // std::cout.write((char*)vcf_buffer, j);
-                // std::cout.flush();
+
+                int j = 0;
+                for (int i = 0; i < n_samples; ++i, j += 2) {
+                    vcf_buffer[j+0] = pbwt1.prev[i];
+                    vcf_buffer[j+1] = pbwt2.prev[i];
+                }
+                
+                std::cout.write((char*)vcf_buffer, j);
+                std::cout.flush();
 
                 if (++n_debug == n_variants_block) break;
             }
