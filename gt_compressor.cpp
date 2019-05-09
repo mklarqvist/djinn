@@ -559,12 +559,7 @@ int GenotypeCompressorModelling::Compress() {
     processed_lines_local = 0;
     buf_raw.reset();
     bytes_out += p1 + p2 + p1E + p2E + p2X + p2X2 + praw + extra1 + extra2;
-    // bytes_out += p1 + p2 + p1E + p2E + extra1 + extra2;
     std::cerr << "[PROGRESS] " << bytes_in << "->" << bytes_out << " (" << (double)bytes_in/bytes_out << "-fold)" << std::endl;
-
-    // Debug compression:
-    // std::cerr << "[PROGRESS ZSTD] " << bytes_in1 << "->" << bytes_out_zstd1 << " (" << (double)bytes_in1/bytes_out_zstd1 << "-fold)" << std::endl;
-    // std::cerr << "[PROGRESS LZ4] " << bytes_in1 << "->" << bytes_out_lz4 << " (" << (double)bytes_in1/bytes_out_lz4 << "-fold)" << std::endl;
 
 #if DEBUG_PBWT
         // Reset digests.

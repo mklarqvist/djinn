@@ -25,10 +25,12 @@
 
 // temp
 #include <bitset>
+#include <chrono>
 #include "gt_decompressor.h"
 
 
 #include <openssl/sha.h>
+#include <roaring/roaring.h>
 
 // Use make debug instead.
 // #define DEBUG_PBWT 1
@@ -272,6 +274,83 @@ private:
     std::vector<uint32_t> gt_width; // debug
     PBWT base_pbwt[4]; // diploid biallelic no-missing models, missing + EOV
     PBWT complex_pbwt[2]; // diploid n-allelic
+};
+
+
+// roaring_bitmap_portable_size_in_bytes(roaring[k]);
+
+
+class HaplotypeCompressor {
+public:
+    HaplotypeCompressor(int64_t n_s) : n_samples(n_s), cum_pos(0), bitmaps(new roaring_bitmap_t*[n_samples])
+    {
+        for (int i = 0; i < n_samples; ++i) bitmaps[i] = roaring_bitmap_create();  
+    }
+
+    ~HaplotypeCompressor() {
+        for (int i = 0; i < n_samples; ++i) roaring_bitmap_free(bitmaps[i]);
+        delete[] bitmaps;
+    }
+
+    int Encode(bcf1_t* bcf, const bcf_hdr_t* hdr) {
+        if (bcf == NULL) return 0;
+        if (hdr == NULL) return 0;
+
+        const bcf_fmt_t* fmt = bcf_get_fmt(hdr, bcf, "GT");
+        if (fmt == NULL) return 0;
+        if (fmt->p_len != n_samples) {
+            std::cerr << "input is not divisible by 2" << std::endl;
+            return 0;
+        }
+
+        if (bcf->n_allele != 2) return 0;
+        assert(fmt->p_len == n_samples);
+
+        const uint8_t* data = fmt->p;
+        for (int i = 0; i < n_samples; ++i) {
+            uint8_t add = BCF_UNPACK_GENOTYPE(data[i]);
+            if (add == 1)
+                roaring_bitmap_add(bitmaps[i], cum_pos);
+        }
+        ++cum_pos;
+
+        return 1;
+    }
+    
+    void PrintSizes() const {
+        uint64_t total_cost = 0;
+        uint32_t max_size = 0;
+
+        for (int i = 0; i < n_samples; ++i) {
+            uint32_t cost = roaring_bitmap_size_in_bytes(bitmaps[i]);
+            max_size = std::max(max_size, cost);
+            std::cerr << "Haplotype-" << i << ": " << cost << std::endl;
+            total_cost += cost;
+        }
+        std::cerr << "Total cost=" << total_cost << std::endl;
+
+        std::chrono::high_resolution_clock::time_point t1 = std::chrono::high_resolution_clock::now();
+        for (int j = 0; j < n_samples; ++j) {
+            std::chrono::high_resolution_clock::time_point t3 = std::chrono::high_resolution_clock::now();
+            uint64_t sim = 0;
+            for (int i = j+1; i < n_samples; ++i) {
+                sim += roaring_bitmap_and_cardinality(bitmaps[i], bitmaps[j]);
+            }
+            std::chrono::high_resolution_clock::time_point t4 = std::chrono::high_resolution_clock::now();
+            auto time_span_inner = std::chrono::duration_cast<std::chrono::milliseconds>(t4 - t3);
+            std::cerr << j << "->" << sim << " time=" << time_span_inner.count() << "ms" << std::endl;
+        }
+        std::chrono::high_resolution_clock::time_point t2 = std::chrono::high_resolution_clock::now();
+        auto time_span = std::chrono::duration_cast<std::chrono::seconds>(t2 - t1);
+        std::cerr << "Total time=" << time_span.count() << "s" << std::endl;
+        
+
+    }
+
+public:
+    int64_t n_samples;
+    int64_t cum_pos;
+    roaring_bitmap_t** bitmaps;
 };
 
 class GTCompressor {
