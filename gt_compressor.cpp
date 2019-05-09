@@ -287,9 +287,7 @@ int GenotypeCompressorModelling::Encode2N2MC(uint8_t* data, const int32_t n_data
         } else base_model_bitmaps[1].EncodeSymbol(0);
         offset += step_size;
     }
-#endif
-
-#if 0
+#else
     base_models[0].ResetContext();
     for (int j = 0; j < n_samples; ++j) {
         // assert(base_models[0].pbwt->prev[j] < 2);
@@ -377,46 +375,93 @@ int GenotypeCompressorModelling::Encode2NXM(uint8_t* data, const int32_t n_data,
 
 int GenotypeCompressorModelling::Compress() {
 #if DEBUG_PBWT
-        // Finish digests.
-        for (int i = 0; i < 6; ++i) {
-            if (debug_pbwt[i].len) {
-                debug_pbwt[i].FinalizeDigest();
-                std::cerr << "Digest-" << i << "=" << std::hex << (int)debug_pbwt[i].digest[0];
-                for (int j = 1; j < 64; ++j) std::cerr << std::hex << (int)debug_pbwt[i].digest[j];
-                std::cerr << std::dec << std::endl;
-            }
+    // Finish digests.
+    for (int i = 0; i < 6; ++i) {
+        if (debug_pbwt[i].len) {
+            debug_pbwt[i].FinalizeDigest();
+            std::cerr << "Digest-" << i << "=" << std::hex << (int)debug_pbwt[i].digest[0];
+            for (int j = 1; j < 64; ++j) std::cerr << std::hex << (int)debug_pbwt[i].digest[j];
+            std::cerr << std::dec << std::endl;
         }
+    }
 #endif
 
-    // flush: temp
     int p1  = base_models[0].FinishEncoding();
     int p2  = base_models[1].FinishEncoding();
     int p1E = base_models[2].FinishEncoding();
     int p2E = base_models[3].FinishEncoding();
     int p2X = base_models_complex[0].FinishEncoding();
     int p2X2 = base_models_complex[1].FinishEncoding();
+    int extra1 = base_model_bitmaps[0].FinishEncoding();
+    int extra2 = base_model_bitmaps[1].FinishEncoding();
+
     int praw = ZstdCompress(buf_raw.data, buf_raw.len,
                             buf_compress.data, buf_compress.capacity(),
                             20);
 
-    base_models[0].Reset();
-    base_models[0].StartEncoding();
-    base_models[1].Reset();
-    base_models[1].StartEncoding();
-    base_models[2].Reset();
-    base_models[2].StartEncoding();
-    base_models[3].Reset();
-    base_models[3].StartEncoding();
-    base_models_complex[0].Reset();
-    base_models_complex[0].StartEncoding();
-    base_models_complex[1].Reset();
-    base_models_complex[1].StartEncoding();
+#if DEBUG_CONTEXT
+    if (debug_pbwt[0].len) {
+        assert(debug_pbwt[0].len > 0 && debug_pbwt[1].len > 0);
+        assert(debug_pbwt[0].len/n_samples == debug_pbwt[1].len/n_samples);
+        uint32_t n_cycles = debug_pbwt[0].len/n_samples;
 
-    int extra1 = base_model_bitmaps[0].FinishEncoding();
-    int extra2 = base_model_bitmaps[1].FinishEncoding();
+        GeneralPBWTModel debug_model1;
+        debug_model1.Construct(n_samples, 2);
+        GeneralPBWTModel debug_bitmap1;
+        debug_bitmap1.Construct(1, 2);
+        debug_model1.StartDecoding((uint8_t*)base_models[0].buffer);
+        debug_bitmap1.StartDecoding((uint8_t*)base_model_bitmaps[0].buffer);
+
+        // Setup.
+        int n_steps = 16;
+        const uint32_t step_size = std::ceil((float)n_samples / n_steps);
+
+        uint32_t offset = 0, offset_end = 0;
+        std::cerr << "cycles=" << n_cycles << "," << n_steps << " data=" << extra1 << " additions=" << base_model_bitmaps[0].n_additions << std::endl;
+        assert(base_model_bitmaps[0].n_additions == n_cycles*n_steps);
+        for (int i = 0; i < n_cycles; ++i) {
+            debug_bitmap1.ResetContext();
+            debug_model1.ResetContext();
+           
+            uint32_t l_offset = 0;
+
+            for (int j = 0; j < n_steps; ++j) {
+                uint16_t ret = debug_bitmap1.DecodeSymbol();
+                uint32_t lim = l_offset + step_size > n_samples ? n_samples - l_offset : step_size;
+                if (ret) {
+                    uint32_t nonzero = 0;
+                    for (int k = 0; k < lim; ++k) {
+                        int retgt = debug_model1.DecodeSymbol();
+                        nonzero += retgt;
+                    }
+                    assert(nonzero > 0);
+                }
+                l_offset += lim;
+            }
+            assert(l_offset == n_samples);
+        }
+        assert(debug_bitmap1.range_coder->InSize() == extra1);
+        std::cerr << debug_model1.range_coder->InSize() << "/" << p1 << std::endl;
+        assert(debug_model1.range_coder->InSize() == p1);
+    }
+#endif
+
+    base_models[0].Reset();
+    base_models[1].Reset();
+    base_models[2].Reset();
+    base_models[3].Reset();
+    base_models_complex[0].Reset();
+    base_models_complex[1].Reset();
     base_model_bitmaps[0].Reset();
-    base_model_bitmaps[0].StartEncoding();
     base_model_bitmaps[1].Reset();
+
+    base_models[0].StartEncoding();
+    base_models[1].StartEncoding();
+    base_models[2].StartEncoding();
+    base_models[3].StartEncoding();
+    base_models_complex[0].StartEncoding();
+    base_models_complex[1].StartEncoding();
+    base_model_bitmaps[0].StartEncoding();
     base_model_bitmaps[1].StartEncoding();
 
     std::cerr << "[WRITE] Variants=" << processed_lines_local << " 2N2MC=" << p1 << "," << p2 << " 2N2MM=" << p1E << "," << p2E << " 2NXM=" << p2X << "," << p2X2 << " RAW=" << praw << " SKIP=" << extra1 << "," << extra2 << std::endl;

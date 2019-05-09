@@ -71,7 +71,6 @@ public:
     void StartDecode();
     void FinishEncode();
     void FinishDecode();
-    void build_rcp_freq(void);
     void Encode (uint32_t cumFreq, uint32_t freq, uint32_t totFreq);
     uint32_t GetFreq (uint32_t totFreq);
     void Decode (uint32_t cumFreq, uint32_t freq, uint32_t totFreq);

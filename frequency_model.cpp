@@ -91,11 +91,11 @@ void FrequencyModel::EncodeSymbol(RangeCoder* rc, uint16_t sym) {
     }
 
     /* Keep approx sorted */
-    /*if (s[0].Freq > s[-1].Freq) {
-        SymFreqs t = s[0];
-        s[0]  = s[-1];
-        s[-1] = t;
-    }*/
+    // if (s[0].Freq > s[-1].Freq) {
+    //     SymFreqs t = s[0];
+    //     s[0]  = s[-1];
+    //     s[-1] = t;
+    // }
 }
 
 uint16_t FrequencyModel::DecodeSymbol(RangeCoder *rc) {
@@ -116,12 +116,12 @@ uint16_t FrequencyModel::DecodeSymbol(RangeCoder *rc) {
         Normalize();
 
     /* Keep approx sorted */
-    if (s[0].Freq > s[-1].Freq) {
-        SymFreqs t = s[0];
-        s[0] = s[-1];
-        s[-1] = t;
-        return t.Symbol;
-    }
+    // if (s[0].Freq > s[-1].Freq) {
+    //     SymFreqs t = s[0];
+    //     s[0] = s[-1];
+    //     s[-1] = t;
+    //     return t.Symbol;
+    // }
 
     return s->Symbol;
 }

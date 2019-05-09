@@ -35,17 +35,6 @@ void RangeCoder::FinishEncode()
 
 void RangeCoder::FinishDecode() {}
 
-#if DIV_RCP
-static uint64_t rcp[65536];
-void RangeCoder::build_rcp_freq(void) {
-    int i;
-    for (i = 1; i < 65536; i++)
-    rcp[i] = (((uint64_t)1<<32)) / i;
-}
-#else
-void RangeCoder::build_rcp_freq(void) {}
-#endif
-
 void RangeCoder::Encode(uint32_t cumFreq, uint32_t freq, uint32_t totFreq)
 {
     //fprintf(stderr, "                       RC %d+%d of %d\n", cumFreq, freq, totFreq);
@@ -96,7 +85,7 @@ uint32_t RangeCoder::GetFreq(uint32_t totFreq) {
 
 void RangeCoder::Decode(uint32_t cumFreq, uint32_t freq, uint32_t totFreq)
 {
-    //fprintf(stderr, "                       RC %d+%d of %d\n", cumFreq, freq, totFreq);
+    // fprintf(stderr, "                       RC %d+%d of %d\n", cumFreq, freq, totFreq);
 
     uint32_t temp = cumFreq * range;
     low   += temp;
