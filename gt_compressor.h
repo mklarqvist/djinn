@@ -201,7 +201,7 @@ protected:
     uint32_t processed_lines;
     uint32_t processed_lines_local;
     
-    uint64_t bytes_in, bytes_out;
+    uint64_t bytes_in, bytes_in_vcf, bytes_out;
     CompressionStrategy strategy;
     
     Buffer buf_compress;
@@ -268,7 +268,6 @@ public:
     int EncodeRLEBitmap2NXM(const int target);
 
 private:
-    uint64_t bytes_in1;//debug
     uint64_t bytes_out_zstd1, bytes_out_lz4;//debug
     Buffer buf_wah[3];
     std::vector<uint32_t> gt_width; // debug

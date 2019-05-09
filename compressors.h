@@ -11,8 +11,12 @@ int ZstdCompress(const uint8_t* in, uint32_t n_in, uint8_t* out, uint32_t out_ca
 
 static
 int ZstdDecompress(const uint8_t* in, uint32_t n_in, uint8_t* out, uint32_t out_capacity) {
-    int ret = ZSTD_decompress(out, out_capacity, in, n_in);
-    return(ret);
+    int compressed_data_size = ZSTD_decompress(out, out_capacity, in, n_in);
+    if (compressed_data_size < 0) {
+        std::cerr << "A negative result from ZSTD_decompress indicates a failure trying to compress the data.  See exit code (echo $?) for value returned." << std::endl;
+        exit(1);
+    }
+    return(compressed_data_size);
 }
 
 static

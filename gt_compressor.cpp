@@ -10,7 +10,7 @@ GenotypeCompressor::GenotypeCompressor(int64_t n_s) :
     block_size(8192),
     processed_lines(0),
     processed_lines_local(0),
-    bytes_in(0), bytes_out(0),
+    bytes_in(0), bytes_in_vcf(0), bytes_out(0),
     strategy(CompressionStrategy::LZ4)
 {
     buf_compress.resize(10000000);
@@ -39,6 +39,7 @@ int GenotypeCompressor::Encode(bcf1_t* bcf, const bcf_hdr_t* hdr) {
 
     // Keep track of input bytes.
     bytes_in += fmt->p_len;
+    bytes_in_vcf += fmt->p_len * 2 - 1; // (char)(sep)(char)(tab)
 
     // if (bcf->n_allele < 16 && bcf->n_allele > 2) {
     //     for (int i = 0; i < bcf->n_allele; ++i) {
@@ -388,18 +389,42 @@ int GenotypeCompressorModelling::Compress() {
     }
 #endif
 
-    int p1   = base_models[0].FinishEncoding();
-    int p2   = base_models[1].FinishEncoding();
-    int p1E  = base_models[2].FinishEncoding();
-    int p2E  = base_models[3].FinishEncoding();
-    int p2X  = base_models_complex[0].FinishEncoding();
-    int p2X2 = base_models_complex[1].FinishEncoding();
-    int extra1 = base_model_bitmaps[0].FinishEncoding();
-    int extra2 = base_model_bitmaps[1].FinishEncoding();
+    size_t p1   = base_models[0].FinishEncoding();
+    size_t p2   = base_models[1].FinishEncoding();
+    size_t p1E  = base_models[2].FinishEncoding();
+    size_t p2E  = base_models[3].FinishEncoding();
+    size_t p2X  = base_models_complex[0].FinishEncoding();
+    size_t p2X2 = base_models_complex[1].FinishEncoding();
+    size_t extra1 = base_model_bitmaps[0].FinishEncoding();
+    size_t extra2 = base_model_bitmaps[1].FinishEncoding();
 
-    int praw = ZstdCompress(buf_raw.data, buf_raw.len,
+    size_t praw = ZstdCompress(buf_raw.data, buf_raw.len,
                             buf_compress.data, buf_compress.capacity(),
                             20);
+
+    if (base_models[0].n_additions) {
+        // Temp: emit data to cout.
+        std::cout.write((char*)&processed_lines_local, sizeof(uint32_t));
+        std::cout.write((char*)&base_models[0].n_additions, sizeof(size_t));
+        std::cout.write((char*)&p1, sizeof(size_t));
+        std::cout.write((char*)base_models[0].buffer, p1);
+        std::cout.write((char*)&base_model_bitmaps[0].n_additions, sizeof(size_t));
+        std::cout.write((char*)&extra1, sizeof(size_t));
+        std::cout.write((char*)base_model_bitmaps[0].buffer, extra1);
+        std::cout.flush();
+    }
+
+    if (base_models[1].n_additions) {
+        // Temp: emit data to cout.
+        std::cout.write((char*)&processed_lines_local, sizeof(uint32_t));
+        std::cout.write((char*)&base_models[1].n_additions, sizeof(size_t));
+        std::cout.write((char*)&p2, sizeof(size_t));
+        std::cout.write((char*)base_models[1].buffer, p2);
+        std::cout.write((char*)&base_model_bitmaps[1].n_additions, sizeof(size_t));
+        std::cout.write((char*)&extra2, sizeof(size_t));
+        std::cout.write((char*)base_model_bitmaps[1].buffer, extra2);
+        std::cout.flush();
+    }
 
 #if DEBUG_PBWT
     if (debug_pbwt[0].len) {
@@ -559,7 +584,7 @@ int GenotypeCompressorModelling::Compress() {
     processed_lines_local = 0;
     buf_raw.reset();
     bytes_out += p1 + p2 + p1E + p2E + p2X + p2X2 + praw + extra1 + extra2;
-    std::cerr << "[PROGRESS] " << bytes_in << "->" << bytes_out << " (" << (double)bytes_in/bytes_out << "-fold)" << std::endl;
+    std::cerr << "[PROGRESS] " << bytes_in << "->" << bytes_out << " (" << (double)bytes_in/bytes_out << "-fold ubcf, " << (double)bytes_in_vcf/bytes_out << "-fold vcf)" << std::endl;
 
 #if DEBUG_PBWT
         // Reset digests.
@@ -574,7 +599,7 @@ int GenotypeCompressorModelling::Compress() {
 /*======   RLE-bitmap approach   ======*/
 
 GenotypeCompressorRLEBitmap::GenotypeCompressorRLEBitmap(int64_t n_s) : GenotypeCompressor(n_s),
-    bytes_in1(0), bytes_out_zstd1(0), bytes_out_lz4(0)
+    bytes_out_zstd1(0), bytes_out_lz4(0)
 {
     strategy = CompressionStrategy::LZ4;
 
@@ -877,7 +902,7 @@ int GenotypeCompressorRLEBitmap::Compress() {
 #endif
 
         if (strategy == CompressionStrategy::ZSTD) {
-            int praw = ZstdCompress(buf_wah[0].data, buf_wah[0].len,
+            size_t praw = ZstdCompress(buf_wah[0].data, buf_wah[0].len,
                                     buf_compress.data, buf_compress.capacity(),
                                     20);
 
@@ -889,7 +914,7 @@ int GenotypeCompressorRLEBitmap::Compress() {
             std::cout.write((char*)&buf_wah[0].len, sizeof(size_t));
             std::cout.write((char*)&praw, sizeof(size_t));
             std::cout.write((char*)buf_compress.data, praw);
-            std::cout.flush(); 
+            std::cout.flush();
         }
 
         if (strategy == CompressionStrategy::LZ4) {
@@ -949,7 +974,7 @@ int GenotypeCompressorRLEBitmap::Compress() {
 #endif
 
         if (strategy == CompressionStrategy::ZSTD) {
-            int praw = ZstdCompress(buf_wah[1].data, buf_wah[1].len,
+            size_t praw = ZstdCompress(buf_wah[1].data, buf_wah[1].len,
                                     buf_compress.data, buf_compress.capacity(),
                                     20);
 
@@ -961,7 +986,7 @@ int GenotypeCompressorRLEBitmap::Compress() {
             std::cout.write((char*)&buf_wah[1].len, sizeof(size_t));
             std::cout.write((char*)&praw, sizeof(size_t));
             std::cout.write((char*)buf_compress.data, praw);
-            std::cout.flush(); 
+            std::cout.flush();
         }
 
         if (strategy == CompressionStrategy::LZ4) {
@@ -1021,7 +1046,7 @@ int GenotypeCompressorRLEBitmap::Compress() {
         std::cerr << "debug=" << n_debug << std::endl;
 #endif
         if (strategy == CompressionStrategy::ZSTD) {
-            int praw = ZstdCompress(buf_wah[2].data, buf_wah[2].len,
+            size_t praw = ZstdCompress(buf_wah[2].data, buf_wah[2].len,
                                     buf_compress.data, buf_compress.capacity(),
                                     20);
 
@@ -1033,7 +1058,7 @@ int GenotypeCompressorRLEBitmap::Compress() {
             std::cout.write((char*)&buf_wah[2].len, sizeof(size_t));
             std::cout.write((char*)&praw, sizeof(size_t));
             std::cout.write((char*)buf_compress.data, praw);
-            std::cout.flush(); 
+            std::cout.flush();
         }
 
         if (strategy == CompressionStrategy::LZ4) {
@@ -1050,7 +1075,7 @@ int GenotypeCompressorRLEBitmap::Compress() {
             std::cout.write((char*)&buf_wah[2].len, sizeof(size_t));
             std::cout.write((char*)&plz4, sizeof(size_t));
             std::cout.write((char*)buf_compress.data, plz4);
-            std::cout.flush();        
+            std::cout.flush();     
         }
         // Reset
         buf_wah[2].len = 0;
@@ -1074,14 +1099,12 @@ int GenotypeCompressorRLEBitmap::Compress() {
     buf_raw.reset();
     
     // Debug compression:
-    std::cerr << "[PROGRESS ZSTD] " << bytes_in1 << "->" << bytes_out_zstd1 << " (" << (double)bytes_in1/bytes_out_zstd1 << "-fold)" << std::endl;
-    std::cerr << "[PROGRESS LZ4] "  << bytes_in1 << "->" << bytes_out_lz4 << " (" << (double)bytes_in1/bytes_out_lz4 << "-fold)" << std::endl;
+    std::cerr << "[PROGRESS ZSTD] " << bytes_in << "->" << bytes_out_zstd1 << " (" << (double)bytes_in/bytes_out_zstd1 << "-fold ubcf, " << (double)bytes_in_vcf/bytes_out_zstd1 << "-fold vcf)" << std::endl;
+    std::cerr << "[PROGRESS LZ4] "  << bytes_in << "->" << bytes_out_lz4 << " (" << (double)bytes_in/bytes_out_lz4 << "-fold ubcf, " << (double)bytes_in_vcf/bytes_out_lz4 << "-fold vcf)" << std::endl;
 }
 
 int GenotypeCompressorRLEBitmap::EncodeRLEBitmap2N2MC(const int target) {
     assert(target == 0 || target == 1);
-
-    bytes_in1 += n_samples;
 
     // RLE word -> 1 bit typing, 1 bit allele, word*8-2 bits for RLE
     const uint8_t* prev = base_pbwt[target].prev;
@@ -1195,8 +1218,6 @@ int GenotypeCompressorRLEBitmap::EncodeRLEBitmap2N2MC(const int target) {
 
 int GenotypeCompressorRLEBitmap::EncodeRLEBitmap2N2MM(const int target) {
     assert(target == 2 || target == 3);
-
-    bytes_in1 += n_samples;
 
     // RLE word -> 1 bit typing, 2 bit allele, word*8-3 bits for RLE
     const uint8_t* prev = base_pbwt[target].prev;
@@ -1316,8 +1337,6 @@ int GenotypeCompressorRLEBitmap::EncodeRLEBitmap2N2MM(const int target) {
 
 int GenotypeCompressorRLEBitmap::EncodeRLEBitmap2NXM(const int target) {
     assert(target == 0 || target == 1);
-
-    bytes_in1 += n_samples;
 
     // RLE word -> 1 bit typing, 4 bit allele, word*8-5 bits for RLE
     const uint8_t* prev = complex_pbwt[target].prev;

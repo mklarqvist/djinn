@@ -3,6 +3,7 @@
 // temp
 #include <iostream>
 #include <bitset>
+#include <cmath>//ceil
 
 PBWT::PBWT() :
     n_symbols(0),
@@ -11,7 +12,8 @@ PBWT::PBWT() :
     prev(nullptr),
     ppa(nullptr),
     n_queue(nullptr),
-    queue(nullptr)
+    queue(nullptr),
+    prev_bitmap(nullptr)
 {
 
 }
@@ -23,7 +25,8 @@ PBWT::PBWT(int64_t n_samples, int n_symbols) :
     prev(new uint8_t[n_samples]),
     ppa(new uint32_t[n_samples]),
     n_queue(new uint32_t[n_symbols]),
-    queue(new uint32_t*[n_symbols])
+    queue(new uint32_t*[n_symbols]),
+    prev_bitmap(nullptr)
 {
     assert(n_symbols > 1);
 
@@ -43,6 +46,7 @@ PBWT::~PBWT() {
 
     delete[] queue;
     delete[] n_queue;
+    delete[] prev_bitmap;
 }
 
 void PBWT::Initiate(int64_t n_s, int n_sym) {
@@ -198,6 +202,37 @@ int PBWT::ReverseUpdate(const uint8_t* arr) {
             continue;
         }
         prev[ppa[i]] = arr[i]; // Unpermute data.
+    }
+
+    // Merge PPA queues.
+    uint32_t of = 0;
+    for (int j = 0; j < n_symbols; ++j) { // O(n)
+        memcpy(&ppa[of], queue[j], sizeof(uint32_t)*n_queue[j]);
+        // for (int i = 0; i < n_queue[j]; ++i, ++of) {
+        //     ppa[of] = queue[j][i];
+        // }
+        of += n_queue[j];
+    }
+    assert(of == n_samples);
+    ++n_steps;
+
+    // std::cerr << "nskips=" << n_skips << std::endl;
+
+    return 1;
+}
+
+int PBWT::ReverseUpdateBitmap(const uint8_t* arr) {
+    // memset(prev, 0, n_samples); // O(n)
+    if (prev_bitmap == nullptr) prev_bitmap = new uint64_t[(int)ceil((float)n_samples/64)];
+    memset(prev_bitmap, 0, (int)ceil((float)n_samples/64) * sizeof(uint64_t));
+    memset(n_queue, 0, sizeof(uint32_t)*n_symbols);
+
+    // Restore + update PPA
+    // uint32_t n_skips = 0;
+    for (int i = 0; i < n_samples; ++i) { // Worst case O(n), average case O(n) with a smallish constant.
+        queue[arr[i]][n_queue[arr[i]]++] = ppa[i];
+        prev_bitmap[ppa[i]/64] |= arr[i] << (ppa[i] % 64);
+        // prev[ppa[i]] = arr[i]; // Unpermute data.
     }
 
     // Merge PPA queues.

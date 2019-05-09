@@ -60,6 +60,7 @@ public:
     int Update(const uint32_t* alt_pos, const uint32_t len);
 
     int ReverseUpdate(const uint8_t* arr);
+    int ReverseUpdateBitmap(const uint8_t* arr);
 
     std::string ToPrettyString() const;
 
@@ -71,6 +72,7 @@ public:
     uint32_t*  ppa; // current PPA
     uint32_t*  n_queue; // number of elements in each positional queue
     uint32_t** queue; // the positional queues themselves
+    uint64_t*  prev_bitmap; // bitmap version
 };
 
 /*======   Higher order   ======*/
