@@ -33,11 +33,12 @@ void ReadVcfGT (const std::string& filename) {
     // GenotypeCompressorRLEBitmap gtperm2(reader->n_samples_);
     
     djinn::GTCompressor gtcomp;
-    gtcomp.SetStrategy(djinn::GTCompressor::CompressionStrategy::CONTEXT_MODEL, reader->n_samples_);
-    // gtcomp.SetStrategy(GTCompressor::CompressionStrategy::RLE_BITMAP, reader->n_samples_);
-    // gtcomp.SetStrategy(GenotypeCompressor::CompressionStrategy::ZSTD);
+    // gtcomp.SetStrategy(djinn::GTCompressor::CompressionStrategy::CONTEXT_MODEL, reader->n_samples_);
+    gtcomp.SetStrategy(djinn::GTCompressor::CompressionStrategy::RLE_BITMAP, reader->n_samples_);
+    gtcomp.SetStrategy(djinn::GenotypeCompressor::CompressionStrategy::LZ4);
     // HaplotypeCompressor hcomp(2*reader->n_samples_);
     uint64_t n_lines = 0;
+    // gtcomp.permute_pbwt = false;
 
     // While there are bcf records available.
     while (reader->Next()) {
@@ -51,7 +52,7 @@ void ReadVcfGT (const std::string& filename) {
 
         // std::cerr << reader->bcf1_->pos+1 << std::endl;
         
-        if (n_lines % 8196 == 0 && n_lines != 0) gtcomp.Compress();
+        if (n_lines % (8196) == 0 && n_lines != 0) gtcomp.Compress();
         gtcomp.Encode(reader->bcf1_, reader->header_);
         ++n_lines;
 

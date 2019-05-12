@@ -188,6 +188,7 @@ public:
     enum class CompressionStrategy : uint32_t { ZSTD = 0, LZ4 = 1, CONTEXT = 2 };
     
 protected:
+    bool permute_pbwt;
     int64_t  n_samples;
     uint32_t block_size;
     uint32_t processed_lines;
@@ -259,9 +260,14 @@ public:
     bool CheckLimit() const override;
 
     int Compress() override;
+
+    // Compression routines.
     int EncodeRLEBitmap2N2MC(const int target);
     int EncodeRLEBitmap2N2MM(const int target);
     int EncodeRLEBitmap2NXM(const int target);
+    int EncodeRLEBitmap2N2MC(const int target, const uint8_t* data, const int stride);
+    int EncodeRLEBitmap2N2MM(const int target, const uint8_t* data, const int stride);
+    int EncodeRLEBitmap2NXM(const int target, const uint8_t* data, const int stride);
 
 private:
     uint64_t bytes_out_zstd1, bytes_out_lz4;//debug
@@ -369,9 +375,9 @@ public:
         if (instance.get() == nullptr) return(*this);
 
         switch(strategy) {
-            case(GenotypeCompressor::CompressionStrategy::CONTEXT) : instance->strategy = GenotypeCompressor::CompressionStrategy::CONTEXT; break;
-            case(GenotypeCompressor::CompressionStrategy::LZ4) : instance->strategy = GenotypeCompressor::CompressionStrategy::LZ4; break;
-            case(GenotypeCompressor::CompressionStrategy::ZSTD) : instance->strategy = GenotypeCompressor::CompressionStrategy::ZSTD; break;
+            case(GenotypeCompressor::CompressionStrategy::CONTEXT): instance->strategy = GenotypeCompressor::CompressionStrategy::CONTEXT; break;
+            case(GenotypeCompressor::CompressionStrategy::LZ4): instance->strategy = GenotypeCompressor::CompressionStrategy::LZ4; break;
+            case(GenotypeCompressor::CompressionStrategy::ZSTD): instance->strategy = GenotypeCompressor::CompressionStrategy::ZSTD; break;
         }
         return *this;
     }
