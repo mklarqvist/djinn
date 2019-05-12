@@ -56,7 +56,7 @@
 #include <stddef.h> //size_t
 #include <cstdint>
 
-namespace pil {
+namespace djinn {
 
 class RangeCoder {
 public:

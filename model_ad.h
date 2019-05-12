@@ -27,6 +27,8 @@
 #include "range_coder.h"
 #include "vcf_reader.h"
 
+namespace djinn {
+
 static int NearestPowerOfTwo(int n) {
     int v = n; 
 
@@ -256,5 +258,7 @@ public:
     ad_object* entries;
     ad_object* entries2;
 };
+
+}
 
 #endif

@@ -13,7 +13,7 @@
 #define  DO(n) int _;for (_=0; _<n; _++)
 #define  TOP   (1<<24)
 
-namespace pil {
+namespace djinn {
 
 void RangeCoder::StartEncode()
 {

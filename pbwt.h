@@ -29,6 +29,8 @@
 
 #include <iostream>//temp
 
+namespace djinn {
+
 // Map missing to 2, 1->0, 2->1, and EOV -> 3.
 const uint8_t TWK_BCF_GT_UNPACK[65] = {2,0,1,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,3};
 const uint8_t TWK_BCF_GT_PACK[3]   = {1, 2, 0};
@@ -90,6 +92,7 @@ public:
     void ResetPBWT();
     void ResetContext();
     void Reset();
+    void ResetExceptPBWT();
     int FinishEncoding();
     int FinishDecoding();
     void StartEncoding();
@@ -102,11 +105,13 @@ public:
     int model_context_shift;
     uint32_t model_context;
     std::shared_ptr<PBWT> pbwt;
-    std::shared_ptr<pil::RangeCoder> range_coder;
-    std::vector < std::shared_ptr<pil::FrequencyModel> > models;
+    std::shared_ptr<RangeCoder> range_coder;
+    std::vector < std::shared_ptr<FrequencyModel> > models;
     size_t n_buffer;
     uint8_t* buffer; // fix
     size_t n_additions;
 };
+
+}
 
 #endif

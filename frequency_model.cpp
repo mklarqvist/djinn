@@ -3,7 +3,7 @@
 
 #include "frequency_model.h"
 
-namespace pil {
+namespace djinn {
 
 FrequencyModel::FrequencyModel() :
     NSYM(0), STEP(2), SHIFT(16),
@@ -66,7 +66,7 @@ void FrequencyModel::Normalize() {
 }
 
 void FrequencyModel::EncodeSymbol(RangeCoder* rc, uint16_t sym) {
-    //std::cerr << "encoding symbol: " << sym << " with " << NSYM << "," << SHIFT << "," << STEP << std::endl;
+    // std::cerr << "encoding symbol: " << sym << " with " << NSYM << "," << SHIFT << "," << STEP << std::endl;
     SymFreqs* s = F;
     uint32_t AccFreq = 0;
 
@@ -75,15 +75,10 @@ void FrequencyModel::EncodeSymbol(RangeCoder* rc, uint16_t sym) {
         _mm_prefetch((uint8_t*)(s+1), _MM_HINT_T0);
     }
 
-    //std::cerr << "after while: " << AccFreq << "," << TotFreq << std::endl;
-    //std::cerr << "freq=" << s->Freq << std::endl;
-
     rc->Encode(AccFreq, s->Freq, TotFreq);
-    //std::cerr << "after encode" << std::endl;
 
     s->Freq += STEP;
     TotFreq += STEP;
-    //std::cerr << "freq after=" << s->Freq << std::endl;
 
     if (TotFreq > ((1 << SHIFT) - STEP)) {
         //std::cerr << "normalzing" << std::endl;
@@ -91,11 +86,13 @@ void FrequencyModel::EncodeSymbol(RangeCoder* rc, uint16_t sym) {
     }
 
     /* Keep approx sorted */
-    // if (s[0].Freq > s[-1].Freq) {
-    //     SymFreqs t = s[0];
-    //     s[0]  = s[-1];
-    //     s[-1] = t;
-    // }
+    if(s != F) { // Prevent s[-1] to segfault when s == F
+        if (s[0].Freq > s[-1].Freq) {
+            SymFreqs t = s[0];
+            s[0]  = s[-1];
+            s[-1] = t;
+        }
+    }
 }
 
 uint16_t FrequencyModel::DecodeSymbol(RangeCoder *rc) {
@@ -116,12 +113,14 @@ uint16_t FrequencyModel::DecodeSymbol(RangeCoder *rc) {
         Normalize();
 
     /* Keep approx sorted */
-    // if (s[0].Freq > s[-1].Freq) {
-    //     SymFreqs t = s[0];
-    //     s[0] = s[-1];
-    //     s[-1] = t;
-    //     return t.Symbol;
-    // }
+    if(s != F) { // Prevent s[-1] to segfault when s == F
+        if (s[0].Freq > s[-1].Freq) {
+            SymFreqs t = s[0];
+            s[0] = s[-1];
+            s[-1] = t;
+            return t.Symbol;
+        }
+    }
 
     return s->Symbol;
 }

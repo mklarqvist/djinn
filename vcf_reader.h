@@ -24,8 +24,7 @@
 
 #include <htslib/vcf.h>
 
-namespace tachyon {
-namespace io {
+namespace djinn {
 
 class VcfReader {
 public:
@@ -158,7 +157,6 @@ public:
     bcf1_t* bcf1_;
 };
 
-}
 }
 
 

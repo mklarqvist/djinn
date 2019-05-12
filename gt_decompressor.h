@@ -18,10 +18,7 @@
 #ifndef GT_DECOMPRESSOR_H_
 #define GT_DECOMPRESSOR_H_
 
-struct gt_context_t {
-    uint8_t *di2mc1, *di2mc2, *di2mm1, *di2mm2, *di2x1, *di2x2;
-    uint8_t *di2mc_bit1, *di2mc_bit2;
-};
+namespace djinn {
 
 class GenotypeDecompressor {
 public:
@@ -345,5 +342,7 @@ public:
     std::shared_ptr<GeneralPBWTModel> model;
     std::shared_ptr<GeneralPBWTModel> partition;
 };
+
+}
 
 #endif

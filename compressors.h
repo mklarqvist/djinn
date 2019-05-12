@@ -3,6 +3,8 @@
 #include "lz4.h" // lz4
 #include "lz4hc.h"
 
+namespace djinn {
+
 static
 int ZstdCompress(const uint8_t* in, uint32_t n_in, uint8_t* out, uint32_t out_capacity, const int32_t c_level = 1) {
     int ret = ZSTD_compress(out, out_capacity, in, n_in, c_level);
@@ -52,4 +54,6 @@ int Lz4Decompress(const uint8_t* in, uint32_t n_in, uint8_t* out, uint32_t out_c
 
 
     return(decompressed_size);
+}
+
 }

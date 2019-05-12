@@ -12,12 +12,13 @@
 #include <fstream>
 #include <iostream>
 #include <chrono>
+// #include <thread>
 
 #include "gt_compressor.h"
 #include "gt_decompressor.h"
 
 void ReadVcfGT (const std::string& filename) {
-    std::unique_ptr<tachyon::io::VcfReader> reader = tachyon::io::VcfReader::FromFile(filename,8);
+    std::unique_ptr<djinn::VcfReader> reader = djinn::VcfReader::FromFile(filename);
     if (reader.get() == nullptr) {
         std::cerr << "failed read" << std::endl;
         exit(1);
@@ -31,12 +32,13 @@ void ReadVcfGT (const std::string& filename) {
     // GenotypeCompressorModelling gtperm(reader->n_samples_);
     // GenotypeCompressorRLEBitmap gtperm2(reader->n_samples_);
     
-    GTCompressor gtcomp;
-    // gtcomp.SetStrategy(GTCompressor::CompressionStrategy::CONTEXT_MODEL, reader->n_samples_);
-    gtcomp.SetStrategy(GTCompressor::CompressionStrategy::RLE_BITMAP, reader->n_samples_);
-    gtcomp.SetStrategy(GenotypeCompressor::CompressionStrategy::ZSTD);
+    djinn::GTCompressor gtcomp;
+    gtcomp.SetStrategy(djinn::GTCompressor::CompressionStrategy::CONTEXT_MODEL, reader->n_samples_);
+    // gtcomp.SetStrategy(GTCompressor::CompressionStrategy::RLE_BITMAP, reader->n_samples_);
+    // gtcomp.SetStrategy(GenotypeCompressor::CompressionStrategy::ZSTD);
     // HaplotypeCompressor hcomp(2*reader->n_samples_);
-    
+    uint64_t n_lines = 0;
+
     // While there are bcf records available.
     while (reader->Next()) {
         //const char* chrom = bcf_seqname(hr,line) ;
@@ -48,13 +50,16 @@ void ReadVcfGT (const std::string& filename) {
         //while ( (*ref = toupper(*ref)) ) ++ref ;
 
         // std::cerr << reader->bcf1_->pos+1 << std::endl;
-        // gtperm.Encode(reader->bcf1_, reader->header_);
-        // gtperm2.Encode(reader->bcf1_, reader->header_);
         
+        if (n_lines % 8196 == 0 && n_lines != 0) gtcomp.Compress();
         gtcomp.Encode(reader->bcf1_, reader->header_);
+        ++n_lines;
+
         // hcomp.Encode(reader->bcf1_, reader->header_);
     }
 
+    // Compress final.
+    gtcomp.Compress();
     // hcomp.PrintSizes();
 
     // gtperm.Compress(); // Final
@@ -78,7 +83,7 @@ int DecompressTest(const std::string& file, int type) {
 
     std::cerr << "filesize=" << filesize << "@" << f.tellg() << std::endl;
 
-    size_t uncompressed_size = 0, compressed_size = 0;
+    size_t uncompressed_size = 0, compressed_size = 0, compressed_size2 = 0;
     size_t dest_capacity = 10000000;
     uint8_t* buffer     = new uint8_t[dest_capacity];
     uint8_t* out_buffer = new uint8_t[dest_capacity];
@@ -88,14 +93,12 @@ int DecompressTest(const std::string& file, int type) {
     uint64_t tot_decomp = 0;
     uint8_t* out = new uint8_t[n_samples];
     uint8_t* vcf_buffer = new uint8_t[n_samples*8];
-    PBWT pbwt1(n_samples, 2);
-    PBWT pbwt2(n_samples, 2);
+    djinn::PBWT pbwt1(n_samples, 2);
+    djinn::PBWT pbwt2(n_samples, 2);
 
     std::chrono::high_resolution_clock::time_point t1 = std::chrono::high_resolution_clock::now();
 
     if (type & 1) {
-        
-        std::cerr << "context" << std::endl;
         uint8_t* buffer2     = new uint8_t[dest_capacity];
         uint8_t* out_buffer2 = new uint8_t[dest_capacity];
         uint8_t* buffer_partition1 = new uint8_t[dest_capacity];
@@ -108,66 +111,60 @@ int DecompressTest(const std::string& file, int type) {
         size_t uncompressed_size_bitmap2 = 0;
 
         while (f.good()) {
-            // std::cout.write((char*)&processed_lines_local, sizeof(uint32_t));
-            // std::cout.write((char*)&base_models[0].n_additions, sizeof(size_t));
-            // std::cout.write((char*)&p1, sizeof(size_t));
-            // std::cout.write((char*)base_models[0].buffer, p1);
-            // std::cout.write((char*)&base_model_bitmaps[0].n_additions, sizeof(size_t));
-            // std::cout.write((char*)&extra1, sizeof(size_t));
-            // std::cout.write((char*)base_model_bitmaps[0].buffer, extra1);
-
-            f.read((char*)&n_variants_block,  sizeof(uint32_t));
+            std::cerr << f.tellg() << "/" << filesize << std::endl;
+            f.read((char*)&n_variants_block, sizeof(uint32_t));
             f.read((char*)&uncompressed_size, sizeof(size_t));
-            f.read((char*)&compressed_size,   sizeof(size_t));
+            f.read((char*)&compressed_size, sizeof(size_t));
             f.read((char*)buffer, compressed_size);
-            std::cerr << "[STEP 1] " << uncompressed_size << "," << compressed_size << " -> " << f.tellg() << "/" << filesize << std::endl;
+            // std::cerr << "[STEP 1] " << uncompressed_size << "," << compressed_size << " -> " << f.tellg() << "/" << filesize << std::endl;
             f.read((char*)&uncompressed_size_bitmap1, sizeof(size_t));
-            f.read((char*)&compressed_size_bitmap1,   sizeof(size_t));
-            f.read((char*)buffer_partition1, uncompressed_size_bitmap1);
-            std::cerr << "[STEP 2] " << uncompressed_size_bitmap1 << "," << compressed_size_bitmap1 << " -> " << f.tellg() << "/" << filesize << std::endl;
+            f.read((char*)&compressed_size_bitmap1, sizeof(size_t));
+            f.read((char*)buffer_partition1, compressed_size_bitmap1);
+            // std::cerr << "[STEP 2] " << uncompressed_size_bitmap1 << "," << compressed_size_bitmap1 << " -> " << f.tellg() << "/" << filesize << std::endl;
 
             // second
-            f.read((char*)&n_variants_block,  sizeof(uint32_t));
+            f.read((char*)&n_variants_block, sizeof(uint32_t));
             f.read((char*)&uncompressed_size, sizeof(size_t));
-            f.read((char*)&compressed_size,   sizeof(size_t));
-            f.read((char*)buffer2, compressed_size);
-            std::cerr << "[STEP 3] " << uncompressed_size << "," << compressed_size << " -> " << f.tellg() << "/" << filesize << std::endl;
+            f.read((char*)&compressed_size2, sizeof(size_t));
+            f.read((char*)buffer2, compressed_size2);
+            // std::cerr << "[STEP 3] " << uncompressed_size << "," << compressed_size << " -> " << f.tellg() << "/" << filesize << std::endl;
             f.read((char*)&uncompressed_size_bitmap2, sizeof(size_t));
-            f.read((char*)&compressed_size_bitmap2,   sizeof(size_t));
-            f.read((char*)buffer_partition2, uncompressed_size_bitmap2);
-            std::cerr << "[STEP 4] " << uncompressed_size_bitmap2 << "," << compressed_size_bitmap2 << " -> " << f.tellg() << "/" << filesize << std::endl;
+            f.read((char*)&compressed_size_bitmap2, sizeof(size_t));
+            f.read((char*)buffer_partition2, compressed_size_bitmap2);
+            // std::cerr << "[STEP 4] " << uncompressed_size_bitmap2 << "," << compressed_size_bitmap2 << " -> " << f.tellg() << "/" << filesize << std::endl;
 
+            n_variants += n_variants_block;
 
-            // assert(ret == uncompressed_size);
-            // n_variants += DebugRLEBitmap(out_buffer, uncompressed_size, n_samples, true);
+            // Decode
+            std::shared_ptr<djinn::GenotypeDecompressorContext> debug1 = 
+                std::make_shared<djinn::GenotypeDecompressorContext>(
+                    (uint8_t*)buffer, compressed_size, 
+                    (uint8_t*)buffer_partition1, compressed_size_bitmap1, 
+                    n_variants_block, n_samples, 2);
 
-            //
-            // std::shared_ptr<GenotypeDecompressorContext> debug1 = std::make_shared<GenotypeDecompressorContext>((uint8_t*)base_models[0].buffer, p1, (uint8_t*)base_model_bitmaps[0].buffer, extra1, n_cycles, n_samples, 2);
-            
-            // pbwt1.reset();
-            // pbwt2.reset();
+            std::shared_ptr<djinn::GenotypeDecompressorContext> debug2 = 
+                std::make_shared<djinn::GenotypeDecompressorContext>(
+                    (uint8_t*)buffer2, compressed_size2, 
+                    (uint8_t*)buffer_partition2, compressed_size_bitmap2, 
+                    n_variants_block, n_samples, 2);
 
+            for (int i = 0; i < n_variants_block; ++i) {
+                debug1->Decode(out);
+                pbwt1.ReverseUpdate(out);
+                debug2->Decode(out);
+                pbwt2.ReverseUpdate(out);
+            }
+
+            if (f.tellg() == filesize) break;
+
+            pbwt1.reset();
+            pbwt2.reset();
         }
 
         delete[] buffer2;
         delete[] out_buffer2;
         delete[] buffer_partition1;
-        delete[] buffer_partition1;
-    
-
-        // std::shared_ptr<GenotypeDecompressorContext> debug1 = std::make_shared<GenotypeDecompressorContext>((uint8_t*)base_models[0].buffer, p1, (uint8_t*)base_model_bitmaps[0].buffer, extra1, n_cycles, n_samples, 2);
-        // PBWT pbwt1(n_samples, 2);
-
-        // uint8_t* debug_buf = new uint8_t[n_samples];
-        // uint32_t debug_offset = 0;
-        // for (int i = 0; i < n_cycles; ++i) {
-        //     debug1->Decode(debug_buf);
-        //     pbwt1.ReverseUpdate(debug_buf);
-        //     for (int j = 0; j < n_samples; ++j) {
-        //         assert(BCF_UNPACK_GENOTYPE(debug_pbwt[0].buffer[debug_offset + j]) == pbwt1.prev[j]);
-        //     }
-        //     debug_offset += n_samples;
-        // }
+        delete[] buffer_partition2;
     }
 
     else {
@@ -180,15 +177,15 @@ int DecompressTest(const std::string& file, int type) {
             std::cerr << uncompressed_size << "," << compressed_size << " -> " << f.tellg() << "/" << filesize << std::endl;
             int ret;
             if ((type >> 1) & 1)
-                ret = Lz4Decompress(buffer, compressed_size, out_buffer, dest_capacity);
+                ret = djinn::Lz4Decompress(buffer, compressed_size, out_buffer, dest_capacity);
             else if ((type >> 2) & 1)
-                ret = ZstdDecompress(buffer, compressed_size, out_buffer, dest_capacity);
+                ret = djinn::ZstdDecompress(buffer, compressed_size, out_buffer, dest_capacity);
 
             assert(ret == uncompressed_size);
             // n_variants += DebugRLEBitmap(out_buffer, uncompressed_size, n_samples, true);
 
             //
-            std::shared_ptr<GenotypeDecompressorRLEBitmap> debug1 = std::make_shared<GenotypeDecompressorRLEBitmap>(out_buffer, uncompressed_size, 2*n_variants_block, n_samples);
+            std::shared_ptr<djinn::GenotypeDecompressorRLEBitmap> debug1 = std::make_shared<djinn::GenotypeDecompressorRLEBitmap>(out_buffer, uncompressed_size, 2*n_variants_block, n_samples);
             
             pbwt1.reset();
             pbwt2.reset();
@@ -205,28 +202,28 @@ int DecompressTest(const std::string& file, int type) {
                 
                 // std::cerr << "AC=" << alts1+alts2 << std::endl;
 
-                // vcf_buffer[0] = pbwt1.prev[0] + '0';
-                // vcf_buffer[1] = '|';
-                // vcf_buffer[2] = pbwt2.prev[0] + '0';
+                vcf_buffer[0] = pbwt1.prev[0] + '0';
+                vcf_buffer[1] = '|';
+                vcf_buffer[2] = pbwt2.prev[0] + '0';
                 
-                // int j = 3;
-                // for (int i = 1; i < n_samples; ++i, j += 4) {
-                //     vcf_buffer[j+0] = '\t';
-                //     vcf_buffer[j+1] = pbwt1.prev[i] + '0';
-                //     vcf_buffer[j+2] = '|';
-                //     vcf_buffer[j+3] = pbwt2.prev[i] + '0';
-                // }
-                // vcf_buffer[j++] = '\n';
-                // std::cout.write((char*)vcf_buffer, j);
-
-                int j = 0;
-                for (int i = 0; i < n_samples; ++i, j += 2) {
-                    vcf_buffer[j+0] = pbwt1.prev[i];
-                    vcf_buffer[j+1] = pbwt2.prev[i];
+                int j = 3;
+                for (int i = 1; i < n_samples; ++i, j += 4) {
+                    vcf_buffer[j+0] = '\t';
+                    vcf_buffer[j+1] = pbwt1.prev[i] + '0';
+                    vcf_buffer[j+2] = '|';
+                    vcf_buffer[j+3] = pbwt2.prev[i] + '0';
                 }
-                
+                vcf_buffer[j++] = '\n';
                 std::cout.write((char*)vcf_buffer, j);
-                std::cout.flush();
+
+                // int j = 0;
+                // for (int i = 0; i < n_samples; ++i, j += 2) {
+                //     vcf_buffer[j+0] = pbwt1.prev[i];
+                //     vcf_buffer[j+1] = pbwt2.prev[i];
+                // }
+                
+                // std::cout.write((char*)vcf_buffer, j);
+                // std::cout.flush();
 
                 if (++n_debug == n_variants_block) break;
             }

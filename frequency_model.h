@@ -1,6 +1,6 @@
 /*
-* Copyright (c) 2019 Marcus D. R. Klarqvist
-* Author(s): Marcus D. R. Klarqvist
+* Copyright (c) 2019
+* Author(s): Marcus D. R. Klarqvist and James Bonfield
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -63,7 +63,7 @@
 
 #include "range_coder.h"
 
-namespace pil {
+namespace djinn {
 
 /*
  *--------------------------------------------------------------------------
@@ -85,7 +85,7 @@ namespace pil {
 class FrequencyModel {
 private:
     struct SymFreqs {
-        uint16_t Freq;
+        uint32_t Freq;
         uint16_t Symbol;
     };
 
@@ -99,12 +99,13 @@ public:
     void Initiate(int nsym, int max_sym);
     void Normalize();
     void EncodeSymbol(RangeCoder* rc, uint16_t sym);
+    void EncodeSymbolNoUpdate(RangeCoder* rc, uint16_t sym);
     uint16_t DecodeSymbol(RangeCoder* rc);
 
     void SetStep(int step) { STEP = step; }
     void SetShift(int shift) { SHIFT = shift; }
 
-private:
+public:
     int NSYM, STEP, SHIFT;
     uint32_t TotFreq;  // Total frequency
 

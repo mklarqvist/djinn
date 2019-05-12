@@ -19,16 +19,18 @@
 OPTFLAGS  := -O3 -march=native
 CFLAGS     = -std=c99 $(OPTFLAGS) $(DEBUG_FLAGS)
 CPPFLAGS   = -std=c++0x $(OPTFLAGS) $(DEBUG_FLAGS)
-CPP_SOURCE = frequency_model.cpp main.cpp pbwt.cpp range_coder.cpp gt_compressor.cpp
+CPP_SOURCE = frequency_model.cpp main.cpp pbwt.cpp range_coder.cpp gt_compressor.cpp range_coder64.cpp
 C_SOURCE   = 
 OBJECTS    = $(C_SOURCE:.c=.o) $(CPP_SOURCE:.cpp=.o)
 DEBUG_FLAGS =
+DEBUG_LIBS  =
 
 # Default target
-all: gt
+all: djinn
 
 debug: DEBUG_FLAGS += -DDEBUG_PBWT -DDEBUG_WAH -DDEBUG_CONTEXT -g
-debug: gt
+debug: DEBUG_LIBS += -lroaring -lcrypto
+debug: djinn
 
 # Generic rules
 %.o: %.c
@@ -37,11 +39,11 @@ debug: gt
 %.o: %.cpp
 	$(CXX) $(CPPFLAGS) -c -o $@ $<
 
-gt: $(OBJECTS)
-	$(CXX) $(CPPFLAGS) $(OBJECTS) -lzstd -llz4 -lhts -lcrypto -lroaring -o gt
+djinn: $(OBJECTS)
+	$(CXX) $(CPPFLAGS) $(OBJECTS) -lzstd -llz4 -lhts $(DEBUG_LIBS) -o djinn
 
 clean:
 	rm -f $(OBJECTS)
-	rm -f gt
+	rm -f djinn
 
 .PHONY: all clean debug

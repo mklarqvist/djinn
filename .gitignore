@@ -31,7 +31,7 @@
 *.out
 *.app
 
-gt
+djinn
 .vscode
 CMakeFiles
 Testing

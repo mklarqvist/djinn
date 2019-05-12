@@ -18,23 +18,23 @@
 #ifndef GT_COMPRESSOR_H_
 #define GT_COMPRESSOR_H_
 
+#include "djinn.h"
 #include "vcf_reader.h"
 #include "pbwt.h"
-
 #include "compressors.h"
 
 // temp
 #include <bitset>
 #include <chrono>
+
 #include "gt_decompressor.h"
-
-
 #include <openssl/sha.h>
 #include <roaring/roaring.h>
 
-// Use make debug instead.
-// #define DEBUG_PBWT 1
-// #define DEBUG_WAH 1
+
+#include "range_coder64.h"
+
+namespace djinn {
 
 struct DataDigest {
     DataDigest() : len(0), capac(0), buffer(nullptr), has_initialized(false) {}
@@ -164,7 +164,6 @@ public:
     virtual ~GenotypeCompressor();
     
     // Encode data using literals.
-    // virtual int Encode(bcf1_t* bcf, const bcf_hdr_t* hdr) =0;
     virtual int Encode2N(uint8_t* data, const int32_t n_data, const int32_t n_alleles) =0;
     virtual int Encode2N2M(uint8_t* data, const int32_t n_data) =0;
     virtual int Encode2N2MC(uint8_t* data, const int32_t n_data) =0;
@@ -173,22 +172,15 @@ public:
 
     // Encode data using htslib.
     virtual int Encode(bcf1_t* bcf, const bcf_hdr_t* hdr);
+    virtual int Encode(uint8_t* data, const int32_t n_data, const int32_t ploidy, const int32_t n_alleles);
     virtual int Encode2N(bcf1_t* bcf, const bcf_hdr_t* hdr) =0;
-
-    // Return compressed output
-    // virtual int Compress2N2MC(uint8_t* out, uint32_t l_out) =0;
-    // virtual int Compress2N2MM(uint8_t* out, uint32_t l_out) =0;
-    // virtual int Compress2NXM(uint8_t* out, uint32_t l_out) =0;
-    // virtual uint8_t* Compress2N2MC() =0;
-    // virtual uint8_t* Compress2N2MM() =0;
-    // virtual uint8_t* Compress2NXM() =0;
-
     //
     int32_t RemapGenotypeEOV(uint8_t* data, const uint32_t len);
 
     //
     virtual bool CheckLimit() const =0;
     virtual int Compress() =0;
+    // virtual int Compress(djinn_block_t*& block) =0;
 
 public:
     // Compression strategy used.
@@ -208,6 +200,8 @@ protected:
     Buffer buf_raw;
 
     uint32_t alts[256];
+
+    djinn_block_t* block;
 
 #if DEBUG_PBWT
     DataDigest debug_pbwt[6]; // 2 complete, 2 missing, 2 complex
@@ -244,6 +238,8 @@ private:
     GeneralPBWTModel base_models_complex[2]; // 0-1: diploid n-allelic
     GeneralPBWTModel* models;
     GeneralPBWTModel base_model_bitmaps[2];
+
+    // SimpleModel64 s64[2];
 };
 
 class GenotypeCompressorRLEBitmap : public GenotypeCompressor {
@@ -274,9 +270,6 @@ private:
     PBWT base_pbwt[4]; // diploid biallelic no-missing models, missing + EOV
     PBWT complex_pbwt[2]; // diploid n-allelic
 };
-
-
-// roaring_bitmap_portable_size_in_bytes(roaring[k]);
 
 
 class HaplotypeCompressor {
@@ -385,11 +378,14 @@ public:
 
 public:
     inline int Encode(bcf1_t* bcf, const bcf_hdr_t* hdr) { this->instance->Encode(bcf, hdr); }
-    // inline int Encode(uint8_t* data, const int32_t n_data, const int n_alleles) { this->instance->Encode(data, n_data, n_alleles); }
+    inline int Encode(uint8_t* data, const int32_t n_data, const int n_ploidy, const int n_alleles) { this->instance->Encode(data, n_data, n_ploidy, n_alleles); }
+    inline void Compress() { this->instance->Compress(); }
 
 private:
     CompressionStrategy strategy;
     std::shared_ptr<GenotypeCompressor> instance;
 };
+
+}
 
 #endif

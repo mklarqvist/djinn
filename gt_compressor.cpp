@@ -3,6 +3,8 @@
 #include <cstdio>//printf: debug
 #include "gt_decompressor.h" //debug
 
+namespace djinn {
+
 /*======   Base model   ======*/
 
 GenotypeCompressor::GenotypeCompressor(int64_t n_s) :
@@ -11,7 +13,8 @@ GenotypeCompressor::GenotypeCompressor(int64_t n_s) :
     processed_lines(0),
     processed_lines_local(0),
     bytes_in(0), bytes_in_vcf(0), bytes_out(0),
-    strategy(CompressionStrategy::LZ4)
+    strategy(CompressionStrategy::LZ4),
+    block(nullptr)
 {
     buf_compress.resize(10000000);
     buf_raw.resize(10000000);
@@ -23,7 +26,7 @@ GenotypeCompressor::GenotypeCompressor(int64_t n_s) :
 #endif
 }
 
-GenotypeCompressor::~GenotypeCompressor() { }
+GenotypeCompressor::~GenotypeCompressor() { delete block; }
 
 // Encode data using htslib.
 int GenotypeCompressor::Encode(bcf1_t* bcf, const bcf_hdr_t* hdr) {
@@ -50,6 +53,22 @@ int GenotypeCompressor::Encode(bcf1_t* bcf, const bcf_hdr_t* hdr) {
 
     // Todo: extend beyond 2N
     return(Encode2N(fmt->p, fmt->p_len, bcf->n_allele));
+}
+
+int GenotypeCompressor::Encode(uint8_t* data, const int32_t n_data, const int32_t ploidy, const int32_t n_alleles) {
+    if (data == nullptr) return 0;
+    if (n_data == 0) return 0;
+    if (n_alleles <= 0) return 0;
+
+    if (ploidy != 2) {
+        std::cerr << "only diploid data is currently supported" << std::endl;
+        return 0;
+    }
+
+    bytes_in += n_data;
+    bytes_in_vcf += n_data * 2 - 1;
+
+    return(Encode2N(data, n_data, n_alleles));
 }
 
 //
@@ -123,26 +142,7 @@ bool GenotypeCompressorModelling::CheckLimit() const {
             buf_raw.len > 9000000);
 }
 
-//
-// int GenotypeCompressorModelling::Encode(bcf1_t* bcf, const bcf_hdr_t* hdr) {
-//     if (bcf == NULL) return 0;
-//     if (hdr == NULL) return 0;
-    
-//     const bcf_fmt_t* fmt = bcf_get_fmt(hdr, bcf, "GT");
-//     if (fmt == NULL) return 0;
-//     if (fmt->p_len / n_samples != 2) {
-//         std::cerr << "input is not divisible by 2" << std::endl;
-//         return 0;
-//     }
-
-//     bytes_in += bcf->d.fmt->p_len;
-
-//     // Todo: extend beyond 2N
-//     return(Encode2N(bcf,hdr));
-// }
-
 int GenotypeCompressorModelling::Encode2N(bcf1_t* bcf, const bcf_hdr_t* hdr) {
-    std::cerr << "here" << std::endl;
     if (bcf == NULL) return 0;
     if (hdr == NULL) return 0;
     
@@ -181,10 +181,6 @@ int GenotypeCompressorModelling::Encode2N(uint8_t* data, const int32_t n_data, c
     if (n_alleles == 2) return(Encode2N2M(data, n_data)); // biallelic
     else if (n_alleles < 14) return(Encode2NXM(data, n_data, n_alleles));  // #alleles < 14
     else {
-        if (CheckLimit()) {
-            Compress();
-        }
-
         // std::cerr << "alleles=" << n_alleles << std::endl;
         const uint8_t* gts = data;
         for (int i = 0; i < 2*n_samples; ++i) {
@@ -199,10 +195,6 @@ int GenotypeCompressorModelling::Encode2N(uint8_t* data, const int32_t n_data, c
 
 // Wrapper for 2N2M
 int GenotypeCompressorModelling::Encode2N2M(uint8_t* data, const int32_t n_data) {
-    if (CheckLimit()) {
-        Compress();
-    }
-
     // Todo: assert genotypes are set for this variant.
     int replaced = RemapGenotypeEOV(data, n_data);
     if (replaced) {
@@ -229,11 +221,6 @@ int GenotypeCompressorModelling::Encode2N2M(uint8_t* data, const int32_t n_data)
 
 // 2N2M complete
 int GenotypeCompressorModelling::Encode2N2MC(uint8_t* data, const int32_t n_data) {
-    // std::cerr << "Encode2N2MC" << std::endl;
-    if (CheckLimit()) {
-        Compress();
-    }
-
 #if DEBUG_PBWT
     assert(debug_pbwt[0].UpdateDigestStride(&data[0], n_data, 2));
     assert(debug_pbwt[1].UpdateDigestStride(&data[1], n_data, 2));
@@ -263,6 +250,7 @@ int GenotypeCompressorModelling::Encode2N2MC(uint8_t* data, const int32_t n_data
             offset_end = offset + step_size < n_samples ? offset + step_size : n_samples;
             for (int j = offset; j < offset_end; ++j) {
                 base_models[0].EncodeSymbol(base_models[0].pbwt->prev[j]);
+                // s64[0].Encode(base_models[0].pbwt->prev[j]);
             }
         } else base_model_bitmaps[0].EncodeSymbol(0);
         offset += step_size;
@@ -284,6 +272,7 @@ int GenotypeCompressorModelling::Encode2N2MC(uint8_t* data, const int32_t n_data
             offset_end = offset + step_size < n_samples ? offset + step_size : n_samples;
             for (int j = offset; j < offset_end; ++j) {
                 base_models[1].EncodeSymbol(base_models[1].pbwt->prev[j]);
+                // s64[1].Encode(base_models[0].pbwt->prev[j]);
             }
         } else base_model_bitmaps[1].EncodeSymbol(0);
         offset += step_size;
@@ -293,12 +282,14 @@ int GenotypeCompressorModelling::Encode2N2MC(uint8_t* data, const int32_t n_data
     for (int j = 0; j < n_samples; ++j) {
         // assert(base_models[0].pbwt->prev[j] < 2);
         base_models[0].EncodeSymbol(base_models[0].pbwt->prev[j]);
+        // s64[0].Encode(base_models[0].pbwt->prev[j]);
     }
 
     base_models[1].ResetContext();
     for (int i = 0; i < n_samples; ++i) {
         // assert(base_models[1].pbwt->prev[i] < 2);
         base_models[1].EncodeSymbol(base_models[1].pbwt->prev[i]);
+        // s64[1].Encode(base_models[0].pbwt->prev[i]);
     }
 #endif
 
@@ -309,9 +300,6 @@ int GenotypeCompressorModelling::Encode2N2MC(uint8_t* data, const int32_t n_data
 
 // 2N2M with missing
 int GenotypeCompressorModelling::Encode2N2MM(uint8_t* data, const int32_t n_data) {
-    if (CheckLimit()) {
-        Compress();
-    }
 
 #if DEBUG_PBWT
     assert(debug_pbwt[2].UpdateDigestStride(&data[0], n_data, 2));
@@ -342,10 +330,6 @@ int GenotypeCompressorModelling::Encode2N2MM(uint8_t* data, const int32_t n_data
 
 // 2N any M (up to 16)
 int GenotypeCompressorModelling::Encode2NXM(uint8_t* data, const int32_t n_data, const int32_t n_alleles) {
-    // std::cerr << "Encode2NXM" << std::endl;
-    if (CheckLimit()) {
-        Compress();
-    }
 
 #if DEBUG_PBWT
     assert(debug_pbwt[4].UpdateDigestStride(&data[0], n_data, 2));
@@ -377,6 +361,15 @@ int GenotypeCompressorModelling::Encode2NXM(uint8_t* data, const int32_t n_data,
 }
 
 int GenotypeCompressorModelling::Compress() {
+    if (block == nullptr) {
+        block = new djinn_block_t();
+        block->type = djinn_block_t::BlockType::CONTEXT;
+        block->data = new djinn_ctx_t();
+    }
+    djinn_ctx_t* data_out = (djinn_ctx_t*)block->data;
+    data_out->reset();
+    
+
 #if DEBUG_PBWT
     // Finish digests.
     for (int i = 0; i < 6; ++i) {
@@ -398,33 +391,77 @@ int GenotypeCompressorModelling::Compress() {
     size_t extra1 = base_model_bitmaps[0].FinishEncoding();
     size_t extra2 = base_model_bitmaps[1].FinishEncoding();
 
-    size_t praw = ZstdCompress(buf_raw.data, buf_raw.len,
-                            buf_compress.data, buf_compress.capacity(),
-                            20);
+    // size_t praw = ZstdCompress(buf_raw.data, buf_raw.len,
+    //                            buf_compress.data, buf_compress.capacity(),
+    //                            20);
 
     if (base_models[0].n_additions) {
-        // Temp: emit data to cout.
-        std::cout.write((char*)&processed_lines_local, sizeof(uint32_t));
-        std::cout.write((char*)&base_models[0].n_additions, sizeof(size_t));
-        std::cout.write((char*)&p1, sizeof(size_t));
-        std::cout.write((char*)base_models[0].buffer, p1);
-        std::cout.write((char*)&base_model_bitmaps[0].n_additions, sizeof(size_t));
-        std::cout.write((char*)&extra1, sizeof(size_t));
-        std::cout.write((char*)base_model_bitmaps[0].buffer, extra1);
-        std::cout.flush();
+        assert(base_models[1].n_additions);
+        data_out->ctx_models[DJINN_CTX_MODEL_DI2MC1].SetDataReference(base_models[0].buffer, p1);
+        data_out->ctx_models[DJINN_CTX_MODEL_DI2MC1].n = base_models[0].n_additions;
+        data_out->ctx_models[DJINN_CTX_MODEL_DI2MC1].n_c = p1;
+        assert(memcmp(base_models[0].buffer, data_out->ctx_models[DJINN_CTX_MODEL_DI2MC1].vptr, p1) == 0);
+
+        data_out->ctx_partitions[DJINN_CTX_MODEL_DI2MC_PART1].SetDataReference(base_model_bitmaps[0].buffer, extra1);
+        data_out->ctx_partitions[DJINN_CTX_MODEL_DI2MC_PART1].n = base_model_bitmaps[0].n_additions;
+        data_out->ctx_partitions[DJINN_CTX_MODEL_DI2MC_PART1].n_c = extra1;
+        assert(memcmp(base_model_bitmaps[0].buffer, data_out->ctx_partitions[DJINN_CTX_MODEL_DI2MC_PART1].vptr, extra1) == 0);
+
+        std::cerr << processed_lines_local << "," << base_models[0].n_additions << "," << p1 << "," << base_model_bitmaps[0].n_additions << "," << extra1 << std::endl;
     }
 
     if (base_models[1].n_additions) {
-        // Temp: emit data to cout.
-        std::cout.write((char*)&processed_lines_local, sizeof(uint32_t));
-        std::cout.write((char*)&base_models[1].n_additions, sizeof(size_t));
-        std::cout.write((char*)&p2, sizeof(size_t));
-        std::cout.write((char*)base_models[1].buffer, p2);
-        std::cout.write((char*)&base_model_bitmaps[1].n_additions, sizeof(size_t));
-        std::cout.write((char*)&extra2, sizeof(size_t));
-        std::cout.write((char*)base_model_bitmaps[1].buffer, extra2);
-        std::cout.flush();
+        assert(base_models[0].n_additions);
+
+        data_out->ctx_models[DJINN_CTX_MODEL_DI2MC2].SetDataReference(base_models[1].buffer, p2);
+        data_out->ctx_models[DJINN_CTX_MODEL_DI2MC2].n = base_models[1].n_additions;
+        data_out->ctx_models[DJINN_CTX_MODEL_DI2MC1].n_c = p2;
+
+        data_out->ctx_partitions[DJINN_CTX_MODEL_DI2MC_PART2].SetDataReference(base_model_bitmaps[1].buffer, extra2);
+        data_out->ctx_partitions[DJINN_CTX_MODEL_DI2MC_PART2].n = base_model_bitmaps[1].n_additions;
+        data_out->ctx_partitions[DJINN_CTX_MODEL_DI2MC_PART2].n_c = extra2;
+
+        std::cerr << processed_lines_local << "," << base_models[1].n_additions << "," << p2 << "," << base_model_bitmaps[1].n_additions << "," << extra2 << std::endl;
     }
+
+    if (base_models[2].n_additions) {
+        assert(base_models[3].n_additions);
+        data_out->ctx_models[DJINN_CTX_MODEL_DI2MM1].SetDataReference(base_models[2].buffer, p1E);
+        data_out->ctx_models[DJINN_CTX_MODEL_DI2MM1].n = base_models[2].n_additions;
+        data_out->ctx_models[DJINN_CTX_MODEL_DI2MM1].n_c = p1E;
+    }
+
+    if (base_models[3].n_additions) {
+        assert(base_models[2].n_additions);
+
+        data_out->ctx_models[DJINN_CTX_MODEL_DI2MM2].SetDataReference(base_models[3].buffer, p2E);
+        data_out->ctx_models[DJINN_CTX_MODEL_DI2MM2].n = base_models[3].n_additions;
+        data_out->ctx_models[DJINN_CTX_MODEL_DI2MM2].n_c = p2E;
+    }
+
+    if (base_models_complex[0].n_additions) {
+        assert(base_models_complex[1].n_additions);
+        data_out->ctx_models[DJINN_CTX_MODEL_DI2X1].SetDataReference(base_models_complex[0].buffer, p2X);
+        data_out->ctx_models[DJINN_CTX_MODEL_DI2X1].n = base_models_complex[0].n_additions;
+        data_out->ctx_models[DJINN_CTX_MODEL_DI2X1].n_c = p2X;
+    }
+
+    if (base_models_complex[1].n_additions) {
+        assert(base_models_complex[0].n_additions);
+
+        data_out->ctx_models[DJINN_CTX_MODEL_DI2X2].SetDataReference(base_models_complex[1].buffer, p2X2);
+        data_out->ctx_models[DJINN_CTX_MODEL_DI2X2].n = base_models_complex[1].n_additions;
+        data_out->ctx_models[DJINN_CTX_MODEL_DI2X2].n_c = p2X2;
+    }
+
+    block->n_rcds = processed_lines_local;
+    block->ctrl = data_out->GetController();
+    block->p_len = data_out->SerializedSize();
+    djinn_ctx_block_t* oblock = (djinn_ctx_block_t*)block;
+    oblock->Serialize(std::cout);
+    // std::cout.write((char*)base_models[0].buffer, p1);
+    std::cout.flush();
+    std::cerr << "Written size=" << block->p_len << " ctrl=" << std::bitset<16>(block->ctrl) << std::endl;
 
 #if DEBUG_PBWT
     if (debug_pbwt[0].len) {
@@ -580,12 +617,32 @@ int GenotypeCompressorModelling::Compress() {
     base_model_bitmaps[0].StartEncoding();
     base_model_bitmaps[1].StartEncoding();
 
-    std::cerr << "[WRITE] Variants=" << processed_lines_local << " 2N2MC=" << p1 << "," << p2 << " 2N2MM=" << p1E << "," << p2E << " 2NXM=" << p2X << "," << p2X2 << " RAW=" << praw << " SKIP=" << extra1 << "," << extra2 << std::endl;
+    // uint8_t* debug_buffer_rle = new uint8_t[20000000];
+
+    // s64[0].Flush();
+    // s64[1].Flush();
+    // size_t ps64_rle = ZstdCompress(s64[0].rle_buf, s64[0].l_rle_buf,
+    //                            buf_compress.data, buf_compress.capacity(),
+    //                            20);
+
+    // std::cerr << "[s64[0]] " << s64[0].size() << std::endl;
+    // size_t ps64_rle2 = ZstdCompress(s64[1].rle_buf, s64[1].l_rle_buf,
+    //                            buf_compress.data, buf_compress.capacity(),
+    //                            20);
+
+    // std::cerr << "[s64[1]] " << s64[1].size() << std::endl;
+
+    std::cerr << "[WRITE] Variants=" << processed_lines_local << " 2N2MC=" << p1 << "," << p2 << " 2N2MM=" << p1E << "," << p2E << " 2NXM=" << p2X << "," << p2X2 << " SKIP=" << extra1 << "," << extra2 << std::endl;
     processed_lines_local = 0;
     buf_raw.reset();
-    bytes_out += p1 + p2 + p1E + p2E + p2X + p2X2 + praw + extra1 + extra2;
+    bytes_out += p1 + p2 + p1E + p2E + p2X + p2X2 + extra1 + extra2;
+    // bytes_out += (s64[0].size()) + (s64[1].size()) + p1E + p2E + p2X + p2X2 + praw + extra1 + extra2;
     std::cerr << "[PROGRESS] " << bytes_in << "->" << bytes_out << " (" << (double)bytes_in/bytes_out << "-fold ubcf, " << (double)bytes_in_vcf/bytes_out << "-fold vcf)" << std::endl;
 
+    
+    // s64[0].reset();
+    // s64[1].reset();
+    
 #if DEBUG_PBWT
         // Reset digests.
         for (int i = 0; i < 6; ++i) {
@@ -1453,4 +1510,6 @@ int GenotypeCompressorRLEBitmap::EncodeRLEBitmap2NXM(const int target) {
     ++gt_width[n_objects];
 
     return n_objects;
+}
+
 }

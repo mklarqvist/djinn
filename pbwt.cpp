@@ -5,6 +5,8 @@
 #include <bitset>
 #include <cmath>//ceil
 
+namespace djinn {
+
 PBWT::PBWT() :
     n_symbols(0),
     n_samples(0),
@@ -268,14 +270,14 @@ GeneralPBWTModel::GeneralPBWTModel(int64_t n_samples, int n_symbols) :
     model_context_shift(ceil(log2(n_symbols))),
     model_context(0),
     pbwt(std::make_shared<PBWT>(n_samples, n_symbols)),
-    range_coder(std::make_shared<pil::RangeCoder>()),
+    range_coder(std::make_shared<RangeCoder>()),
     n_buffer(10000000),
     buffer(new uint8_t[n_buffer]),
     n_additions(0)
 {
     assert(n_symbols > 1);
     models.resize(MODEL_SIZE);
-    for (int i = 0; i < MODEL_SIZE; ++i) models[i] = std::make_shared<pil::FrequencyModel>();
+    for (int i = 0; i < MODEL_SIZE; ++i) models[i] = std::make_shared<FrequencyModel>();
 
     Reset();
 }
@@ -290,11 +292,11 @@ void GeneralPBWTModel::Construct(int64_t n_samples, int n_symbols) {
     model_context_shift = ceil(log2(n_symbols));
     model_context = 0;
     pbwt = std::make_shared<PBWT>(n_samples, n_symbols);
-    range_coder = std::make_shared<pil::RangeCoder>();
+    range_coder = std::make_shared<RangeCoder>();
 
     assert(n_symbols > 1);
     models.resize(MODEL_SIZE);
-    for (int i = 0; i < MODEL_SIZE; ++i) models[i] = std::make_shared<pil::FrequencyModel>();
+    for (int i = 0; i < MODEL_SIZE; ++i) models[i] = std::make_shared<FrequencyModel>();
 
     Reset();
 }
@@ -320,6 +322,12 @@ void GeneralPBWTModel::Reset() {
     ResetContext();
 }
 
+void GeneralPBWTModel::ResetExceptPBWT() {
+    n_additions = 0;
+    ResetModels();
+    ResetContext();
+}
+
 int GeneralPBWTModel::FinishEncoding() {
     range_coder->FinishEncode();
     int ret = range_coder->OutSize();
@@ -341,8 +349,39 @@ void GeneralPBWTModel::StartDecoding(uint8_t* data) {
     range_coder->StartDecode();
 }
 
+// static int tester = 0;
+// static uint64_t n_tester_total = 0;
+// static uint64_t n_splits8 = 0;
+// static uint64_t n_splits16 = 0;
+// static uint64_t n_splits32 = 0;
+// static uint64_t n_splits64 = 0;
+
+// static uint64_t n_splits8r = 0;
+// static uint64_t n_splits16r = 0;
+// static uint64_t n_splits32r = 0;
+// static uint64_t n_splits64r = 0;
+
 void GeneralPBWTModel::EncodeSymbol(const uint16_t symbol) {
-    models[model_context]->EncodeSymbol(range_coder.get(), symbol);
+    // if (model_context == 0) {
+    //     if (symbol) {
+    //        n_splits8 += tester/8;
+    //        n_splits16 += tester/16;
+    //        n_splits32 += tester/32;
+    //        n_splits64 += tester/64;
+    //        n_splits8r += tester - (tester/8)*8;
+    //        n_splits16r += tester - (tester/16)*16;
+    //        n_splits32r += tester - (tester/32)*32;
+    //        n_splits64r += tester - (tester/64)*64;
+    //        std::cerr << "tester=" << tester << "->" << n_tester_total << ", " << n_splits8 << "+" << n_splits8r << "," << n_splits16 << "+" << n_splits16r << "," << n_splits32 << "+" << n_splits32r << "," << n_splits64 << "+" << n_splits64r << std::endl;
+    //        tester = 0;
+    //    } else {
+    //        ++tester;
+    //        ++n_tester_total;
+    //    }
+    // } else 
+        
+        models[model_context]->EncodeSymbol(range_coder.get(), symbol);
+
     model_context <<= model_context_shift;
     model_context |= symbol;
     model_context &= (MODEL_SIZE-1);
@@ -357,4 +396,6 @@ uint16_t GeneralPBWTModel::DecodeSymbol() {
     model_context &= (MODEL_SIZE-1);
     _mm_prefetch((const char *)&(models[model_context]), _MM_HINT_T0);
     return symbol;
+}
+
 }

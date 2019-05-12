@@ -2,6 +2,16 @@
 
 ![screenshot](DJINN.png)
 
+Djinn is an open-source C++ library for efficiently storing and analyzing whole-genome genotypes and/or haplotypes. Unlike previous efforts, the Djinn algortihms support multiple alternative alleles (up to 16) and mixed phasing.
+
+1. Haplotype PBWT with word-aligned hybrid compression.
+2. Haplotype PBWT with higher-order context modelling.
+3. Genotype PBWT with word-aligned hybrid compression. 
+4. Word-aligned hybrid compression only for use with the gtOcc data structure.
+5. Block-wise genotype PBWT with word-aligned hybrid compression.
+
+### Building
+
 Building requires the packages: [htslib](https://github.com/samtools/htslib), [zstd](https://github.com/facebook/zstd), [lz4](https://github.com/lz4/lz4), and `openssl` if debugging.
 
 ### Note
@@ -16,8 +26,9 @@ This is a collaborative effort between Marcus D. R. Klarqvist ([@klarqvist](http
 |-----------------------|-------------|-------------------------|-------------|-------------------|-------------------|
 | hPBWT + WAH + LZ4-HC9 | 31.62       | 551.64                  | 2m12.883s   | 26.104s           | 30.441s           |
 | hPBWT + WAH + ZSTD-19 | 26.91       | 648.2                   | 2m16.400s   | 27.784s           | 30.560s           |
-| hPBWT + context       | 18.45       | 945.42                  | 2m32.443s   | 1                 | 1                 |
+| hPBWT + context       | 18.49       | 943.37                  | 2m0.808s    | 26.179s           | 27.482s           |
 | BGT*                  | 64.47       | 270.56                  | 2m20.834s   | CORRUPTED         | CORRUPTED         |
+| GTShark               | 12.6        | 1384.36                 | 2m23.363s   | 7m55.707s         | 2m19.970s         |
 | GQT                   | 233.7       | 74.64                   | 8m13.750s   | N/A               | N/A               |
 | BCF                   | 196.88      | 88.6                    | -           | 2m22.953s         | -                 |
 | uBCF                  | 8683.26     | 2.01                    | -           | 2m4.911s          | 2m17.367s         |
@@ -26,17 +37,18 @@ This is a collaborative effort between Marcus D. R. Klarqvist ([@klarqvist](http
 
 HRC-chr11 (n = 32470, m = 1936990)
 
-| Approach              | Output (MB) | Compression ratio (VCF) | Import time | Output VCF (time) | Output BCF (time) |
-|-----------------------|-------------|-------------------------|-------------|-------------------|-------------------|
-| hPBWT + WAH + LZ4-HC9 | 181.26      | 1388.22                 | 32m2.310s   | 7m16.925s         | 7m27.964s         |
-| hPBWT + WAH + ZSTD-19 | 156         | 1613.01                 | 33m0.165s   |                   |                   |
-| hPBWT + context       | 123.19      | 2042.61                 |             |                   |                   |
-| BGT*                  | 365.65      | 688.17                  | 33m10.116s  | 25m11.121s        | 12m5.086s         |
-| GQT                   |             |                  |             | N/A               | N/A               |
-| BCF                   | 3476.07     | 72.39                   |             |                   |                   |
-| uBCF                  |             |                  |             |                   |                   |
-| VCF.gz**              |             |                  |             |                   |                   |
-| VCF**                 | 251629.59   | 1                       |             |                   |                   |
+| Approach              | Output (MB) | Compression ratio (VCF) | Import time | Output VCF (time)       | Output BCF (time) |
+|-----------------------|-------------|-------------------------|-------------|-------------------------|-------------------|
+| hPBWT + WAH + LZ4-HC9 | 181.26      | 1388.22                 | 32m2.310s   | 7m16.925s               | 7m27.964s         |
+| hPBWT + WAH + ZSTD-19 | 156         | 1613.01                 | 33m0.165s   | 7m13.414s               | 7m26.049s         |
+| hPBWT + context       | 123.19      | 2042.61                 | 41m16.079s  | 1                       | 1                 |
+| BGT*                  | 365.65      | 688.17                  | 33m10.116s  | 25m11.121s              | 12m5.086s         |
+| GTShark               | 89.78       | 2802.74                 | 33m38.250s  |                         | 36m10.505s        |
+| GQT                   | 4877.69     | 51.59                   | 195m16.803s | N/A                     | N/A               |
+| BCF                   | 3476.07     | 72.39                   | -           | 36m15.195s              | -                 |
+| uBCF                  | 125549.35   | 2                       | -           | 31m56.717s              | 41m22.754s        |
+| VCF.gz**              | 3940.51     | 63.86                   | -           | 104m19.148s             |                   |
+| VCF**                 | 251629.59   | 1                       | -           | 95m48.053s (14m28.331s) |                   |
 
 ### Stripped vcf files
 
