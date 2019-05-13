@@ -17,6 +17,10 @@ Implemented algorithms:
 
 Building requires the packages: [htslib](https://github.com/samtools/htslib), [zstd](https://github.com/facebook/zstd), [lz4](https://github.com/lz4/lz4), and `openssl` if debugging. Build with `make` and build with debug flags by passing invoking `make debug`. Compile with `make debug_size` to get compression performance dumped to the console.
 
+### Usage
+
+Compile and execute `djinn` to display available command line options. For usage of the library, see `main.cpp` for an example. Detailed examples coming soon.
+
 ### Note
 
 This is a collaborative effort between Marcus D. R. Klarqvist ([@klarqvist](https://github.com/mklarqvist/)) and James Bonfield ([@jkbonfield](https://github.com/jkbonfield)).
@@ -43,7 +47,7 @@ This is a collaborative effort between Marcus D. R. Klarqvist ([@klarqvist](http
 
 \* Listing size of the genotype component (`pbf` file); ^ listing size of the genotype component only (`_gt` file).
 
-HRC-chr11 (n = 32470, m = 1936990)
+HRC-chr11 (n = 32470, m = 1936990). 
 
 | Approach                 | Output (MB) | Compression ratio (VCF) | Import time | Output VCF (time)       | Output BCF (time) |
 |--------------------------|-------------|-------------------------|-------------|-------------------------|-------------------|

@@ -200,7 +200,7 @@ int DecompressExample(const std::string& file, int type) {
 
 void usage() {
     printf("djinn\n");
-    printf("   -i STRING input file (required)\n");
+    printf("   -i STRING input file (vcf,vcf.gz,bcf, or ubcf (required))\n");
     printf("   -c BOOL   compress file\n");
     printf("   -d BOOL   decompress file\n");
     printf("   -z BOOL   compress with RLE-hybrid + ZSTD-19\n");
