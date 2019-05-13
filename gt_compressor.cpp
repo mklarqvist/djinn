@@ -223,6 +223,9 @@ int GenotypeCompressorModelling::Encode2N2MC(uint8_t* data, const int32_t n_data
     assert(debug_pbwt[0].UpdateDigestStride(&data[0], n_data, 2));
     assert(debug_pbwt[1].UpdateDigestStride(&data[1], n_data, 2));
 #endif
+
+    ++base_models[0];
+    ++base_models[1];
     
     if (permute_pbwt) {
         base_models[0].pbwt->Update(&data[0], 2);
@@ -249,7 +252,6 @@ int GenotypeCompressorModelling::Encode2N2MC(uint8_t* data, const int32_t n_data
                 offset_end = offset + step_size < n_samples ? offset + step_size : n_samples;
                 for (int j = offset; j < offset_end; ++j) {
                     base_models[0].EncodeSymbol(base_models[0].pbwt->prev[j]);
-                    // s64[0].Encode(base_models[0].pbwt->prev[j]);
                 }
             } else base_model_bitmaps[0].EncodeSymbol(0);
             offset += step_size;
@@ -271,7 +273,6 @@ int GenotypeCompressorModelling::Encode2N2MC(uint8_t* data, const int32_t n_data
                 offset_end = offset + step_size < n_samples ? offset + step_size : n_samples;
                 for (int j = offset; j < offset_end; ++j) {
                     base_models[1].EncodeSymbol(base_models[1].pbwt->prev[j]);
-                    // s64[1].Encode(base_models[0].pbwt->prev[j]);
                 }
             } else base_model_bitmaps[1].EncodeSymbol(0);
             offset += step_size;
@@ -281,14 +282,12 @@ int GenotypeCompressorModelling::Encode2N2MC(uint8_t* data, const int32_t n_data
         for (int j = 0; j < n_samples; ++j) {
             // assert(base_models[0].pbwt->prev[j] < 2);
             base_models[0].EncodeSymbol(base_models[0].pbwt->prev[j]);
-            // s64[0].Encode(base_models[0].pbwt->prev[j]);
         }
 
         base_models[1].ResetContext();
         for (int i = 0; i < n_samples; ++i) {
             // assert(base_models[1].pbwt->prev[i] < 2);
             base_models[1].EncodeSymbol(base_models[1].pbwt->prev[i]);
-            // s64[1].Encode(base_models[0].pbwt->prev[i]);
         }
 #endif
     } // end permute pbwt
@@ -314,7 +313,6 @@ int GenotypeCompressorModelling::Encode2N2MC(uint8_t* data, const int32_t n_data
                 offset_end = offset + step_size < n_samples ? offset + step_size : n_samples;
                 for (int j = offset; j < offset_end; ++j) {
                     base_models[0].EncodeSymbol(BCF_UNPACK_GENOTYPE(data[0+j*2]));
-                    // s64[0].Encode(base_models[0].pbwt->prev[j]);
                 }
             } else base_model_bitmaps[0].EncodeSymbol(0);
             offset += step_size;
@@ -336,7 +334,6 @@ int GenotypeCompressorModelling::Encode2N2MC(uint8_t* data, const int32_t n_data
                 offset_end = offset + step_size < n_samples ? offset + step_size : n_samples;
                 for (int j = offset; j < offset_end; ++j) {
                     base_models[1].EncodeSymbol(BCF_UNPACK_GENOTYPE(data[1+j*2]));
-                    // s64[1].Encode(base_models[0].pbwt->prev[j]);
                 }
             } else base_model_bitmaps[1].EncodeSymbol(0);
             offset += step_size;
@@ -365,6 +362,9 @@ int GenotypeCompressorModelling::Encode2N2MM(uint8_t* data, const int32_t n_data
     assert(debug_pbwt[2].UpdateDigestStride(&data[0], n_data, 2));
     assert(debug_pbwt[3].UpdateDigestStride(&data[1], n_data, 2));
 #endif
+
+    ++base_models[2];
+    ++base_models[3];
 
     if (permute_pbwt) {
         // std::cerr << "Encode2N2MM" << std::endl;
@@ -412,6 +412,9 @@ int GenotypeCompressorModelling::Encode2NXM(uint8_t* data, const int32_t n_data,
     assert(debug_pbwt[4].UpdateDigestStride(&data[0], n_data, 2));
     assert(debug_pbwt[5].UpdateDigestStride(&data[1], n_data, 2));
 #endif
+
+    ++base_models_complex[0];
+    ++base_models_complex[1];
 
     // std::cerr << "Ecndoe2nXM: " << n_alleles << std::endl;
     if (permute_pbwt) {
@@ -464,7 +467,7 @@ int GenotypeCompressorModelling::Compress(djinn_block_t*& block) {
     for (int i = 0; i < 6; ++i) {
         if (debug_pbwt[i].len) {
             debug_pbwt[i].FinalizeDigest();
-            std::cerr << "Digest-" << i << "=" << std::hex << (int)debug_pbwt[i].digest[0];
+            std::cerr << "[SHA512] Digest-" << i << "=" << std::hex << (int)debug_pbwt[i].digest[0];
             for (int j = 1; j < 64; ++j) std::cerr << std::hex << (int)debug_pbwt[i].digest[j];
             std::cerr << std::dec << std::endl;
         }
@@ -489,6 +492,7 @@ int GenotypeCompressorModelling::Compress(djinn_block_t*& block) {
         data_out->ctx_models[DJINN_CTX_MODEL_DI2MC1].SetDataReference(base_models[0].buffer, p1);
         data_out->ctx_models[DJINN_CTX_MODEL_DI2MC1].n = base_models[0].n_additions;
         data_out->ctx_models[DJINN_CTX_MODEL_DI2MC1].n_c = p1;
+        data_out->ctx_models[DJINN_CTX_MODEL_DI2MC1].n_v = base_models[0].n_variants;
         assert(memcmp(base_models[0].buffer, data_out->ctx_models[DJINN_CTX_MODEL_DI2MC1].vptr, p1) == 0);
 
         data_out->ctx_partitions[DJINN_CTX_MODEL_DI2MC_PART1].SetDataReference(base_model_bitmaps[0].buffer, extra1);
@@ -504,7 +508,8 @@ int GenotypeCompressorModelling::Compress(djinn_block_t*& block) {
 
         data_out->ctx_models[DJINN_CTX_MODEL_DI2MC2].SetDataReference(base_models[1].buffer, p2);
         data_out->ctx_models[DJINN_CTX_MODEL_DI2MC2].n = base_models[1].n_additions;
-        data_out->ctx_models[DJINN_CTX_MODEL_DI2MC1].n_c = p2;
+        data_out->ctx_models[DJINN_CTX_MODEL_DI2MC2].n_c = p2;
+        data_out->ctx_models[DJINN_CTX_MODEL_DI2MC2].n_v = base_models[1].n_variants;
 
         data_out->ctx_partitions[DJINN_CTX_MODEL_DI2MC_PART2].SetDataReference(base_model_bitmaps[1].buffer, extra2);
         data_out->ctx_partitions[DJINN_CTX_MODEL_DI2MC_PART2].n = base_model_bitmaps[1].n_additions;
@@ -518,6 +523,7 @@ int GenotypeCompressorModelling::Compress(djinn_block_t*& block) {
         data_out->ctx_models[DJINN_CTX_MODEL_DI2MM1].SetDataReference(base_models[2].buffer, p1E);
         data_out->ctx_models[DJINN_CTX_MODEL_DI2MM1].n = base_models[2].n_additions;
         data_out->ctx_models[DJINN_CTX_MODEL_DI2MM1].n_c = p1E;
+        data_out->ctx_models[DJINN_CTX_MODEL_DI2MM1].n_v = base_models[2].n_variants;
     }
 
     if (base_models[3].n_additions) {
@@ -526,6 +532,7 @@ int GenotypeCompressorModelling::Compress(djinn_block_t*& block) {
         data_out->ctx_models[DJINN_CTX_MODEL_DI2MM2].SetDataReference(base_models[3].buffer, p2E);
         data_out->ctx_models[DJINN_CTX_MODEL_DI2MM2].n = base_models[3].n_additions;
         data_out->ctx_models[DJINN_CTX_MODEL_DI2MM2].n_c = p2E;
+        data_out->ctx_models[DJINN_CTX_MODEL_DI2MM2].n_v = base_models[3].n_variants;
     }
 
     if (base_models_complex[0].n_additions) {
@@ -533,6 +540,7 @@ int GenotypeCompressorModelling::Compress(djinn_block_t*& block) {
         data_out->ctx_models[DJINN_CTX_MODEL_DI2X1].SetDataReference(base_models_complex[0].buffer, p2X);
         data_out->ctx_models[DJINN_CTX_MODEL_DI2X1].n = base_models_complex[0].n_additions;
         data_out->ctx_models[DJINN_CTX_MODEL_DI2X1].n_c = p2X;
+        data_out->ctx_models[DJINN_CTX_MODEL_DI2X1].n_v = base_models_complex[0].n_variants;
     }
 
     if (base_models_complex[1].n_additions) {
@@ -541,6 +549,7 @@ int GenotypeCompressorModelling::Compress(djinn_block_t*& block) {
         data_out->ctx_models[DJINN_CTX_MODEL_DI2X2].SetDataReference(base_models_complex[1].buffer, p2X2);
         data_out->ctx_models[DJINN_CTX_MODEL_DI2X2].n = base_models_complex[1].n_additions;
         data_out->ctx_models[DJINN_CTX_MODEL_DI2X2].n_c = p2X2;
+        data_out->ctx_models[DJINN_CTX_MODEL_DI2X2].n_v = base_models_complex[1].n_variants;
     }
 
     block->n_rcds = processed_lines_local;
@@ -552,160 +561,17 @@ int GenotypeCompressorModelling::Compress(djinn_block_t*& block) {
     // oblock->Serialize(std::cout);
     // std::cout.write((char*)base_models[0].buffer, p1);
     // std::cout.flush();
-    std::cerr << "Written size=" << block->p_len << " ctrl=" << std::bitset<16>(block->ctrl) << std::endl;
+    // std::cerr << "Written size=" << block->p_len << " ctrl=" << std::bitset<16>(block->ctrl) << std::endl;
 
 #if DEBUG_PBWT
-    std::cerr << "debug1: " << p1 << std::endl;
-    DebugContext(base_models[0].buffer, p1,  base_model_bitmaps[0].buffer, extra1, debug_pbwt[0].buffer, debug_pbwt[0].len/n_samples, 2, &GenotypeDecompressorContext::Decode, TWK_BCF_GT_UNPACK);
-    std::cerr << "debug2: " << p2 << std::endl;
-    DebugContext(base_models[1].buffer, p2,  base_model_bitmaps[1].buffer, extra2, debug_pbwt[1].buffer, debug_pbwt[1].len/n_samples, 2, &GenotypeDecompressorContext::Decode, TWK_BCF_GT_UNPACK);
-    std::cerr << "debug3: " << p1E << std::endl;
-    DebugContext(base_models[2].buffer, p1E, debug_pbwt[2].buffer, debug_pbwt[2].len/n_samples, 4, &GenotypeDecompressorContext::Decode2, TWK_BCF_GT_UNPACK);
-    std::cerr << "debug4: " << p2E << std::endl;
-    DebugContext(base_models[3].buffer, p2E, debug_pbwt[3].buffer, debug_pbwt[3].len/n_samples, 4, &GenotypeDecompressorContext::Decode2, TWK_BCF_GT_UNPACK);
-    std::cerr << "debug5: " << p2X << std::endl;
-    DebugContext(base_models_complex[0].buffer, p2X,  debug_pbwt[4].buffer, debug_pbwt[4].len/n_samples, 16, &GenotypeDecompressorContext::Decode2, TWK_BCF_GT_UNPACK_GENERAL);
-    std::cerr << "debug6: " << p2X2 << std::endl;
-    DebugContext(base_models_complex[1].buffer, p2X2, debug_pbwt[5].buffer, debug_pbwt[5].len/n_samples, 16, &GenotypeDecompressorContext::Decode2, TWK_BCF_GT_UNPACK_GENERAL);
-    std::cerr << "debug end" << std::endl;
-    
-    /*
-    if (permute_pbwt) { 
-        if (debug_pbwt[0].len) {
-            assert(debug_pbwt[0].len > 0 && debug_pbwt[1].len > 0);
-            assert(debug_pbwt[0].len/n_samples == debug_pbwt[1].len/n_samples);
-            uint32_t n_cycles = debug_pbwt[0].len/n_samples;
-
-            std::shared_ptr<GenotypeDecompressorContext> debug1 = std::make_shared<GenotypeDecompressorContext>((uint8_t*)base_models[0].buffer, p1, (uint8_t*)base_model_bitmaps[0].buffer, extra1, n_cycles, n_samples, 2);
-            PBWT pbwt1(n_samples, 2);
-
-            uint8_t* debug_buf = new uint8_t[n_samples];
-            uint32_t debug_offset = 0;
-            for (int i = 0; i < n_cycles; ++i) {
-                debug1->Decode(debug_buf);
-                pbwt1.ReverseUpdate(debug_buf);
-                for (int j = 0; j < n_samples; ++j) {
-                    assert(BCF_UNPACK_GENOTYPE(debug_pbwt[0].buffer[debug_offset + j]) == pbwt1.prev[j]);
-                }
-                debug_offset += n_samples;
-            }
-            assert(debug1->model->range_coder->InSize() == p1);
-            assert(debug1->partition->range_coder->InSize() == extra1);
-            delete[] debug_buf;
-        }
-
-        if (debug_pbwt[1].len) {
-            assert(debug_pbwt[0].len > 0 && debug_pbwt[1].len > 0);
-            assert(debug_pbwt[0].len/n_samples == debug_pbwt[1].len/n_samples);
-            uint32_t n_cycles = debug_pbwt[0].len/n_samples;
-
-            std::shared_ptr<GenotypeDecompressorContext> debug1 = std::make_shared<GenotypeDecompressorContext>((uint8_t*)base_models[1].buffer, p2, (uint8_t*)base_model_bitmaps[1].buffer, extra2, n_cycles, n_samples, 2);
-            PBWT pbwt1(n_samples, 2);
-            
-            uint8_t* debug_buf = new uint8_t[n_samples];
-            uint32_t debug_offset = 0;
-            for (int i = 0; i < n_cycles; ++i) {
-                debug1->Decode(debug_buf);
-                pbwt1.ReverseUpdate(debug_buf);
-                for (int j = 0; j < n_samples; ++j) {
-                    assert(BCF_UNPACK_GENOTYPE(debug_pbwt[1].buffer[debug_offset + j]) == pbwt1.prev[j]);
-                }
-                debug_offset += n_samples;
-            }
-            assert(debug1->model->range_coder->InSize() == p2);
-            assert(debug1->partition->range_coder->InSize() == extra2);
-            delete[] debug_buf;
-        }
-
-        if (debug_pbwt[2].len) {
-            assert(debug_pbwt[2].len > 0 && debug_pbwt[3].len > 0);
-            assert(debug_pbwt[2].len/n_samples == debug_pbwt[3].len/n_samples);
-            uint32_t n_cycles = debug_pbwt[2].len/n_samples;
-
-            std::shared_ptr<GenotypeDecompressorContext> debug1 = std::make_shared<GenotypeDecompressorContext>((uint8_t*)base_models[2].buffer, p1E, n_cycles, n_samples, 4);
-            PBWT pbwt1(n_samples, 4);
-            
-            uint8_t* debug_buf = new uint8_t[n_samples];
-            uint32_t debug_offset = 0;
-            for (int i = 0; i < n_cycles; ++i) {
-                debug1->Decode2(debug_buf);
-                pbwt1.ReverseUpdate(debug_buf);
-                for (int j = 0; j < n_samples; ++j) {
-                    assert(BCF_UNPACK_GENOTYPE(debug_pbwt[2].buffer[debug_offset + j]) == pbwt1.prev[j]);
-                }
-                debug_offset += n_samples;
-            }
-            assert(debug1->model->range_coder->InSize() == p1E);
-            delete[] debug_buf;
-        }
-
-        if (debug_pbwt[3].len) {
-            assert(debug_pbwt[2].len > 0 && debug_pbwt[3].len > 0);
-            assert(debug_pbwt[2].len/n_samples == debug_pbwt[3].len/n_samples);
-            uint32_t n_cycles = debug_pbwt[2].len/n_samples;
-
-            std::shared_ptr<GenotypeDecompressorContext> debug1 = std::make_shared<GenotypeDecompressorContext>((uint8_t*)base_models[3].buffer, p2E, n_cycles, n_samples, 4);
-            PBWT pbwt1(n_samples, 4);
-            
-            uint8_t* debug_buf = new uint8_t[n_samples];
-            uint32_t debug_offset = 0;
-            for (int i = 0; i < n_cycles; ++i) {
-                debug1->Decode2(debug_buf);
-                pbwt1.ReverseUpdate(debug_buf);
-                for (int j = 0; j < n_samples; ++j) {
-                    assert(BCF_UNPACK_GENOTYPE(debug_pbwt[3].buffer[debug_offset + j]) == pbwt1.prev[j]);
-                }
-                debug_offset += n_samples;
-            }
-            assert(debug1->model->range_coder->InSize() == p2E);
-            delete[] debug_buf;
-        }
-
-        if (debug_pbwt[4].len) {
-            assert(debug_pbwt[4].len > 0 && debug_pbwt[5].len > 0);
-            assert(debug_pbwt[4].len/n_samples == debug_pbwt[5].len/n_samples);
-            uint32_t n_cycles = debug_pbwt[4].len/n_samples;
-
-            std::shared_ptr<GenotypeDecompressorContext> debug1 = std::make_shared<GenotypeDecompressorContext>((uint8_t*)base_models_complex[0].buffer, p2X, n_cycles, n_samples, 16);
-            PBWT pbwt1(n_samples, 16);
-            
-            uint8_t* debug_buf = new uint8_t[n_samples];
-            uint32_t debug_offset = 0;
-            for (int i = 0; i < n_cycles; ++i) {
-                debug1->Decode2(debug_buf);
-                pbwt1.ReverseUpdate(debug_buf);
-                for (int j = 0; j < n_samples; ++j) {
-                    assert(BCF_UNPACK_GENOTYPE_GENERAL(debug_pbwt[4].buffer[debug_offset + j]) == pbwt1.prev[j]);
-                }
-                debug_offset += n_samples;
-            }
-            assert(debug1->model->range_coder->InSize() == p2X);
-            delete[] debug_buf;
-        }
-
-        if (debug_pbwt[5].len) {
-            assert(debug_pbwt[4].len > 0 && debug_pbwt[5].len > 0);
-            assert(debug_pbwt[4].len/n_samples == debug_pbwt[5].len/n_samples);
-            uint32_t n_cycles = debug_pbwt[4].len/n_samples;
-
-            std::shared_ptr<GenotypeDecompressorContext> debug1 = std::make_shared<GenotypeDecompressorContext>((uint8_t*)base_models_complex[1].buffer, p2X2, n_cycles, n_samples, 16);
-            PBWT pbwt1(n_samples, 16);
-
-            uint8_t* debug_buf = new uint8_t[n_samples];
-            uint32_t debug_offset = 0;
-            for (int i = 0; i < n_cycles; ++i) {
-                debug1->Decode2(debug_buf);
-                pbwt1.ReverseUpdate(debug_buf);
-                for (int j = 0; j < n_samples; ++j) {
-                    assert(BCF_UNPACK_GENOTYPE_GENERAL(debug_pbwt[5].buffer[debug_offset + j]) == pbwt1.prev[j]);
-                }
-                debug_offset += n_samples;
-            }
-            assert(debug1->model->range_coder->InSize() == p2X2);
-            delete[] debug_buf;
-        }
-    } // end if using pbwt
-    */
+    // for (int i = 0; i < 4; ++i) std::cerr << "variants=" << base_models[i].n_variants << std::endl;
+    // for (int i = 0; i < 2; ++i) std::cerr << "variants=" << base_models_complex[i].n_variants << std::endl;
+    DebugContext(base_models[0].buffer, p1,  base_model_bitmaps[0].buffer, extra1, debug_pbwt[0].buffer, base_models[0].n_variants, 2, &GenotypeDecompressorContext::Decode, TWK_BCF_GT_UNPACK);
+    DebugContext(base_models[1].buffer, p2,  base_model_bitmaps[1].buffer, extra2, debug_pbwt[1].buffer, base_models[1].n_variants, 2, &GenotypeDecompressorContext::Decode, TWK_BCF_GT_UNPACK);
+    DebugContext(base_models[2].buffer, p1E, debug_pbwt[2].buffer, base_models[2].n_variants, 4, &GenotypeDecompressorContext::Decode2, TWK_BCF_GT_UNPACK);
+    DebugContext(base_models[3].buffer, p2E, debug_pbwt[3].buffer, base_models[3].n_variants, 4, &GenotypeDecompressorContext::Decode2, TWK_BCF_GT_UNPACK);
+    DebugContext(base_models_complex[0].buffer, p2X,  debug_pbwt[4].buffer, base_models_complex[0].n_variants, 16, &GenotypeDecompressorContext::Decode2, TWK_BCF_GT_UNPACK_GENERAL);
+    DebugContext(base_models_complex[1].buffer, p2X2, debug_pbwt[5].buffer, base_models_complex[1].n_variants, 16, &GenotypeDecompressorContext::Decode2, TWK_BCF_GT_UNPACK_GENERAL);
 #endif
 
     base_models[0].Reset();
@@ -726,31 +592,13 @@ int GenotypeCompressorModelling::Compress(djinn_block_t*& block) {
     base_model_bitmaps[0].StartEncoding();
     base_model_bitmaps[1].StartEncoding();
 
-    // uint8_t* debug_buffer_rle = new uint8_t[20000000];
-
-    // s64[0].Flush();
-    // s64[1].Flush();
-    // size_t ps64_rle = ZstdCompress(s64[0].rle_buf, s64[0].l_rle_buf,
-    //                            buf_compress.data, buf_compress.capacity(),
-    //                            20);
-
-    // std::cerr << "[s64[0]] " << s64[0].size() << std::endl;
-    // size_t ps64_rle2 = ZstdCompress(s64[1].rle_buf, s64[1].l_rle_buf,
-    //                            buf_compress.data, buf_compress.capacity(),
-    //                            20);
-
-    // std::cerr << "[s64[1]] " << s64[1].size() << std::endl;
-
+    bytes_out += p1 + p2 + p1E + p2E + p2X + p2X2 + extra1 + extra2;
+#if DEBUG_SIZE
     std::cerr << "[WRITE] Variants=" << processed_lines_local << " 2N2MC=" << p1 << "," << p2 << " 2N2MM=" << p1E << "," << p2E << " 2NXM=" << p2X << "," << p2X2 << " SKIP=" << extra1 << "," << extra2 << std::endl;
+    std::cerr << "[PROGRESS] " << bytes_in << "->" << bytes_out << " (" << (double)bytes_in/bytes_out << "-fold ubcf, " << (double)bytes_in_vcf/bytes_out << "-fold vcf)" << std::endl;
+#endif
     processed_lines_local = 0;
     buf_raw.reset();
-    bytes_out += p1 + p2 + p1E + p2E + p2X + p2X2 + extra1 + extra2;
-    // bytes_out += (s64[0].size()) + (s64[1].size()) + p1E + p2E + p2X + p2X2 + praw + extra1 + extra2;
-    std::cerr << "[PROGRESS] " << bytes_in << "->" << bytes_out << " (" << (double)bytes_in/bytes_out << "-fold ubcf, " << (double)bytes_in_vcf/bytes_out << "-fold vcf)" << std::endl;
-
-    
-    // s64[0].reset();
-    // s64[1].reset();
     
 #if DEBUG_PBWT
         // Reset digests.
@@ -759,7 +607,7 @@ int GenotypeCompressorModelling::Compress(djinn_block_t*& block) {
         }
 #endif
 
-    return 1;
+    return oblock->size();
 }
 
 #if DEBUG_CONTEXT
@@ -859,9 +707,11 @@ GenotypeCompressorRLEBitmap::GenotypeCompressorRLEBitmap(int64_t n_s) : Genotype
 {
     strategy = CompressionStrategy::LZ4;
 
-    gt_width.resize(n_s, 0);
+    // gt_width.resize(n_s, 0);
     for (int i = 0; i < 6; ++i)
         buf_wah[i].resize(10000000);
+        
+    for (int i = 0; i < 6; ++i) n_variants[i] = 0;
     
     base_pbwt[0].Initiate(n_s, 2);
     base_pbwt[1].Initiate(n_s, 2);
@@ -928,6 +778,9 @@ int GenotypeCompressorRLEBitmap::Encode2N2MC(uint8_t* data, const int32_t n_data
     assert(debug_pbwt[0].UpdateDigestStride(&data[0], n_data, 2));
     assert(debug_pbwt[1].UpdateDigestStride(&data[1], n_data, 2));
 #endif
+
+    ++n_variants[0];
+    ++n_variants[1];
 
 #if DEBUG_WAH
     uint32_t buf_wah_before = buf_wah[0].len;
@@ -1009,6 +862,9 @@ int GenotypeCompressorRLEBitmap::Encode2N2MM(uint8_t* data, const int32_t n_data
     assert(debug_pbwt[3].UpdateDigestStride(&data[1], n_data, 2));
 #endif
 
+    ++n_variants[2];
+    ++n_variants[3];
+
     // std::cerr << "2N2MM" << std::endl;
 
 #if DEBUG_WAH
@@ -1085,6 +941,9 @@ int GenotypeCompressorRLEBitmap::Encode2NXM(uint8_t* data, const int32_t n_data,
     assert(debug_pbwt[4].UpdateDigestStride(&data[0], n_data, 2));
     assert(debug_pbwt[5].UpdateDigestStride(&data[1], n_data, 2));
 #endif
+
+    ++n_variants[4];
+    ++n_variants[5];
 
     // Todo: check for missing and EOV and ascertain total < 16
     if (n_alleles >= 14) {
@@ -1193,7 +1052,7 @@ int GenotypeCompressorRLEBitmap::Compress(djinn_block_t*& block) {
     for (int i = 0; i < 6; ++i) {
         if (debug_pbwt[i].len) {
             debug_pbwt[i].FinalizeDigest();
-            std::cerr << "Digest-" << i << "=" << std::hex << (int)debug_pbwt[i].digest[0];
+            std::cerr << "[SHA512] Digest-" << i << "=" << std::hex << (int)debug_pbwt[i].digest[0];
             for (int j = 1; j < 64; ++j) std::cerr << std::hex << (int)debug_pbwt[i].digest[j];
             std::cerr << std::dec << std::endl;
         }
@@ -1201,12 +1060,12 @@ int GenotypeCompressorRLEBitmap::Compress(djinn_block_t*& block) {
 #endif
 
 #if DEBUG_PBWT
-    DebugWAH(buf_wah[0].data, buf_wah[0].len, debug_pbwt[0].buffer, 2,  &GenotypeDecompressorRLEBitmap::Decode2N2MC, TWK_BCF_GT_UNPACK);
-    DebugWAH(buf_wah[1].data, buf_wah[1].len, debug_pbwt[1].buffer, 2,  &GenotypeDecompressorRLEBitmap::Decode2N2MC, TWK_BCF_GT_UNPACK);
-    DebugWAH(buf_wah[2].data, buf_wah[2].len, debug_pbwt[2].buffer, 4,  &GenotypeDecompressorRLEBitmap::Decode2N2MM, TWK_BCF_GT_UNPACK);
-    DebugWAH(buf_wah[3].data, buf_wah[3].len, debug_pbwt[3].buffer, 4,  &GenotypeDecompressorRLEBitmap::Decode2N2MM, TWK_BCF_GT_UNPACK);
-    DebugWAH(buf_wah[4].data, buf_wah[4].len, debug_pbwt[4].buffer, 16, &GenotypeDecompressorRLEBitmap::Decode2NXM,  TWK_BCF_GT_UNPACK_GENERAL);
-    DebugWAH(buf_wah[5].data, buf_wah[5].len, debug_pbwt[5].buffer, 16, &GenotypeDecompressorRLEBitmap::Decode2NXM,  TWK_BCF_GT_UNPACK_GENERAL);
+    DebugWAH(buf_wah[0].data, buf_wah[0].len, debug_pbwt[0].buffer, n_variants[0], 2,  &GenotypeDecompressorRLEBitmap::Decode2N2MC, TWK_BCF_GT_UNPACK);
+    DebugWAH(buf_wah[1].data, buf_wah[1].len, debug_pbwt[1].buffer, n_variants[1], 2,  &GenotypeDecompressorRLEBitmap::Decode2N2MC, TWK_BCF_GT_UNPACK);
+    DebugWAH(buf_wah[2].data, buf_wah[2].len, debug_pbwt[2].buffer, n_variants[2], 4,  &GenotypeDecompressorRLEBitmap::Decode2N2MM, TWK_BCF_GT_UNPACK);
+    DebugWAH(buf_wah[3].data, buf_wah[3].len, debug_pbwt[3].buffer, n_variants[3], 4,  &GenotypeDecompressorRLEBitmap::Decode2N2MM, TWK_BCF_GT_UNPACK);
+    DebugWAH(buf_wah[4].data, buf_wah[4].len, debug_pbwt[4].buffer, n_variants[4], 16, &GenotypeDecompressorRLEBitmap::Decode2NXM,  TWK_BCF_GT_UNPACK_GENERAL);
+    DebugWAH(buf_wah[5].data, buf_wah[5].len, debug_pbwt[5].buffer, n_variants[5], 16, &GenotypeDecompressorRLEBitmap::Decode2NXM,  TWK_BCF_GT_UNPACK_GENERAL);
 #endif
 
     // Compress and add to djinn block.
@@ -1219,7 +1078,7 @@ int GenotypeCompressorRLEBitmap::Compress(djinn_block_t*& block) {
                                     20);
 
                 bytes_out_zstd1 += praw;
-                std::cerr << i << ":Zstd->compressed: " << buf_wah[i].len << "->" << praw << " (" << (float)buf_wah[i].len/praw << ")" << std::endl;
+                // std::cerr << i << ":Zstd->compressed: " << buf_wah[i].len << "->" << praw << " (" << (float)buf_wah[i].len/praw << ")" << std::endl;
             }
 
             if (strategy == CompressionStrategy::LZ4) {
@@ -1227,15 +1086,17 @@ int GenotypeCompressorRLEBitmap::Compress(djinn_block_t*& block) {
                                 buf_compress.data, buf_compress.capacity(),
                                 9);
                 
-                std::cerr << i << ":Lz4->compressed: " << buf_wah[i].len << "->" << praw << " (" << (float)buf_wah[i].len/praw << ")" << std::endl;
+                // std::cerr << i << ":Lz4->compressed: " << buf_wah[i].len << "->" << praw << " (" << (float)buf_wah[i].len/praw << ")" << std::endl;
                 bytes_out_lz4 += praw;       
             }
 
             data_out->wah_models[i].SetData(buf_compress.data, praw); // copy data because the internal buffer is immediately reused
             data_out->wah_models[i].n = buf_wah[i].len;
             data_out->wah_models[i].n_c = praw;
+            data_out->wah_models[i].n_v = n_variants[i];
+#if DEBUG_WAH
             assert(memcmp(buf_compress.data, data_out->wah_models[i].vptr, praw) == 0);
-
+#endif
             // Reset
             buf_wah[i].len = 0;
         }
@@ -1257,6 +1118,7 @@ int GenotypeCompressorRLEBitmap::Compress(djinn_block_t*& block) {
 
     processed_lines_local = 0;
     buf_raw.reset();
+    for (int i = 0; i < 6; ++i) n_variants[i] = 0;
 
     //
     block->n_rcds = processed_lines_local;
@@ -1265,12 +1127,15 @@ int GenotypeCompressorRLEBitmap::Compress(djinn_block_t*& block) {
     djinn_wah_block_t* oblock = (djinn_wah_block_t*)block;
     djinn_wah_ctrl_t* ctrl = (djinn_wah_ctrl_t*)&oblock->ctrl;
     ctrl->pbwt = permute_pbwt;
-    std::cerr << "Written size=" << block->p_len << " ctrl=" << std::bitset<16>(block->ctrl) << std::endl;
+    // std::cerr << "Written size=" << block->p_len << " ctrl=" << std::bitset<16>(block->ctrl) << std::endl;
     //
     
     // Debug compression:
+#if DEBUG_SIZE
     std::cerr << "[PROGRESS ZSTD] " << bytes_in << "->" << bytes_out_zstd1 << " (" << (double)bytes_in/bytes_out_zstd1 << "-fold ubcf, " << (double)bytes_in_vcf/bytes_out_zstd1 << "-fold vcf)" << std::endl;
     std::cerr << "[PROGRESS LZ4] "  << bytes_in << "->" << bytes_out_lz4 << " (" << (double)bytes_in/bytes_out_lz4 << "-fold ubcf, " << (double)bytes_in_vcf/bytes_out_lz4 << "-fold vcf)" << std::endl;
+#endif
+    return oblock->size();
 }
 
 int GenotypeCompressorRLEBitmap::EncodeRLEBitmap2N2MC(const int target) {
@@ -1381,7 +1246,7 @@ int GenotypeCompressorRLEBitmap::EncodeRLEBitmap2N2MC(const int target) {
     assert(observed_alts == base_pbwt[target].n_queue[1]);
     assert(observed_length == n_samples);
 
-    ++gt_width[n_objects];
+    // ++gt_width[n_objects];
 
     return n_objects;
 }
@@ -1492,7 +1357,7 @@ int GenotypeCompressorRLEBitmap::EncodeRLEBitmap2N2MC(const int target, const ui
     // Ascertain correctness:
     assert(observed_length == n_samples);
 
-    ++gt_width[n_objects];
+    // ++gt_width[n_objects];
 
     return n_objects;
 }
@@ -1611,7 +1476,7 @@ int GenotypeCompressorRLEBitmap::EncodeRLEBitmap2N2MM(const int target) {
     // assert(observed_alts == base_pbwt[target].n_queue[1]);
     assert(observed_length == n_samples);
 
-    ++gt_width[n_objects];
+    // ++gt_width[n_objects];
 
     return n_objects;
 }
@@ -1729,7 +1594,7 @@ int GenotypeCompressorRLEBitmap::EncodeRLEBitmap2N2MM(const int target, const ui
     // assert(observed_alts == base_pbwt[target].n_queue[1]);
     assert(observed_length == n_samples);
 
-    ++gt_width[n_objects];
+    // ++gt_width[n_objects];
 
     return n_objects;
 }
@@ -1849,7 +1714,7 @@ int GenotypeCompressorRLEBitmap::EncodeRLEBitmap2NXM(const int target) {
     // assert(observed_alts == complex_pbwt[target].n_queue[1]);
     assert(observed_length == n_samples);
 
-    ++gt_width[n_objects];
+    // ++gt_width[n_objects];
 
     return n_objects;
 }
@@ -1968,15 +1833,14 @@ int GenotypeCompressorRLEBitmap::EncodeRLEBitmap2NXM(const int target, const uin
     // assert(observed_alts == complex_pbwt[target].n_queue[1]);
     assert(observed_length == n_samples);
 
-    ++gt_width[n_objects];
+    // ++gt_width[n_objects];
 
     return n_objects;
 }
 
 #if DEBUG_WAH
-int GenotypeCompressorRLEBitmap::DebugWAH(uint8_t* in, size_t len_in, uint8_t* ref_data, int pbwt_sym, bitmap_debug_decode decode_fn, const uint8_t* lookup_fn) {
+int GenotypeCompressorRLEBitmap::DebugWAH(uint8_t* in, size_t len_in, uint8_t* ref_data, size_t n_cycles, int pbwt_sym, bitmap_debug_decode decode_fn, const uint8_t* lookup_fn) {
     if (len_in) {
-        uint32_t n_cycles = len_in/n_samples;
         std::shared_ptr<GenotypeDecompressorRLEBitmap> debug1 = std::make_shared<GenotypeDecompressorRLEBitmap>(in, len_in, n_cycles, n_samples);
         if (permute_pbwt)
             debug1->InitPbwt(pbwt_sym);

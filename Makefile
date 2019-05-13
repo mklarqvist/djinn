@@ -16,10 +16,10 @@
 # under the License.
 ###################################################################
 
-OPTFLAGS  := -O3 -march=native
+OPTFLAGS  := -O3
 CFLAGS     = -std=c99 $(OPTFLAGS) $(DEBUG_FLAGS)
 CPPFLAGS   = -std=c++0x $(OPTFLAGS) $(DEBUG_FLAGS)
-CPP_SOURCE = frequency_model.cpp main.cpp pbwt.cpp range_coder.cpp gt_compressor.cpp range_coder64.cpp
+CPP_SOURCE = frequency_model.cpp main.cpp pbwt.cpp range_coder.cpp gt_compressor.cpp djinn.cpp
 C_SOURCE   = 
 OBJECTS    = $(C_SOURCE:.c=.o) $(CPP_SOURCE:.cpp=.o)
 DEBUG_FLAGS =
@@ -28,8 +28,10 @@ DEBUG_LIBS  =
 # Default target
 all: djinn
 
-debug: DEBUG_FLAGS += -DDEBUG_PBWT -DDEBUG_WAH -DDEBUG_CONTEXT -g
-debug: DEBUG_LIBS += -lroaring -lcrypto
+debug_size: DEBUG_FLAGS += -DDEBUG_SIZE
+debug_size: djinn
+debug: DEBUG_FLAGS += -DDEBUG_PBWT -DDEBUG_WAH -DDEBUG_CONTEXT -DDEBUG_SIZE -g
+debug: DEBUG_LIBS += -lcrypto
 debug: djinn
 
 # Generic rules
@@ -46,4 +48,4 @@ clean:
 	rm -f $(OBJECTS)
 	rm -f djinn
 
-.PHONY: all clean debug
+.PHONY: all clean debug debug_size

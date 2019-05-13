@@ -104,6 +104,8 @@ public:
     void EncodeSymbol(const uint16_t symbol);
     uint16_t DecodeSymbol();
 
+    void operator++() { ++this->n_variants; } 
+
 public:
     int max_model_symbols;
     int model_context_shift;
@@ -114,6 +116,7 @@ public:
     size_t n_buffer;
     uint8_t* buffer; // fix
     size_t n_additions;
+    size_t n_variants;
 };
 
 }

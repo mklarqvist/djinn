@@ -33,11 +33,6 @@
 #include <openssl/sha.h>
 #endif
 
-#include <roaring/roaring.h>
-
-
-#include "range_coder64.h"
-
 namespace djinn {
 
 #if DEBUG_PBWT
@@ -252,8 +247,6 @@ private:
     GeneralPBWTModel base_models_complex[2]; // 0-1: diploid n-allelic
     GeneralPBWTModel* models;
     GeneralPBWTModel base_model_bitmaps[2];
-
-    // SimpleModel64 s64[2];
 };
 
 class GenotypeCompressorRLEBitmap : public GenotypeCompressor {
@@ -285,87 +278,16 @@ public:
 #if DEBUG_WAH
 #define CALL_MEMBER_FN(object,ptrToMember)  ((object).*(ptrToMember))
     typedef int(GenotypeDecompressorRLEBitmap::*bitmap_debug_decode)(uint8_t*);
-    int DebugWAH(uint8_t* in, size_t len_in, uint8_t* ref_data, int pbwt_sym, bitmap_debug_decode decode_fn, const uint8_t* lookup_fn);
+    int DebugWAH(uint8_t* in, size_t len_in, uint8_t* ref_data, size_t n_cycles, int pbwt_sym, bitmap_debug_decode decode_fn, const uint8_t* lookup_fn);
 #endif
 
 private:
     uint64_t bytes_out_zstd1, bytes_out_lz4;//debug
+    size_t n_variants[6];
     Buffer buf_wah[6];
-    std::vector<uint32_t> gt_width; // debug
+    // std::vector<uint32_t> gt_width; // debug
     PBWT base_pbwt[4]; // diploid biallelic no-missing models, missing + EOV
     PBWT complex_pbwt[2]; // diploid n-allelic
-};
-
-
-class HaplotypeCompressor {
-public:
-    HaplotypeCompressor(int64_t n_s) : n_samples(n_s), cum_pos(0), bitmaps(new roaring_bitmap_t*[n_samples])
-    {
-        for (int i = 0; i < n_samples; ++i) bitmaps[i] = roaring_bitmap_create();  
-    }
-
-    ~HaplotypeCompressor() {
-        for (int i = 0; i < n_samples; ++i) roaring_bitmap_free(bitmaps[i]);
-        delete[] bitmaps;
-    }
-
-    int Encode(bcf1_t* bcf, const bcf_hdr_t* hdr) {
-        if (bcf == NULL) return 0;
-        if (hdr == NULL) return 0;
-
-        const bcf_fmt_t* fmt = bcf_get_fmt(hdr, bcf, "GT");
-        if (fmt == NULL) return 0;
-        if (fmt->p_len != n_samples) {
-            std::cerr << "input is not divisible by 2" << std::endl;
-            return 0;
-        }
-
-        if (bcf->n_allele != 2) return 0;
-        assert(fmt->p_len == n_samples);
-
-        const uint8_t* data = fmt->p;
-        for (int i = 0; i < n_samples; ++i) {
-            uint8_t add = BCF_UNPACK_GENOTYPE(data[i]);
-            if (add == 1)
-                roaring_bitmap_add(bitmaps[i], cum_pos);
-        }
-        ++cum_pos;
-
-        return 1;
-    }
-    
-    void PrintSizes() const {
-        uint64_t total_cost = 0;
-        uint32_t max_size = 0;
-
-        for (int i = 0; i < n_samples; ++i) {
-            uint32_t cost = roaring_bitmap_size_in_bytes(bitmaps[i]);
-            max_size = std::max(max_size, cost);
-            std::cerr << "Haplotype-" << i << ": " << cost << std::endl;
-            total_cost += cost;
-        }
-        std::cerr << "Total cost=" << total_cost << std::endl;
-
-        std::chrono::high_resolution_clock::time_point t1 = std::chrono::high_resolution_clock::now();
-        for (int j = 0; j < n_samples; ++j) {
-            std::chrono::high_resolution_clock::time_point t3 = std::chrono::high_resolution_clock::now();
-            uint64_t sim = 0;
-            for (int i = j+1; i < n_samples; ++i) {
-                sim += roaring_bitmap_and_cardinality(bitmaps[i], bitmaps[j]);
-            }
-            std::chrono::high_resolution_clock::time_point t4 = std::chrono::high_resolution_clock::now();
-            auto time_span_inner = std::chrono::duration_cast<std::chrono::milliseconds>(t4 - t3);
-            std::cerr << j << "->" << sim << " time=" << time_span_inner.count() << "ms" << std::endl;
-        }
-        std::chrono::high_resolution_clock::time_point t2 = std::chrono::high_resolution_clock::now();
-        auto time_span = std::chrono::duration_cast<std::chrono::seconds>(t2 - t1);
-        std::cerr << "Total time=" << time_span.count() << "s" << std::endl;
-    }
-
-public:
-    int64_t n_samples;
-    int64_t cum_pos;
-    roaring_bitmap_t** bitmaps;
 };
 
 class GTCompressor {
@@ -400,7 +322,7 @@ public:
     }
 
     inline void SetPermutePbwt(const bool yes) { this->instance->SetPermutePbwt(yes); }
-    
+
     inline int Encode(bcf1_t* bcf, const bcf_hdr_t* hdr) { this->instance->Encode(bcf, hdr); }
     inline int Encode(uint8_t* data, const int32_t n_data, const int n_ploidy, const int n_alleles) { this->instance->Encode(data, n_data, n_ploidy, n_alleles); }
     inline void Compress(djinn_block_t*& block) { this->instance->Compress(block); }

@@ -89,7 +89,7 @@ public:
      */
 
     // Returns the number of alternative alleles if >= 0, otherwise is an error.
-    int Decode2N2MC(uint8_t* out) {
+    int Decode2N2MC(uint8_t* out, const uint32_t stride = 1) {
         if (out == nullptr) return -1;
         if (cur_variant >= n_variants) return -2;
         if (cur_offset >= l_data) return -3;
@@ -111,7 +111,7 @@ public:
                 uint32_t val = *reinterpret_cast<const uint32_t*>(&data[offset]);
                 for (int i = 0; i < ulimit; ++i) {
                     val >>= 1;
-                    out[out_offset + (ulimit - i - 1)] = (val & 1); // unpack in reverse order
+                    out[(out_offset + (ulimit - i - 1))*stride] = (val & 1); // unpack in reverse order
                 }
                 out_offset += ulimit;
                 offset += sizeof(uint32_t);
@@ -129,7 +129,7 @@ public:
 
                 const uint8_t ref = (val >> 1) & 1;
                 // std::cerr << "addRLE=" << run_length << "->" << out_offset+run_length << "/" << n_samples << std::endl;
-                memset(&out[out_offset], ref, run_length);
+                memset(&out[out_offset*stride], ref, run_length);
                 out_offset += run_length;
                 assert((*reinterpret_cast<const uint16_t*>(&data[offset]) & 1) == 1);
                 offset += sizeof(uint16_t);
@@ -146,7 +146,7 @@ public:
         return n_alts;
     }
 
-    int Decode2N2MM(uint8_t* out) {
+    int Decode2N2MM(uint8_t* out, const uint32_t stride = 1) {
         if (out == nullptr) return -1;
         if (cur_variant >= n_variants) return -2;
         if (cur_offset >= l_data) return -3;
@@ -169,7 +169,7 @@ public:
                 const uint32_t ulimit = out_offset + 15 >= n_samples ? n_samples - out_offset : 15;
                 val >>= 1;
                 for (int i = 0; i < ulimit; ++i) {
-                    out[out_offset + (ulimit - i - 1)] = (val & 3); // unpack in reverse order
+                    out[(out_offset + (ulimit - i - 1))*stride] = (val & 3); // unpack in reverse order
                     val >>= 2;
                 }
                 out_offset += ulimit;
@@ -190,7 +190,7 @@ public:
 
                 const uint8_t ref = (val >> 1) & 3;
                 // std::cerr << "addRLE=" << run_length << "->" << out_offset+run_length << "/" << n_samples << std::endl;
-                memset(&out[out_offset], ref, run_length);
+                memset(&out[out_offset*stride], ref, run_length);
                 out_offset += run_length;
                 offset += sizeof(uint16_t);
 
@@ -206,7 +206,7 @@ public:
         return 1;
     }
 
-    int Decode2NXM(uint8_t* out) {
+    int Decode2NXM(uint8_t* out, const uint32_t stride = 1) {
         if (out == nullptr) return -1;
         if (cur_variant >= n_variants) return -2;
         if (cur_offset >= l_data) return -3;
@@ -229,7 +229,7 @@ public:
                 const uint64_t ulimit = out_offset + 15 >= n_samples ? n_samples - out_offset : 15;
                 val >>= 1;
                 for (int i = 0; i < ulimit; ++i) {
-                    out[out_offset + (ulimit - i - 1)] = (val & 15); // unpack in reverse order
+                    out[(out_offset + (ulimit - i - 1))*stride] = (val & 15); // unpack in reverse order
                     val >>= 4;
                 }
                 out_offset += ulimit;
@@ -250,7 +250,7 @@ public:
 
                 const uint8_t ref = (val >> 1) & 15;
                 // std::cerr << "addRLE=" << run_length << "->" << out_offset+run_length << "/" << n_samples << std::endl;
-                memset(&out[out_offset], ref, run_length);
+                memset(&out[out_offset*stride], ref, run_length);
                 out_offset += run_length;
                 offset += sizeof(uint32_t);
 

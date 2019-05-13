@@ -249,8 +249,6 @@ int PBWT::ReverseUpdateBitmap(const uint8_t* arr) {
     assert(of == n_samples);
     ++n_steps;
 
-    // std::cerr << "nskips=" << n_skips << std::endl;
-
     return 1;
 }
 
@@ -262,7 +260,7 @@ GeneralPBWTModel::GeneralPBWTModel() noexcept :
     model_context_shift(0),
     model_context(0),
     n_buffer(10000000), buffer(new uint8_t[n_buffer]),
-    n_additions(0)
+    n_additions(0), n_variants(0)
 {}
 
 GeneralPBWTModel::GeneralPBWTModel(int64_t n_samples, int n_symbols) :
@@ -273,7 +271,7 @@ GeneralPBWTModel::GeneralPBWTModel(int64_t n_samples, int n_symbols) :
     range_coder(std::make_shared<RangeCoder>()),
     n_buffer(10000000),
     buffer(new uint8_t[n_buffer]),
-    n_additions(0)
+    n_additions(0), n_variants(0)
 {
     assert(n_symbols > 1);
     models.resize(MODEL_SIZE);
@@ -302,10 +300,8 @@ void GeneralPBWTModel::Construct(int64_t n_samples, int n_symbols) {
 }
 
 void GeneralPBWTModel::ResetModels() {
-    for (int i = 0; i < MODEL_SIZE; ++i) {
+    for (int i = 0; i < MODEL_SIZE; ++i)
         models[i]->Initiate(max_model_symbols, max_model_symbols);
-        //models[i]->SetShift(11);
-    }
 }
 
 void GeneralPBWTModel::ResetPBWT() {
@@ -317,6 +313,7 @@ void GeneralPBWTModel::ResetContext() { model_context = 0; }
 
 void GeneralPBWTModel::Reset() {
     n_additions = 0;
+    n_variants = 0;
     ResetModels();
     ResetPBWT();
     ResetContext();
@@ -349,39 +346,8 @@ void GeneralPBWTModel::StartDecoding(uint8_t* data) {
     range_coder->StartDecode();
 }
 
-// static int tester = 0;
-// static uint64_t n_tester_total = 0;
-// static uint64_t n_splits8 = 0;
-// static uint64_t n_splits16 = 0;
-// static uint64_t n_splits32 = 0;
-// static uint64_t n_splits64 = 0;
-
-// static uint64_t n_splits8r = 0;
-// static uint64_t n_splits16r = 0;
-// static uint64_t n_splits32r = 0;
-// static uint64_t n_splits64r = 0;
-
 void GeneralPBWTModel::EncodeSymbol(const uint16_t symbol) {
-    // if (model_context == 0) {
-    //     if (symbol) {
-    //        n_splits8 += tester/8;
-    //        n_splits16 += tester/16;
-    //        n_splits32 += tester/32;
-    //        n_splits64 += tester/64;
-    //        n_splits8r += tester - (tester/8)*8;
-    //        n_splits16r += tester - (tester/16)*16;
-    //        n_splits32r += tester - (tester/32)*32;
-    //        n_splits64r += tester - (tester/64)*64;
-    //        std::cerr << "tester=" << tester << "->" << n_tester_total << ", " << n_splits8 << "+" << n_splits8r << "," << n_splits16 << "+" << n_splits16r << "," << n_splits32 << "+" << n_splits32r << "," << n_splits64 << "+" << n_splits64r << std::endl;
-    //        tester = 0;
-    //    } else {
-    //        ++tester;
-    //        ++n_tester_total;
-    //    }
-    // } else 
-        
-        models[model_context]->EncodeSymbol(range_coder.get(), symbol);
-
+    models[model_context]->EncodeSymbol(range_coder.get(), symbol);
     model_context <<= model_context_shift;
     model_context |= symbol;
     model_context &= (MODEL_SIZE-1);
