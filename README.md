@@ -67,7 +67,7 @@ HRC-chr11 (n = 32470, m = 1936990).
 
 More 1kgp3-hg38
 
-| Chr | hPBWT + RLE-H + LZ4-HC-9 | BCF    | Ratio |
+| Chr | hPBWT + arithmetic | BCF    | Ratio |
 |-----|--------------------------|--------|-------|
 | 1   | 58.25                    | 773.03 | 13.27 |
 | 2   | 62.62                    | 834.94 | 13.33 |
