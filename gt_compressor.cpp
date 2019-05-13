@@ -1852,7 +1852,7 @@ int GenotypeCompressorRLEBitmap::DebugWAH(uint8_t* in, size_t len_in, uint8_t* r
         uint32_t debug_offset = 0;
         if (permute_pbwt) {
             for (int i = 0; i < n_cycles; ++i) {
-                int32_t alts1 = CALL_MEMBER_FN(*debug1,decode_fn)(out);
+                int32_t alts1 = CALL_MEMBER_FN(*debug1,decode_fn)(out,1);
                 debug1->pbwt->ReverseUpdate(out);
                 // assert(alts1 == debug1->pbwt->n_queue[1]);
                 for (int j = 0; j < n_samples; ++j) {
@@ -1864,7 +1864,7 @@ int GenotypeCompressorRLEBitmap::DebugWAH(uint8_t* in, size_t len_in, uint8_t* r
             }
         } else {
             for (int i = 0; i < n_cycles; ++i) {
-                int32_t alts1 = CALL_MEMBER_FN(*debug1,decode_fn)(out);
+                int32_t alts1 = CALL_MEMBER_FN(*debug1,decode_fn)(out,1);
                 for (int j = 0; j < n_samples; ++j) {
                     // assert(BCF_UNPACK_GENOTYPE_GENERAL(ref_data[debug_offset + j]) == out[j]);
                     assert(lookup_fn[ref_data[debug_offset + j] >> 1] == out[j]);

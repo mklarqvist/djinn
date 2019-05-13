@@ -277,7 +277,7 @@ public:
 
 #if DEBUG_WAH
 #define CALL_MEMBER_FN(object,ptrToMember)  ((object).*(ptrToMember))
-    typedef int(GenotypeDecompressorRLEBitmap::*bitmap_debug_decode)(uint8_t*);
+    typedef int(GenotypeDecompressorRLEBitmap::*bitmap_debug_decode)(uint8_t*, const uint32_t);
     int DebugWAH(uint8_t* in, size_t len_in, uint8_t* ref_data, size_t n_cycles, int pbwt_sym, bitmap_debug_decode decode_fn, const uint8_t* lookup_fn);
 #endif
 
