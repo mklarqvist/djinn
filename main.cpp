@@ -33,10 +33,13 @@ void ReadVcfGT (const std::string& filename) {
     // GenotypeCompressorRLEBitmap gtperm2(reader->n_samples_);
     
     djinn::GTCompressor gtcomp;
-    // gtcomp.SetStrategy(djinn::GTCompressor::CompressionStrategy::CONTEXT_MODEL, reader->n_samples_);
-    gtcomp.SetStrategy(djinn::GTCompressor::CompressionStrategy::RLE_BITMAP, reader->n_samples_);
-    gtcomp.SetStrategy(djinn::GenotypeCompressor::CompressionStrategy::LZ4);
+    gtcomp.SetStrategy(djinn::GTCompressor::CompressionStrategy::CONTEXT_MODEL, reader->n_samples_);
+    gtcomp.SetPermutePbwt(true);
+    // gtcomp.SetStrategy(djinn::GTCompressor::CompressionStrategy::RLE_BITMAP, reader->n_samples_);
+    // gtcomp.SetStrategy(djinn::GenotypeCompressor::CompressionStrategy::LZ4);
+    // gtcomp.SetStrategy(djinn::GenotypeCompressor::CompressionStrategy::ZSTD);
     // HaplotypeCompressor hcomp(2*reader->n_samples_);
+    djinn::djinn_block_t* block = nullptr;
     uint64_t n_lines = 0;
     // gtcomp.permute_pbwt = false;
 
@@ -52,7 +55,10 @@ void ReadVcfGT (const std::string& filename) {
 
         // std::cerr << reader->bcf1_->pos+1 << std::endl;
         
-        if (n_lines % (8196) == 0 && n_lines != 0) gtcomp.Compress();
+        if (n_lines % (8196) == 0 && n_lines != 0) {
+            gtcomp.Compress(block);
+            block->Serialize(std::cout);
+        }
         gtcomp.Encode(reader->bcf1_, reader->header_);
         ++n_lines;
 
@@ -60,7 +66,9 @@ void ReadVcfGT (const std::string& filename) {
     }
 
     // Compress final.
-    gtcomp.Compress();
+    gtcomp.Compress(block);
+    block->Serialize(std::cout);
+    delete block;
     // hcomp.PrintSizes();
 
     // gtperm.Compress(); // Final

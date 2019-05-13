@@ -28,7 +28,11 @@
 #include <chrono>
 
 #include "gt_decompressor.h"
+
+#if DEBUG_PBWT
 #include <openssl/sha.h>
+#endif
+
 #include <roaring/roaring.h>
 
 
@@ -36,6 +40,7 @@
 
 namespace djinn {
 
+#if DEBUG_PBWT
 struct DataDigest {
     DataDigest() : len(0), capac(0), buffer(nullptr), has_initialized(false) {}
     DataDigest(uint32_t l) : len(0), capac(l), buffer(new uint8_t[l]), has_initialized(false) {}
@@ -113,6 +118,7 @@ struct DataDigest {
     SHA512_CTX context;
 	uint8_t    digest[64];
 };
+#endif
 
 struct Buffer {
     Buffer() noexcept : len(0), cap(0), data(nullptr){}
@@ -162,6 +168,8 @@ class GenotypeCompressor {
 public:
     GenotypeCompressor(int64_t n_s);
     virtual ~GenotypeCompressor();
+
+    void SetPermutePbwt(const bool yes) { permute_pbwt = yes; }
     
     // Encode data using literals.
     virtual int Encode2N(uint8_t* data, const int32_t n_data, const int32_t n_alleles) =0;
@@ -174,13 +182,13 @@ public:
     virtual int Encode(bcf1_t* bcf, const bcf_hdr_t* hdr);
     virtual int Encode(uint8_t* data, const int32_t n_data, const int32_t ploidy, const int32_t n_alleles);
     virtual int Encode2N(bcf1_t* bcf, const bcf_hdr_t* hdr) =0;
+    
     //
     int32_t RemapGenotypeEOV(uint8_t* data, const uint32_t len);
 
     //
     virtual bool CheckLimit() const =0;
-    virtual int Compress() =0;
-    // virtual int Compress(djinn_block_t*& block) =0;
+    virtual int Compress(djinn_block_t*& block) =0;
 
 public:
     // Compression strategy used.
@@ -201,8 +209,6 @@ protected:
     Buffer buf_raw;
 
     uint32_t alts[256];
-
-    djinn_block_t* block;
 
 #if DEBUG_PBWT
     DataDigest debug_pbwt[6]; // 2 complete, 2 missing, 2 complex
@@ -232,7 +238,14 @@ private:
     // 2N any M (up to 16)
     int Encode2NXM(uint8_t* data, const int32_t n_data, const int32_t n_alleles) override;
 
-    int Compress() override;
+    int Compress(djinn_block_t*& block) override;
+
+#if DEBUG_CONTEXT
+#define CALL_MEMBER_FN(object,ptrToMember)  ((object).*(ptrToMember))
+    typedef int(GenotypeDecompressorContext::*context_debug_decode)(uint8_t*);
+    int DebugContext(uint8_t* in, size_t len_in, uint8_t* in_part, size_t len_part, uint8_t* ref_data, size_t n_cycles, int pbwt_sym, context_debug_decode decode_fn, const uint8_t* lookup_fn);
+    int DebugContext(uint8_t* in, size_t len_in, uint8_t* ref_data, size_t n_cycles, int pbwt_sym, context_debug_decode decode_fn, const uint8_t* lookup_fn);
+#endif
 
 private:
     GeneralPBWTModel base_models[4]; // 0-1: diploid biallelic no-missing; 2-3: diploid biallelic missing
@@ -259,7 +272,7 @@ public:
 
     bool CheckLimit() const override;
 
-    int Compress() override;
+    int Compress(djinn_block_t*& block) override;
 
     // Compression routines.
     int EncodeRLEBitmap2N2MC(const int target);
@@ -269,9 +282,15 @@ public:
     int EncodeRLEBitmap2N2MM(const int target, const uint8_t* data, const int stride);
     int EncodeRLEBitmap2NXM(const int target, const uint8_t* data, const int stride);
 
+#if DEBUG_WAH
+#define CALL_MEMBER_FN(object,ptrToMember)  ((object).*(ptrToMember))
+    typedef int(GenotypeDecompressorRLEBitmap::*bitmap_debug_decode)(uint8_t*);
+    int DebugWAH(uint8_t* in, size_t len_in, uint8_t* ref_data, int pbwt_sym, bitmap_debug_decode decode_fn, const uint8_t* lookup_fn);
+#endif
+
 private:
     uint64_t bytes_out_zstd1, bytes_out_lz4;//debug
-    Buffer buf_wah[3];
+    Buffer buf_wah[6];
     std::vector<uint32_t> gt_width; // debug
     PBWT base_pbwt[4]; // diploid biallelic no-missing models, missing + EOV
     PBWT complex_pbwt[2]; // diploid n-allelic
@@ -341,8 +360,6 @@ public:
         std::chrono::high_resolution_clock::time_point t2 = std::chrono::high_resolution_clock::now();
         auto time_span = std::chrono::duration_cast<std::chrono::seconds>(t2 - t1);
         std::cerr << "Total time=" << time_span.count() << "s" << std::endl;
-        
-
     }
 
 public:
@@ -376,16 +393,17 @@ public:
 
         switch(strategy) {
             case(GenotypeCompressor::CompressionStrategy::CONTEXT): instance->strategy = GenotypeCompressor::CompressionStrategy::CONTEXT; break;
-            case(GenotypeCompressor::CompressionStrategy::LZ4): instance->strategy = GenotypeCompressor::CompressionStrategy::LZ4; break;
-            case(GenotypeCompressor::CompressionStrategy::ZSTD): instance->strategy = GenotypeCompressor::CompressionStrategy::ZSTD; break;
+            case(GenotypeCompressor::CompressionStrategy::LZ4):     instance->strategy = GenotypeCompressor::CompressionStrategy::LZ4;     break;
+            case(GenotypeCompressor::CompressionStrategy::ZSTD):    instance->strategy = GenotypeCompressor::CompressionStrategy::ZSTD;    break;
         }
         return *this;
     }
 
-public:
+    inline void SetPermutePbwt(const bool yes) { this->instance->SetPermutePbwt(yes); }
+    
     inline int Encode(bcf1_t* bcf, const bcf_hdr_t* hdr) { this->instance->Encode(bcf, hdr); }
     inline int Encode(uint8_t* data, const int32_t n_data, const int n_ploidy, const int n_alleles) { this->instance->Encode(data, n_data, n_ploidy, n_alleles); }
-    inline void Compress() { this->instance->Compress(); }
+    inline void Compress(djinn_block_t*& block) { this->instance->Compress(block); }
 
 private:
     CompressionStrategy strategy;

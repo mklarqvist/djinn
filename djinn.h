@@ -33,6 +33,7 @@ struct djinn_hdr_t {
     uint8_t version;
     uint8_t base_ploidy;
     int64_t n_samples; // number of samples
+    char** samples;
 };
 
 struct djinn_ctx_ctrl_t {
@@ -40,7 +41,7 @@ struct djinn_ctx_ctrl_t {
 };
 
 struct djinn_wah_ctrl_t {
-    uint16_t pbwt: 1, unused: 15;
+    uint16_t pbwt: 1, di2mc1: 1, di2mc2: 1, di2mm1: 1, di2mm2: 1, di2x1: 1, di2x2: 1, unused: 9;
 };
 
 #define DJINN_CTX_MODEL_DI2MC1      0
@@ -52,11 +53,19 @@ struct djinn_wah_ctrl_t {
 #define DJINN_CTX_MODEL_DI2MC_PART1 0
 #define DJINN_CTX_MODEL_DI2MC_PART2 1
 
+#define DJINN_WAH_MODEL_DI2MC1      0
+#define DJINN_WAH_MODEL_DI2MC2      1
+#define DJINN_WAH_MODEL_DI2MM1      2
+#define DJINN_WAH_MODEL_DI2MM2      3
+#define DJINN_WAH_MODEL_DI2X1       4
+#define DJINN_WAH_MODEL_DI2X2       5
+
 struct djinn_data_t { // pure virtual base struct
     virtual uint32_t size() const =0;
     virtual uint16_t GetController() const =0;
     virtual void reset() =0;
     virtual int Serialize(std::ostream& stream) const =0;
+    virtual int Serialize(uint8_t* dst) const =0;
     virtual uint32_t SerializedSize() const =0;
 };
 
@@ -117,6 +126,21 @@ struct djinn_data_container_t {
             stream.write((char*)&n_c, sizeof(int));
             stream.write((char*)&vptr_len, sizeof(uint32_t));
             stream.write((char*)&vptr, vptr_len);
+
+            return sizeof(int) + sizeof(int) + sizeof(uint32_t) + vptr_len;
+        } else {
+            return 0;
+        }
+    }
+
+    int Serialize(uint8_t* dst) const {
+        if (dst == 0) return 1;
+        int dst_ptr = 0;
+        if (vptr_len) {
+            memcpy(&dst[dst_ptr], &n, sizeof(int)); dst_ptr += sizeof(int);
+            memcpy(&dst[dst_ptr], &n_c, sizeof(int)); dst_ptr += sizeof(int);
+            memcpy(&dst[dst_ptr], &vptr_len, sizeof(int)); dst_ptr += sizeof(uint32_t);
+            memcpy(&dst[dst_ptr], &vptr, sizeof(int)); dst_ptr += vptr_len;
 
             return sizeof(int) + sizeof(int) + sizeof(uint32_t) + vptr_len;
         } else {
@@ -188,35 +212,81 @@ public:
         return ret;
     }
 
+    int Serialize(uint8_t* dst) const override {
+        int ret = 0;
+        for (int i = 0; i < 6; ++i) ret += ctx_models[i].Serialize(dst);
+        for (int i = 0; i < 2; ++i) ret += ctx_partitions[i].Serialize(dst);
+        return ret;
+    }
+
 public:
     djinn_data_container_t ctx_models[6];
     djinn_data_container_t ctx_partitions[2];
 };
 
+// TODOOOOO
 struct djinn_wah_t : public djinn_data_t {
     uint32_t size() const override {
-        return 0;
+        uint32_t tot = 0;
+
+        for (int i = 0; i < 6; ++i) tot += wah_models[i].vptr_len;
+
+        return tot;
     }
 
     uint32_t SerializedSize() const override {
-        return 0;
+        uint32_t tot = 0;
+
+        for (int i = 0; i < 6; ++i) {
+            if (wah_models[i].vptr_len) {
+                tot += sizeof(int) + sizeof(int) + sizeof(uint32_t) + wah_models[i].vptr_len;
+            }
+        }
+
+        return tot;
     }
 
     uint16_t GetController() const override {
-        return 0;
+        uint16_t raw = 0;
+        djinn_wah_ctrl_t* ctrl = (djinn_wah_ctrl_t*)&raw;
+        ctrl->di2mc1 = wah_models[0].vptr_len > 0;
+        ctrl->di2mc2 = wah_models[1].vptr_len > 0;
+        ctrl->di2mm1 = wah_models[2].vptr_len > 0;
+        ctrl->di2mm2 = wah_models[3].vptr_len > 0;
+        ctrl->di2x1  = wah_models[4].vptr_len > 0;
+        ctrl->di2x2  = wah_models[5].vptr_len > 0;
+
+        return raw;
     }
     
     void reset() {
-
+        for (int i = 0; i < 6; ++i) wah_models[i].reset();
     }
 
-    int Serialize(std::ostream& stream) const { return 1; }
+    int Serialize(std::ostream& stream) const override { 
+        int ret = 0;
+        for (int i = 0; i < 6; ++i) ret += wah_models[i].Serialize(stream);
+
+        return ret;
+    }
+
+    int Serialize(uint8_t* dst) const override {
+        int ret = 0;
+        for (int i = 0; i < 6; ++i) ret += wah_models[i].Serialize(dst);
+        return ret;
+    }
+
+public:
+    djinn_data_container_t wah_models[6];
 };
 
 struct djinn_block_t {
     enum class BlockType : uint32_t { UNKNOWN = 0, WAH = 1, CONTEXT = 2 };
 
     djinn_block_t() : type(BlockType::UNKNOWN), n_rcds(0), p_len(0), ctrl(0), data(nullptr){}
+
+    virtual int Serialize(std::ostream& stream) const { return -1; }
+    virtual int Serialize(uint8_t* dst) const { return -1; }
 
     BlockType type; // 
     size_t n_rcds; // number of records
@@ -226,7 +296,7 @@ struct djinn_block_t {
 };
 
 struct djinn_ctx_block_t : public djinn_block_t {
-    int Serialize(std::ostream& stream) const {
+    int Serialize(std::ostream& stream) const override {
         int out_type = (int)type;
         stream.write((char*)&out_type, sizeof(int));
         stream.write((char*)&n_rcds, sizeof(size_t));
@@ -239,6 +309,59 @@ struct djinn_ctx_block_t : public djinn_block_t {
         assert(p_len == d->SerializedSize());
 
         return sizeof(int) + 2*sizeof(size_t) + sizeof(uint16_t) + ret;
+    };
+
+    int Serialize(uint8_t* dst) const override {
+        int dst_ptr = 0;
+        int out_type = (int)type;
+        memcpy(&dst[dst_ptr], &out_type, sizeof(int)); dst_ptr += sizeof(int);
+        memcpy(&dst[dst_ptr], &n_rcds, sizeof(size_t)); dst_ptr += sizeof(size_t);
+        memcpy(&dst[dst_ptr], &p_len, sizeof(size_t)); dst_ptr += sizeof(size_t);
+        memcpy(&dst[dst_ptr], &ctrl, sizeof(uint16_t)); dst_ptr += sizeof(uint16_t);
+
+        djinn_ctx_t* d = (djinn_ctx_t*)data;
+        int ret = d->Serialize(&dst[dst_ptr]);
+        dst_ptr += ret;
+        assert(ret == d->SerializedSize());
+        assert(p_len == d->SerializedSize());
+
+        return dst_ptr;
+    };
+
+    int Deserialize();
+};
+
+struct djinn_wah_block_t : public djinn_block_t {
+    int Serialize(std::ostream& stream) const override {
+        int out_type = (int)type;
+        stream.write((char*)&out_type, sizeof(int));
+        stream.write((char*)&n_rcds, sizeof(size_t));
+        stream.write((char*)&p_len, sizeof(size_t));
+        stream.write((char*)&ctrl, sizeof(uint16_t));
+
+        djinn_wah_t* d = (djinn_wah_t*)data;
+        int ret = d->Serialize(stream);
+        assert(ret == d->SerializedSize());
+        assert(p_len == d->SerializedSize());
+
+        return sizeof(int) + 2*sizeof(size_t) + sizeof(uint16_t) + ret;
+    };
+
+    int Serialize(uint8_t* dst) const override {
+        int dst_ptr = 0;
+        int out_type = (int)type;
+        memcpy(&dst[dst_ptr], &out_type, sizeof(int)); dst_ptr += sizeof(int);
+        memcpy(&dst[dst_ptr], &n_rcds, sizeof(size_t)); dst_ptr += sizeof(size_t);
+        memcpy(&dst[dst_ptr], &p_len, sizeof(size_t)); dst_ptr += sizeof(size_t);
+        memcpy(&dst[dst_ptr], &ctrl, sizeof(uint16_t)); dst_ptr += sizeof(uint16_t);
+
+        djinn_wah_t* d = (djinn_wah_t*)data;
+        int ret = d->Serialize(&dst[dst_ptr]);
+        dst_ptr += ret;
+        assert(ret == d->SerializedSize());
+        assert(p_len == d->SerializedSize());
+
+        return dst_ptr;
     };
 
     int Deserialize();

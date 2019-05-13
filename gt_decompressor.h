@@ -64,19 +64,29 @@ public:
     int64_t n_samples;
     int32_t cur_variant;
     int32_t cur_offset;
-    // Todo:
-    // PBWT models here
 };
 
 class GenotypeDecompressorRLEBitmap : public GenotypeDecompressor {
 public:
     GenotypeDecompressorRLEBitmap(uint8_t* in, const int64_t len_in, const int32_t variants, const int64_t n_s) : GenotypeDecompressor(in, len_in, variants, n_s) {}
+    
+    int InitPbwt(int n_sym) {
+        assert(n_sym > 1);
+        pbwt = std::make_shared<PBWT>(n_samples, n_sym);
+    }
 
     bool Next() override { return false; }
     bool DecodeNext() override { return false; }
     bool DecodeCurrent() override { return false; }
     bool GetGenotypeArray(uint8_t* data) override { return false; }
     bool GetGenotypeArrayCopy(uint8_t*& data) override { return false; }
+
+    /**
+     * These subroutines return the [0, 1, ..., n] encodings. If bcf-style encoding
+     * is desired then wrap the output through the BcfEncode() subroutine.
+     * 
+     * Todo: Decode2N* for 
+     */
 
     // Returns the number of alternative alleles if >= 0, otherwise is an error.
     int Decode2N2MC(uint8_t* out) {
@@ -256,6 +266,7 @@ public:
         return 1;
     }
 
+    std::shared_ptr<PBWT> pbwt;
 };
 
 class GenotypeDecompressorContext : public GenotypeDecompressor {
@@ -266,7 +277,7 @@ public:
             in_partition(nullptr), len_in_partition(0), partition_size(16) 
     {
         model = std::make_shared<GeneralPBWTModel>();
-        model->Construct(n_samples, n_sym);
+        if (n_sym) model->Construct(n_samples, n_sym);
         model->StartDecoding(in);
     }
 
@@ -278,7 +289,7 @@ public:
             partition_size(16)
     {
         model = std::make_shared<GeneralPBWTModel>();
-        model->Construct(n_samples, n_sym);
+        if (n_sym) model->Construct(n_samples, n_sym);
         model->StartDecoding(in);
         partition = std::make_shared<GeneralPBWTModel>();
         partition->Construct(1,2);
@@ -286,6 +297,11 @@ public:
     }
     
     ~GenotypeDecompressorContext() {}
+
+    int InitPbwt(int n_sym) {
+        assert(n_sym > 1);
+        if (model.get() != nullptr) model->Construct(n_samples, n_sym);
+    }
 
     bool Next() override { return false; }
     bool DecodeNext() override { return false; }

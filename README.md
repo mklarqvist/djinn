@@ -4,11 +4,11 @@
 
 Djinn is an open-source C++ library for efficiently storing and analyzing whole-genome genotypes and/or haplotypes. Unlike previous efforts, the Djinn algortihms support multiple alternative alleles (up to 16) and mixed phasing.
 
-1. Haplotype PBWT with word-aligned hybrid compression.
-2. Haplotype PBWT with higher-order context modelling.
-3. Genotype PBWT with word-aligned hybrid compression. 
-4. Word-aligned hybrid compression only for use with the gtOcc data structure.
-5. Block-wise genotype PBWT with word-aligned hybrid compression.
+- [x] Haplotype PBWT with word-aligned hybrid compression.
+- [x] Haplotype PBWT with higher-order context modelling.
+- [ ] Genotype PBWT with word-aligned hybrid compression. 
+- [x] Word-aligned hybrid compression for use with the gtOcc data structure.
+- [ ] Block-wise genotype PBWT with word-aligned hybrid compression.
 
 ### Building
 
