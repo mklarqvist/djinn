@@ -15,7 +15,7 @@ Implemented algorithms:
 
 ### Building
 
-Building requires the packages: [htslib](https://github.com/samtools/htslib), [zstd](https://github.com/facebook/zstd), [lz4](https://github.com/lz4/lz4), and `openssl` if debugging. Build with `make` and build with debug flags by passing invoking `make debug`. Compile with `make debug_size` to get compression performance dumped to the console.
+Building requires the packages: [htslib](https://github.com/samtools/htslib), [zstd](https://github.com/facebook/zstd), [lz4](https://github.com/lz4/lz4), and `openssl` if debugging. Build with `make` and build with debug flags that perform a very large number of correctness tests by invoking `make debug`. Compile with `make debug_size` to get compression performance dumped to the console.
 
 ### Usage
 
@@ -38,7 +38,7 @@ This is a collaborative effort between Marcus D. R. Klarqvist ([@klarqvist](http
 | WAH + ZSTD-19            | 48.48       | 359.8                   | 1m7.568s    | 10.381s           | 10.152s           |
 | arithmetic only          | 80.57       | 216.49                  | 1m57.925s   | 11.852s           | 11.021s           |
 | BGT*                     | 64.47       | 270.56                  | 2m20.834s   | CORRUPTED         | CORRUPTED         |
-| GTShark^                  | 12.6        | 1384.36                 | 2m23.363s   | 7m55.707s         | 2m19.970s         |
+| GTShark^                 | 12.6        | 1384.36                 | 2m23.363s   | 7m55.707s         | 2m19.970s         |
 | GQT                      | 233.7       | 74.64                   | 8m13.750s   | N/A               | N/A               |
 | BCF                      | 196.88      | 88.6                    | -           | 2m22.953s         | 22.482s (uBCF)    |
 | uBCF                     | 8683.26     | 2.01                    | -           | 2m4.911s          | 2m17.367s         |
@@ -58,7 +58,7 @@ HRC-chr11 (n = 32470, m = 1936990).
 | WAH + ZSTD-19            | 656.04      | 383.56                  | 31m27.405s  | 2m27.597s               | 2m25.958s         |
 | arithmetic only          | 1923.25     | 130.84                  | 41m3.145s   | -                       | -                 |
 | BGT*                     | 365.65      | 688.17                  | 33m10.116s  | 25m11.121s              | 12m5.086s         |
-| GTShark^                  | 89.78       | 2802.74                 | 33m38.250s  | -                       | 36m10.505s        |
+| GTShark^                 | 89.78       | 2802.74                 | 33m38.250s  | -                       | 36m10.505s        |
 | GQT                      | 4877.69     | 51.59                   | 195m16.803s | N/A                     | N/A               |
 | BCF                      | 3476.07     | 72.39                   | -           | 36m15.195s              | 5m16.029s (uBCF)  |
 | uBCF                     | 125549.35   | 2                       | -           | 31m56.717s              | 41m22.754s        |
