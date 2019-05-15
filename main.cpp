@@ -120,15 +120,15 @@ int DecompressExample(const std::string& file, int type) {
                 if (d->wah_models[i].vptr_len) {
                     int ret = 0;
                     if ((type >> 1) & 1)
-                        ret =  djinn::Lz4Decompress(d->wah_models[i].vptr, d->wah_models[i].vptr_len, buffers[i], dest_capacity);
+                        ret = djinn::Lz4Decompress(d->wah_models[i].vptr, d->wah_models[i].vptr_len, buffers[i], dest_capacity);
                     else if ((type >> 2) & 1)
                         ret = djinn::ZstdDecompress(d->wah_models[i].vptr, d->wah_models[i].vptr_len, buffers[i], dest_capacity);
                     // std::cerr << "ret=" << ret << std::endl;
                 }
             }
             djinn::djinn_wah_ctrl_t* ctrl = (djinn::djinn_wah_ctrl_t*)&bl->ctrl;
-            std::cerr << "using pbwt=" << ctrl->pbwt << std::endl;
-
+            std::cerr << "using pbwt=" << ctrl->pbwt << " " << f.tellg() << "/" << filesize << std::endl;
+            
             // Unpack WAH 2N2MC
             std::shared_ptr<djinn::GenotypeDecompressorRLEBitmap> debug1 = 
                 std::make_shared<djinn::GenotypeDecompressorRLEBitmap>(
@@ -146,10 +146,11 @@ int DecompressExample(const std::string& file, int type) {
 
                  assert(d->wah_models[0].n_v == d->wah_models[1].n_v);
                 for (int i = 0; i < d->wah_models[0].n_v; ++i) {
-                    debug1->Decode2N2MC(line);
-                    debug1->pbwt->ReverseUpdate(line);
-                    debug2->Decode2N2MC(line);
-                    debug2->pbwt->ReverseUpdate(line);
+                    int ret1 = debug1->Decode2N2MC(line);
+                    // debug1->pbwt->ReverseUpdate(line);
+                    int ret2 = debug2->Decode2N2MC(line);
+                    // debug2->pbwt->ReverseUpdate(line);
+                    std::cout << "AC=" << ret1 + ret2 << std::endl;
                 }
                 
             } 

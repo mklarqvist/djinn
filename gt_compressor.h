@@ -33,6 +33,9 @@
 #include <openssl/sha.h>
 #endif
 
+//test
+#include "balz.h"
+
 namespace djinn {
 
 #if DEBUG_PBWT
@@ -247,6 +250,16 @@ private:
     GeneralPBWTModel base_models_complex[2]; // 0-1: diploid n-allelic
     GeneralPBWTModel* models;
     GeneralPBWTModel base_model_bitmaps[2];
+    
+    uint64_t bytes_out2, bytes_out3;
+    uint32_t pack1_context;
+    uint32_t pack2_context;
+    uint32_t pack1bin_context;
+    uint32_t pack2bin_context;
+    TPPM ppm1, ppm2, ppm_bin1, ppm_bin2;
+    TPPM rle1, rle2, bits1, bits2;
+    uint32_t rle1_context, rle2_context;
+    uint32_t bits1_context, bits2_context;
 };
 
 class GenotypeCompressorRLEBitmap : public GenotypeCompressor {

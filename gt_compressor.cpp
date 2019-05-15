@@ -127,6 +127,32 @@ GenotypeCompressorModelling::GenotypeCompressorModelling(int64_t n_s) : Genotype
     base_model_bitmaps[1].Construct(1, 2);
     base_model_bitmaps[0].StartEncoding();
     base_model_bitmaps[1].StartEncoding();
+
+    pack1_context = 0; pack2_context = 0;
+    ppm1.encoder.buffer = new uint8_t[10000000];
+    ppm1.encoder.dat = ppm1.encoder.buffer;
+    ppm2.encoder.buffer = new uint8_t[10000000];
+    ppm2.encoder.dat = ppm2.encoder.buffer;
+
+    pack1bin_context = 0; pack2bin_context = 0;
+    ppm_bin1.encoder.buffer = new uint8_t[10000000];
+    ppm_bin1.encoder.dat = ppm_bin1.encoder.buffer;
+    ppm_bin2.encoder.buffer = new uint8_t[10000000];
+    ppm_bin2.encoder.dat = ppm_bin2.encoder.buffer;
+
+    rle1_context = 0; bits1_context = 0;
+    rle1.encoder.buffer = new uint8_t[10000000];
+    rle1.encoder.dat = rle1.encoder.buffer;
+    bits1.encoder.buffer = new uint8_t[10000000];
+    bits1.encoder.dat = bits1.encoder.buffer;
+    
+    rle2_context = 0; bits2_context = 0;
+    rle2.encoder.buffer = new uint8_t[10000000];
+    rle2.encoder.dat = rle2.encoder.buffer;
+    bits2.encoder.buffer = new uint8_t[10000000];
+    bits2.encoder.dat = bits2.encoder.buffer;
+
+    bytes_out2 = 0; bytes_out3 = 0;
 }
 
 GenotypeCompressorModelling::~GenotypeCompressorModelling() { delete[] models;}
@@ -234,7 +260,7 @@ int GenotypeCompressorModelling::Encode2N2MC(uint8_t* data, const int32_t n_data
 #if 1
         // Approach: split range [0, N-1] into M bins and compute which bins have
         // >0 alts present.
-        int n_steps = 16;
+        int n_steps = 64;
         const uint32_t step_size = std::ceil((float)n_samples / n_steps);
         uint64_t bins1 = 0;
         for (int i = 0; i < n_samples; ++i) {
@@ -242,19 +268,51 @@ int GenotypeCompressorModelling::Encode2N2MC(uint8_t* data, const int32_t n_data
                 bins1 |= (1 << (i/step_size));
             }
         }
+        
+        uint8_t pack1 = 0; uint8_t n_pack1 = 0;
 
-        base_models[0].ResetContext();
-        base_model_bitmaps[0].ResetContext();
+        // base_models[0].ResetContext();
+        // base_model_bitmaps[0].ResetContext();
         uint32_t offset = 0, offset_end = 0;
+
         for (int i = 0; i < n_steps; ++i) {
             if (bins1 & (1 << i)) {
-                base_model_bitmaps[0].EncodeSymbol(1);
+                // base_model_bitmaps[0].EncodeSymbol(1);
                 offset_end = offset + step_size < n_samples ? offset + step_size : n_samples;
                 for (int j = offset; j < offset_end; ++j) {
-                    base_models[0].EncodeSymbol(base_models[0].pbwt->prev[j]);
+                    // base_models[0].EncodeSymbol(base_models[0].pbwt->prev[j]);
+
+                    if (n_pack1 % 8 == 0 && n_pack1 != 0) {
+                        ppm1.Encode(pack1, pack1_context);
+                        pack1_context <<= 8;
+                        pack1_context |= pack1;
+                        pack1 = 0; n_pack1 = 0;
+
+                        // if (pack1_context != 0) std::cerr << "(int)" << std::bitset<32>(pack1_context) << std::endl;
+                        
+                    } else {
+                        // std::cerr << "adding" << std::endl;
+                        pack1 |= base_models[0].pbwt->prev[j] << n_pack1;
+                        ++n_pack1;
+                    }
                 }
-            } else base_model_bitmaps[0].EncodeSymbol(0);
+            } 
+            // else base_model_bitmaps[0].EncodeSymbol(0);
             offset += step_size;
+        }
+
+        for (int i = 0; i < 8; ++i) {
+            ppm_bin1.Encode(bins1 & 255, pack1bin_context);
+            pack1bin_context <<= 8;
+            pack1bin_context |= (bins1 & 255);
+            bins1 <<= 8;
+        }
+
+    
+        if (n_pack1) {
+            ppm1.Encode(pack1, pack1_context);
+            pack1_context <<= 8;
+            pack1_context |= pack1;
         }
 
         uint64_t bins2 = 0;
@@ -264,19 +322,49 @@ int GenotypeCompressorModelling::Encode2N2MC(uint8_t* data, const int32_t n_data
             }
         }
 
-        base_models[1].ResetContext();
-        base_model_bitmaps[1].ResetContext();
+        uint8_t pack2 = 0; uint8_t n_pack2 = 0;
+
+        // base_models[1].ResetContext();
+        // base_model_bitmaps[1].ResetContext();
         offset = 0, offset_end = 0;
+ 
         for (int i = 0; i < n_steps; ++i) {
             if (bins2 & (1 << i)) {
-                base_model_bitmaps[1].EncodeSymbol(1);
+                // base_model_bitmaps[1].EncodeSymbol(1);
                 offset_end = offset + step_size < n_samples ? offset + step_size : n_samples;
                 for (int j = offset; j < offset_end; ++j) {
-                    base_models[1].EncodeSymbol(base_models[1].pbwt->prev[j]);
+                    // base_models[1].EncodeSymbol(base_models[1].pbwt->prev[j]);
+                    if (n_pack2 % 8 == 0 && n_pack2 != 0) {
+                        ppm2.Encode(pack2, pack2_context);
+                        pack2_context <<= 8;
+                        pack2_context |= pack2;
+                        pack2 = 0; n_pack2 = 0;
+                        // if (pack1_context != 0) std::cerr << "(int)" << std::bitset<32>(pack1_context) << std::endl;
+                        
+                    } else {
+                        // std::cerr << "adding" << std::endl;
+                        pack2 |= base_models[1].pbwt->prev[j] << n_pack2;
+                        ++n_pack2;
+                    }
                 }
-            } else base_model_bitmaps[1].EncodeSymbol(0);
+            } 
+            // else base_model_bitmaps[1].EncodeSymbol(0);
             offset += step_size;
         }
+
+        if (n_pack2) {
+            ppm2.Encode(pack2, pack2_context);
+            pack2_context <<= 8;
+            pack2_context |= pack2;
+        }
+
+        for (int i = 0; i < 8; ++i) {
+            ppm_bin2.Encode(bins2 & 255, pack2bin_context);
+            pack2bin_context <<= 8;
+            pack2bin_context |= (bins2 & 255);
+            bins2 <<= 8;
+        }
+
 #else
         base_models[0].ResetContext();
         for (int j = 0; j < n_samples; ++j) {
@@ -483,6 +571,39 @@ int GenotypeCompressorModelling::Compress(djinn_block_t*& block) {
     size_t extra1 = base_model_bitmaps[0].FinishEncoding();
     size_t extra2 = base_model_bitmaps[1].FinishEncoding();
 
+    size_t s_pp1m = ppm1.encoder.dat-ppm1.encoder.buffer;
+    size_t s_pp2m = ppm2.encoder.dat-ppm2.encoder.buffer;
+    size_t s_pp1m_bin1 = ppm_bin1.encoder.dat-ppm_bin1.encoder.buffer;
+    size_t s_pp2m_bin2 = ppm_bin2.encoder.dat-ppm_bin2.encoder.buffer;
+
+    size_t s_runs1 = rle1.encoder.dat-rle1.encoder.buffer;
+    size_t s_bits1 = bits1.encoder.dat-bits1.encoder.buffer;
+    size_t s_runs2 = rle2.encoder.dat-rle2.encoder.buffer;
+    size_t s_bits2 = bits2.encoder.dat-bits2.encoder.buffer;
+    rle1.reset(); bits1.reset(); rle2.reset(); bits2.reset();
+    rle1_context = 0; bits1_context = 0; rle2_context = 0; bits2_context = 0;
+
+    std::cerr << "ppm1=" << (int)s_pp1m << " (" << (float)p1/s_pp1m << "-fold)" << std::endl;
+    std::cerr << "ppm2=" << (int)s_pp2m << " (" << (float)p2/s_pp2m << "-fold)" << std::endl;
+    std::cerr << "ppm1bin=" << (int)s_pp1m_bin1 << " (" << (float)extra1/s_pp1m_bin1 << "-fold)" << std::endl;
+    std::cerr << "ppm2bin=" << (int)s_pp2m_bin2 << " (" << (float)extra2/s_pp2m_bin2 << "-fold)" << std::endl;
+    std::cerr << "rle=" << s_runs1 << "+" << s_runs2 << ", bits=" << s_bits1 << "+" << s_bits2 << " = " << s_runs1+s_bits1+s_runs2+s_bits2 << " (" << (float)(p1+extra1+p2+extra2)/(s_runs1+s_bits1+s_runs2+s_bits2) << "-fold, " << (float)(s_pp1m+s_pp2m+s_pp1m_bin1+s_pp2m_bin2)/(s_runs1+s_bits1+s_runs2+s_bits2) << "-fold)" << std::endl;
+    std::cerr << "[M3] A=" << s_runs1+s_bits1 << " B=" << s_runs2+s_bits2 << std::endl;
+
+    ppm1.reset();
+    ppm2.reset();
+    ppm_bin1.reset();
+    ppm_bin2.reset();
+    pack1bin_context = 0;
+    pack2bin_context = 0;
+    pack1_context = 0;
+    pack2_context = 0;
+
+    bytes_out2 += s_pp1m + s_pp2m + s_pp1m_bin1 + s_pp2m_bin2;
+    bytes_out3 += s_bits1 + s_runs1 + s_bits2 + s_runs2;
+    std::cerr << "[MODEL2] " << bytes_in << "->" << bytes_out2 << " (" << (double)bytes_in/bytes_out2 << "-fold ubcf, " << (double)bytes_in_vcf/bytes_out2 << "-fold vcf)" << std::endl;
+    std::cerr << "[MODEL3] " << bytes_in << "->" << bytes_out3 << " (" << (double)(bytes_in)/bytes_out3 << "-fold ubcf, " << (double)(bytes_in_vcf)/bytes_out3 << "-fold vcf)" << std::endl;
+
     // size_t praw = ZstdCompress(buf_raw.data, buf_raw.len,
     //                            buf_compress.data, buf_compress.capacity(),
     //                            20);
@@ -593,6 +714,7 @@ int GenotypeCompressorModelling::Compress(djinn_block_t*& block) {
     base_model_bitmaps[1].StartEncoding();
 
     bytes_out += p1 + p2 + p1E + p2E + p2X + p2X2 + extra1 + extra2;
+    // bytes_out += s_pp1m + s_pp2m + extra1 + extra2;
 #if DEBUG_SIZE
     std::cerr << "[WRITE] Variants=" << processed_lines_local << " 2N2MC=" << p1 << "," << p2 << " 2N2MM=" << p1E << "," << p2E << " 2NXM=" << p2X << "," << p2X2 << " SKIP=" << extra1 << "," << extra2 << std::endl;
     std::cerr << "[PROGRESS] " << bytes_in << "->" << bytes_out << " (" << (double)bytes_in/bytes_out << "-fold ubcf, " << (double)bytes_in_vcf/bytes_out << "-fold vcf)" << std::endl;
