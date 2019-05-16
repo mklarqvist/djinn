@@ -109,7 +109,7 @@ GenotypeCompressorModelling::GenotypeCompressorModelling(int64_t n_s) : Genotype
     models(nullptr)
 {
     strategy = CompressionStrategy::CONTEXT;
-    base_models[0].Construct(n_samples, 2);
+    base_models[0].Construct(n_samples*2, 2);
     base_models[1].Construct(n_samples, 2);
     base_models[2].Construct(n_samples, 4);
     base_models[3].Construct(n_samples, 4);
@@ -251,34 +251,40 @@ int GenotypeCompressorModelling::Encode2N2MC(uint8_t* data, const int32_t n_data
 #endif
 
     ++base_models[0];
-    ++base_models[1];
+    // ++base_models[1];
     
     if (permute_pbwt) {
-        base_models[0].pbwt->Update(&data[0], 2);
-        base_models[1].pbwt->Update(&data[1], 2);
+        base_models[0].pbwt->Update(data, 1);
+        // base_models[1].pbwt->Update(&data[1], 2);
 
 #if 1
         // Approach: split range [0, N-1] into M bins and compute which bins have
         // >0 alts present.
-        int n_steps = 64;
-        const uint32_t step_size = std::ceil((float)n_samples / n_steps);
-        uint64_t bins1 = 0;
-        for (int i = 0; i < n_samples; ++i) {
+        int n_steps = 128;
+        const uint32_t step_size = std::ceil((float)2*n_samples / n_steps);
+        uint64_t bins1[2] = {0};
+        for (int i = 0; i < 2*n_samples; ++i) {
+            
             if (base_models[0].pbwt->prev[i]) {
-                bins1 |= (1 << (i/step_size));
+                bins1[i/step_size/64] |= (1L << ((i/step_size) % 64));
+                // std::cerr << i << "," << i/step_size/64 << "," << ((i/step_size)%64) << " step=" << step_size << " " << std::bitset<64>((1L << ((i/step_size) % 64))) << std::endl;
             }
         }
+        // std::cerr << std::bitset<64>(bins1[0]) << " " << std::bitset<64>(bins1[1]) << std::endl;
         
         uint8_t pack1 = 0; uint8_t n_pack1 = 0;
 
         // base_models[0].ResetContext();
         // base_model_bitmaps[0].ResetContext();
         uint32_t offset = 0, offset_end = 0;
+        uint32_t n_obs = 0;
 
         for (int i = 0; i < n_steps; ++i) {
-            if (bins1 & (1 << i)) {
+            // std::cerr << i << "," << i/64 << "," << (i%64) << std::endl;
+            if (bins1[i/64] & (1L << (i%64))) {
+                // std::cerr << "heerre" << std::endl;
                 // base_model_bitmaps[0].EncodeSymbol(1);
-                offset_end = offset + step_size < n_samples ? offset + step_size : n_samples;
+                offset_end = offset + step_size < 2*n_samples ? offset + step_size : 2*n_samples;
                 for (int j = offset; j < offset_end; ++j) {
                     // base_models[0].EncodeSymbol(base_models[0].pbwt->prev[j]);
 
@@ -290,23 +296,31 @@ int GenotypeCompressorModelling::Encode2N2MC(uint8_t* data, const int32_t n_data
 
                         // if (pack1_context != 0) std::cerr << "(int)" << std::bitset<32>(pack1_context) << std::endl;
                         
-                    } else {
-                        // std::cerr << "adding" << std::endl;
+                    } 
+                        // std::cerr << "adding: " << (int)base_models[0].pbwt->prev[j] << "@" << j << std::endl;
+                        n_obs += (base_models[0].pbwt->prev[j] == 1);
                         pack1 |= base_models[0].pbwt->prev[j] << n_pack1;
                         ++n_pack1;
-                    }
+                    
                 }
             } 
             // else base_model_bitmaps[0].EncodeSymbol(0);
             offset += step_size;
         }
 
-        for (int i = 0; i < 8; ++i) {
-            ppm_bin1.Encode(bins1 & 255, pack1bin_context);
-            pack1bin_context <<= 8;
-            pack1bin_context |= (bins1 & 255);
-            bins1 <<= 8;
+        // std::cerr << n_obs << "==" << base_models[0].pbwt->n_queue[1] << std::endl;
+        assert(n_obs == base_models[0].pbwt->n_queue[1]);
+
+        for (int j = 0; j < 2; ++j) {
+            // std::cerr << std::bitset<64>(bins1[j]) << " ";
+            for (int i = 0; i < 8; ++i) {
+                ppm_bin1.Encode(bins1[j] & 255, pack1bin_context);
+                pack1bin_context <<= 8;
+                pack1bin_context |= (bins1[j] & 255);
+                bins1[j] <<= 8;
+            }
         }
+        // std::cerr << std::endl;
 
     
         if (n_pack1) {
@@ -315,55 +329,55 @@ int GenotypeCompressorModelling::Encode2N2MC(uint8_t* data, const int32_t n_data
             pack1_context |= pack1;
         }
 
-        uint64_t bins2 = 0;
-        for (int i = 0; i < n_samples; ++i) {
-            if (base_models[1].pbwt->prev[i]) {
-                bins2 |= (1 << (i/step_size));
-            }
-        }
+        // uint64_t bins2 = 0;
+        // for (int i = 0; i < n_samples; ++i) {
+        //     if (base_models[1].pbwt->prev[i]) {
+        //         bins2 |= (1 << (i/step_size));
+        //     }
+        // }
 
-        uint8_t pack2 = 0; uint8_t n_pack2 = 0;
+        // uint8_t pack2 = 0; uint8_t n_pack2 = 0;
 
-        // base_models[1].ResetContext();
-        // base_model_bitmaps[1].ResetContext();
-        offset = 0, offset_end = 0;
+        // // base_models[1].ResetContext();
+        // // base_model_bitmaps[1].ResetContext();
+        // offset = 0, offset_end = 0;
  
-        for (int i = 0; i < n_steps; ++i) {
-            if (bins2 & (1 << i)) {
-                // base_model_bitmaps[1].EncodeSymbol(1);
-                offset_end = offset + step_size < n_samples ? offset + step_size : n_samples;
-                for (int j = offset; j < offset_end; ++j) {
-                    // base_models[1].EncodeSymbol(base_models[1].pbwt->prev[j]);
-                    if (n_pack2 % 8 == 0 && n_pack2 != 0) {
-                        ppm2.Encode(pack2, pack2_context);
-                        pack2_context <<= 8;
-                        pack2_context |= pack2;
-                        pack2 = 0; n_pack2 = 0;
-                        // if (pack1_context != 0) std::cerr << "(int)" << std::bitset<32>(pack1_context) << std::endl;
+        // for (int i = 0; i < n_steps; ++i) {
+        //     if (bins2 & (1 << i)) {
+        //         // base_model_bitmaps[1].EncodeSymbol(1);
+        //         offset_end = offset + step_size < n_samples ? offset + step_size : n_samples;
+        //         for (int j = offset; j < offset_end; ++j) {
+        //             // base_models[1].EncodeSymbol(base_models[1].pbwt->prev[j]);
+        //             if (n_pack2 % 8 == 0 && n_pack2 != 0) {
+        //                 ppm2.Encode(pack2, pack2_context);
+        //                 pack2_context <<= 8;
+        //                 pack2_context |= pack2;
+        //                 pack2 = 0; n_pack2 = 0;
+        //                 // if (pack1_context != 0) std::cerr << "(int)" << std::bitset<32>(pack1_context) << std::endl;
                         
-                    } else {
-                        // std::cerr << "adding" << std::endl;
-                        pack2 |= base_models[1].pbwt->prev[j] << n_pack2;
-                        ++n_pack2;
-                    }
-                }
-            } 
-            // else base_model_bitmaps[1].EncodeSymbol(0);
-            offset += step_size;
-        }
+        //             } else {
+        //                 // std::cerr << "adding" << std::endl;
+        //                 pack2 |= base_models[1].pbwt->prev[j] << n_pack2;
+        //                 ++n_pack2;
+        //             }
+        //         }
+        //     } 
+        //     // else base_model_bitmaps[1].EncodeSymbol(0);
+        //     offset += step_size;
+        // }
 
-        if (n_pack2) {
-            ppm2.Encode(pack2, pack2_context);
-            pack2_context <<= 8;
-            pack2_context |= pack2;
-        }
+        // if (n_pack2) {
+        //     ppm2.Encode(pack2, pack2_context);
+        //     pack2_context <<= 8;
+        //     pack2_context |= pack2;
+        // }
 
-        for (int i = 0; i < 8; ++i) {
-            ppm_bin2.Encode(bins2 & 255, pack2bin_context);
-            pack2bin_context <<= 8;
-            pack2bin_context |= (bins2 & 255);
-            bins2 <<= 8;
-        }
+        // for (int i = 0; i < 8; ++i) {
+        //     ppm_bin2.Encode(bins2 & 255, pack2bin_context);
+        //     pack2bin_context <<= 8;
+        //     pack2bin_context |= (bins2 & 255);
+        //     bins2 <<= 8;
+        // }
 
 #else
         base_models[0].ResetContext();
