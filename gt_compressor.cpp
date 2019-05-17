@@ -154,6 +154,7 @@ GenotypeCompressorModelling::GenotypeCompressorModelling(int64_t n_s) : Genotype
     mref->StartEncoding();
     mlog_rle->StartEncoding();
     mrle->StartEncoding();
+    bytes_out4 = 0;
 }
 
 GenotypeCompressorModelling::~GenotypeCompressorModelling() { delete[] models;}
@@ -286,11 +287,12 @@ int GenotypeCompressorModelling::Encode2N2MC(uint8_t* data, const int32_t n_data
                 mlog_rle->model_context <<= 1;
                 mlog_rle->model_context |= (ref & 1);
                 mlog_rle->model_context &= mlog_rle->model_ctx_mask;
-                mlog_rle->EncodeSymbolNoUpdate(ilog2(n_run));
+                uint32_t log_length = ilog2(n_run);
+                mlog_rle->EncodeSymbolNoUpdate(log_length);
                 mlog_rle->model_context <<= 4;
-                mlog_rle->model_context |= ilog2(n_run);
+                mlog_rle->model_context |= log_length;
                 mlog_rle->model_context &= mlog_rle->model_ctx_mask;
-                uint32_t max_value_prefix = 1u << (ilog2(n_run));
+                uint32_t max_value_prefix = 1u << (log_length);
                 uint16_t add = max_value_prefix - n_run;
                 // std::cerr << n_run << "," << max_value_prefix << "->" << add << std::endl;
                 while (add > 255) {
@@ -315,7 +317,27 @@ int GenotypeCompressorModelling::Encode2N2MC(uint8_t* data, const int32_t n_data
         if (n_run) {
             // std::cerr << n_run << "(" << ilog2(n_run) << ")|" << (int)ref;
             mref->EncodeSymbol(ref);
-            mlog_rle->EncodeSymbol(ilog2(n_run));
+            mlog_rle->model_context <<= 1;
+            mlog_rle->model_context |= (ref & 1);
+            mlog_rle->model_context &= mlog_rle->model_ctx_mask;
+            uint32_t log_length = ilog2(n_run);
+            mlog_rle->EncodeSymbolNoUpdate(log_length);
+            mlog_rle->model_context <<= 4;
+            mlog_rle->model_context |= log_length;
+            mlog_rle->model_context &= mlog_rle->model_ctx_mask;
+            uint32_t max_value_prefix = 1u << (log_length);
+            uint16_t add = max_value_prefix - n_run;
+            // std::cerr << n_run << "," << max_value_prefix << "->" << add << std::endl;
+            while (add > 255) {
+                mrle->model_context <<= 8;
+                mrle->model_context |= (add & 255);
+                mrle->model_context &= mrle->model_ctx_mask;
+                // std::cerr << "before=" << add << std::endl;
+                mrle->EncodeSymbolNoUpdate(add & 255);
+                // std::cerr << "after" << std::endl;
+                add -= 255;
+            }
+            n_run = 0;
         }
         // std::cerr << std::endl;
         //
@@ -675,6 +697,7 @@ int GenotypeCompressorModelling::Compress(djinn_block_t*& block) {
     size_t smrle = mrle->FinishEncoding();
 
     std::cerr << "[TEST] " << smref << "," << smlrle << "," << smrle << "==" << smref + smlrle + smrle << std::endl;
+    bytes_out4 += smref + smlrle + smrle;
     mref->Reset(); mref->StartEncoding();
     mlog_rle->Reset(); mlog_rle->StartEncoding();
     mrle->Reset(); mrle->StartEncoding();
@@ -714,6 +737,7 @@ int GenotypeCompressorModelling::Compress(djinn_block_t*& block) {
 
     bytes_out2 += s_pp1m + s_pp2m + s_pp1m_bin1 + s_pp2m_bin2;
     std::cerr << "[MODEL2] " << bytes_in << "->" << bytes_out2 << " (" << (double)bytes_in/bytes_out2 << "-fold ubcf, " << (double)bytes_in_vcf/bytes_out2 << "-fold vcf)" << std::endl;
+    std::cerr << "[MODEL-RLEC] " << bytes_in << "->" << bytes_out4 << " (" << (double)bytes_in/bytes_out4 << "-fold ubcf, " << (double)bytes_in_vcf/bytes_out4 << "-fold vcf)" << std::endl;
 
     // size_t praw = ZstdCompress(buf_raw.data, buf_raw.len,
     //                            buf_compress.data, buf_compress.capacity(),

@@ -280,7 +280,7 @@ private:
     GeneralPBWTModel* models;
     GeneralPBWTModel base_model_bitmaps[2];
     
-    uint64_t bytes_out2, bytes_out3;
+    uint64_t bytes_out2, bytes_out3, bytes_out4;
     uint32_t pack1_context;
     uint32_t pack2_context;
     uint32_t pack1bin_context;
