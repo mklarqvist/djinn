@@ -288,21 +288,25 @@ int GenotypeCompressorModelling::Encode2N2MC(uint8_t* data, const int32_t n_data
                 mlog_rle->model_context |= (ref & 1);
                 mlog_rle->model_context &= mlog_rle->model_ctx_mask;
                 uint32_t log_length = ilog2(n_run);
+                // std::cerr << n_run << "->" << log_length << std::endl;
+                assert(log_length < 16);
                 mlog_rle->EncodeSymbolNoUpdate(log_length);
                 mlog_rle->model_context <<= 4;
                 mlog_rle->model_context |= log_length;
                 mlog_rle->model_context &= mlog_rle->model_ctx_mask;
                 uint32_t max_value_prefix = 1u << (log_length);
-                uint16_t add = max_value_prefix - n_run;
+                int32_t add = max_value_prefix - n_run;
                 // std::cerr << n_run << "," << max_value_prefix << "->" << add << std::endl;
-                while (add > 255) {
+                while (add) {
+                    // std::cerr << add << std::endl;
                     mrle->model_context <<= 8;
                     mrle->model_context |= (add & 255);
                     mrle->model_context &= mrle->model_ctx_mask;
                     // std::cerr << "before=" << add << std::endl;
                     mrle->EncodeSymbolNoUpdate(add & 255);
                     // std::cerr << "after" << std::endl;
-                    add -= 255;
+                    // add -= 255;
+                    add = add < 256 ? 0 : add - 255;
                 }
 
                 ref = base_models[0].pbwt->prev[i];
@@ -321,21 +325,25 @@ int GenotypeCompressorModelling::Encode2N2MC(uint8_t* data, const int32_t n_data
             mlog_rle->model_context |= (ref & 1);
             mlog_rle->model_context &= mlog_rle->model_ctx_mask;
             uint32_t log_length = ilog2(n_run);
+            // std::cerr << n_run << "->" << log_length << std::endl;
+            assert(log_length < 16);
             mlog_rle->EncodeSymbolNoUpdate(log_length);
             mlog_rle->model_context <<= 4;
             mlog_rle->model_context |= log_length;
             mlog_rle->model_context &= mlog_rle->model_ctx_mask;
             uint32_t max_value_prefix = 1u << (log_length);
-            uint16_t add = max_value_prefix - n_run;
+            int32_t add = max_value_prefix - n_run;
             // std::cerr << n_run << "," << max_value_prefix << "->" << add << std::endl;
-            while (add > 255) {
+            while (add) {
+                // std::cerr << add << std::endl;
                 mrle->model_context <<= 8;
                 mrle->model_context |= (add & 255);
                 mrle->model_context &= mrle->model_ctx_mask;
                 // std::cerr << "before=" << add << std::endl;
                 mrle->EncodeSymbolNoUpdate(add & 255);
                 // std::cerr << "after" << std::endl;
-                add -= 255;
+                //add -= 255;
+                add = add < 256 ? 0 : add - 255;
             }
             n_run = 0;
         }
