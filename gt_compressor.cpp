@@ -276,7 +276,6 @@ int GenotypeCompressorModelling::Encode2N2MC(uint8_t* data, const int32_t n_data
         }
         // std::cerr << std::bitset<64>(bins1[0]) << " " << std::bitset<64>(bins1[1]) << std::endl;
 
-
         // temp
         uint8_t ref = base_models[0].pbwt->prev[0];
         uint32_t n_run = 1;
@@ -290,24 +289,61 @@ int GenotypeCompressorModelling::Encode2N2MC(uint8_t* data, const int32_t n_data
                 uint32_t log_length = ilog2(n_run);
                 // std::cerr << n_run << "->" << log_length << std::endl;
                 assert(log_length < 16);
-                mlog_rle->EncodeSymbolNoUpdate(log_length);
-                mlog_rle->model_context <<= 4;
-                mlog_rle->model_context |= log_length;
-                mlog_rle->model_context &= mlog_rle->model_ctx_mask;
+                mlog_rle->EncodeSymbol(log_length);
+                // mlog_rle->model_context <<= 4;
+                // mlog_rle->model_context |= log_length;
+                // mlog_rle->model_context &= mlog_rle->model_ctx_mask;
+                // if (log_length > 1) {
                 uint32_t max_value_prefix = 1u << (log_length);
-                int32_t add = max_value_prefix - n_run;
+                int32_t  add = max_value_prefix - n_run;
                 // std::cerr << n_run << "," << max_value_prefix << "->" << add << std::endl;
-                while (add) {
-                    // std::cerr << add << std::endl;
+                // if (log_length == 1) {
+                //     // std::cerr << "single=" << n_run << "," << add << std::endl;
+                // }
+                // else 
+                if (log_length < 8) {
+                    assert(add < 256);
                     mrle->model_context <<= 8;
                     mrle->model_context |= (add & 255);
                     mrle->model_context &= mrle->model_ctx_mask;
                     // std::cerr << "before=" << add << std::endl;
-                    mrle->EncodeSymbolNoUpdate(add & 255);
+                    mrle->EncodeSymbol(add & 255);
                     // std::cerr << "after" << std::endl;
                     // add -= 255;
-                    add = add < 256 ? 0 : add - 255;
+                    // add = add < 256 ? 0 : add - 255;
+                    // assert(add == 0);
+                } else if (log_length < 16) {
+                    assert(add < 65536);
+                    for (int k = 0; k < 2; ++k) {
+                        // std::cerr << add << std::endl;
+                        mrle->model_context <<= 8;
+                        mrle->model_context |= (add & 255);
+                        mrle->model_context &= mrle->model_ctx_mask;
+                        // std::cerr << "before=" << add << std::endl;
+                        mrle->EncodeSymbol(add & 255);
+                        // std::cerr << "after" << std::endl;
+                        // add -= 255;
+                        //add = add < 256 ? 0 : add - 255;
+                        add >>= 8;
+                    }
+                    // std::cerr << add << std::endl;
+                    // assert(add == 0);
                 }
+                else {
+                    for (int k = 0; k < 4; ++k) {
+                        // std::cerr << add << std::endl;
+                        mrle->model_context <<= 8;
+                        mrle->model_context |= (add & 255);
+                        mrle->model_context &= mrle->model_ctx_mask;
+                        // std::cerr << "before=" << add << std::endl;
+                        mrle->EncodeSymbol(add & 255);
+                        // std::cerr << "after" << std::endl;
+                        // add -= 255;
+                        // add = add < 256 ? 0 : add - 255;
+                        add >>= 8;
+                    }
+                }
+                // }
 
                 ref = base_models[0].pbwt->prev[i];
                 n_run = 0;
@@ -327,24 +363,62 @@ int GenotypeCompressorModelling::Encode2N2MC(uint8_t* data, const int32_t n_data
             uint32_t log_length = ilog2(n_run);
             // std::cerr << n_run << "->" << log_length << std::endl;
             assert(log_length < 16);
-            mlog_rle->EncodeSymbolNoUpdate(log_length);
-            mlog_rle->model_context <<= 4;
-            mlog_rle->model_context |= log_length;
-            mlog_rle->model_context &= mlog_rle->model_ctx_mask;
+            mlog_rle->EncodeSymbol(log_length);
+            // mlog_rle->model_context <<= 4;
+            // mlog_rle->model_context |= log_length;
+            // mlog_rle->model_context &= mlog_rle->model_ctx_mask;
             uint32_t max_value_prefix = 1u << (log_length);
             int32_t add = max_value_prefix - n_run;
             // std::cerr << n_run << "," << max_value_prefix << "->" << add << std::endl;
-            while (add) {
-                // std::cerr << add << std::endl;
-                mrle->model_context <<= 8;
-                mrle->model_context |= (add & 255);
-                mrle->model_context &= mrle->model_ctx_mask;
-                // std::cerr << "before=" << add << std::endl;
-                mrle->EncodeSymbolNoUpdate(add & 255);
-                // std::cerr << "after" << std::endl;
-                //add -= 255;
-                add = add < 256 ? 0 : add - 255;
-            }
+            // uint32_t max_value_prefix = 1u << (log_length);
+                // int32_t  add = max_value_prefix - n_run;
+                // std::cerr << n_run << "," << max_value_prefix << "->" << add << std::endl;
+                if (log_length == 1) {
+                    // std::cerr << "single=" << n_run << "," << add << std::endl;
+                }
+                else if (log_length < 8) {
+                    assert(add < 256);
+                    mrle->model_context <<= 8;
+                    mrle->model_context |= (add & 255);
+                    mrle->model_context &= mrle->model_ctx_mask;
+                    // std::cerr << "before=" << add << std::endl;
+                    mrle->EncodeSymbol(add & 255);
+                    // std::cerr << "after" << std::endl;
+                    // add -= 255;
+                    // add = add < 256 ? 0 : add - 255;
+                    // assert(add == 0);
+                } else if (log_length < 16) {
+                    assert(add < 65536);
+                    for (int k = 0; k < 2; ++k) {
+                        // std::cerr << add << std::endl;
+                        mrle->model_context <<= 8;
+                        mrle->model_context |= (add & 255);
+                        mrle->model_context &= mrle->model_ctx_mask;
+                        // std::cerr << "before=" << add << std::endl;
+                        mrle->EncodeSymbol(add & 255);
+                        // std::cerr << "after" << std::endl;
+                        // add -= 255;
+                        //add = add < 256 ? 0 : add - 255;
+                        add >>= 8;
+                    }
+                    // std::cerr << add << std::endl;
+                    // assert(add == 0);
+                }
+                else {
+                    for (int k = 0; k < 4; ++k) {
+                        // std::cerr << add << std::endl;
+                        mrle->model_context <<= 8;
+                        mrle->model_context |= (add & 255);
+                        mrle->model_context &= mrle->model_ctx_mask;
+                        // std::cerr << "before=" << add << std::endl;
+                        mrle->EncodeSymbol(add & 255);
+                        // std::cerr << "after" << std::endl;
+                        // add -= 255;
+                        // add = add < 256 ? 0 : add - 255;
+                        add >>= 8;
+                    }
+                }
+
             n_run = 0;
         }
         // std::cerr << std::endl;
@@ -694,12 +768,12 @@ int GenotypeCompressorModelling::Compress(djinn_block_t*& block) {
     size_t s_pp2m = ppm2.encoder.dat-ppm2.encoder.buffer;
     size_t s_pp1m_bin1 = ppm_bin1.encoder.dat-ppm_bin1.encoder.buffer;
     size_t s_pp2m_bin2 = ppm_bin2.encoder.dat-ppm_bin2.encoder.buffer;
-
+    
     std::cerr << "ppm1=" << (int)s_pp1m << " (" << (float)p1/s_pp1m << "-fold)" << std::endl;
     std::cerr << "ppm2=" << (int)s_pp2m << " (" << (float)p2/s_pp2m << "-fold)" << std::endl;
     std::cerr << "ppm1bin=" << (int)s_pp1m_bin1 << " (" << (float)extra1/s_pp1m_bin1 << "-fold)" << std::endl;
     std::cerr << "ppm2bin=" << (int)s_pp2m_bin2 << " (" << (float)extra2/s_pp2m_bin2 << "-fold)" << std::endl;
-
+    
     size_t smref = mref->FinishEncoding();
     size_t smlrle = mlog_rle->FinishEncoding();
     size_t smrle = mrle->FinishEncoding();
@@ -709,7 +783,7 @@ int GenotypeCompressorModelling::Compress(djinn_block_t*& block) {
     mref->Reset(); mref->StartEncoding();
     mlog_rle->Reset(); mlog_rle->StartEncoding();
     mrle->Reset(); mrle->StartEncoding();
-
+    
 #if DEBUG_PBWT
     TPPM test2; 
     test2.decoder.buffer = ppm_bin1.encoder.buffer;
