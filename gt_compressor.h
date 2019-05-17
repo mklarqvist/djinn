@@ -38,6 +38,17 @@
 
 namespace djinn {
 
+template<typename T>
+uint32_t ilog2(T x)
+{
+	uint32_t r = 0;
+
+	for (; x; ++r)
+		x >>= 1;
+
+	return r;
+}
+
 #if DEBUG_PBWT
 struct DataDigest {
     DataDigest() : len(0), capac(0), buffer(nullptr), has_initialized(false) {}
@@ -71,6 +82,24 @@ struct DataDigest {
         len += data_len;
 
 		if (!SHA512_Update(&context, data, data_len))
+			return false;
+
+		return true;
+	}
+
+    bool UpdateDigest(uint8_t data) {
+		if (!has_initialized) {
+            bool init_passed = this->InitDigest();
+            if (!init_passed) return false;
+        }
+
+        // std::cerr << "Adding: " << len << "->" << len+data_len << "(" << data_len << ")" << "/" << capac << std::endl;
+        // assert(len + data_len < capac);
+        // memcpy(&buffer[len], data, data_len);
+        // len += data_len;
+        buffer[len++] = data;
+
+		if (!SHA512_Update(&context, &data, 1))
 			return false;
 
 		return true;
@@ -257,9 +286,13 @@ private:
     uint32_t pack1bin_context;
     uint32_t pack2bin_context;
     TPPM ppm1, ppm2, ppm_bin1, ppm_bin2;
-    TPPM rle1, rle2, bits1, bits2;
-    uint32_t rle1_context, rle2_context;
-    uint32_t bits1_context, bits2_context;
+    uint32_t n_bins, bin_stride;
+    uint64_t* bins1;
+#if DEBUG_PBWT
+    DataDigest debug_bins[2];
+#endif
+
+    std::shared_ptr<GeneralModel> mref, mlog_rle, mrle;
 };
 
 class GenotypeCompressorRLEBitmap : public GenotypeCompressor {

@@ -5,7 +5,6 @@
 // preceding bytes. One of these prediction is passed to encoder
 // and decoder. 
 //
-#define USE_2_BYTES_CONTEXT  // Comment this out to use only one byte context
 //
 // #define _CRT_DISABLE_PERFCRIT_LOCKS // for vc8 and later
 #include <stdio.h>
@@ -16,7 +15,7 @@
 #include <cstdint>
 
 #define IDENT 0xba
-// unsigned char* g_buffer = 0;
+// uint8_t* g_buffer = 0;
 // int current_byte = 0;
 
 ///////auxiliary functions///////////////////////////////
@@ -32,12 +31,12 @@
 //end
 
 //Input/Output functions
-// void writeByte(unsigned char byte) {
+// void writeByte(uint8_t byte) {
 // 	g_buffer[current_byte++] = byte;
 // }
 
-// unsigned char readByte() {
-// 	unsigned char byte = g_buffer[current_byte];
+// uint8_t readByte() {
+// 	uint8_t byte = g_buffer[current_byte];
 // 	++current_byte;
 // 	return byte;
 // }
@@ -71,19 +70,26 @@ public:
 };
 
 //arithmetic encoder and decoder derived by Ilya Muraviev from matt mahoney's fpaq0
-class TEncoder {
-private:
-	unsigned int x1, x2;
+class TBase {
 public:
-	TEncoder(): x1(0), x2(-1), buffer(nullptr), dat(nullptr) {} 
+	TBase() : buffer(nullptr), dat(nullptr) {}
+	uint8_t* buffer;
+    uint8_t* dat;
+};
+
+class TEncoder : public TBase {
+private:
+	uint32_t x1, x2;
+public:
+	TEncoder(): x1(0), x2(-1) {} 
 
 	void Encode(int probability, int bit) { 
-		const unsigned int xmid = x1 + (unsigned int)((uint64_t(x2 - x1) * uint64_t (probability)) >> 17);
+		const uint32_t xmid = x1 + (uint32_t)((uint64_t(x2 - x1) * uint64_t (probability)) >> 17);
 		if (bit) x2 = xmid;
 		else x1 = xmid + 1;
 
 		while ((x1 ^ x2) < (1 << 24)) {
-			*dat = (unsigned char)(x2 >> 24);
+			*dat = (uint8_t)(x2 >> 24);
             ++dat;
 			x1 <<= 8;
 			x2 = (x2 << 8) + 255;
@@ -92,8 +98,8 @@ public:
 
 	void Flush() { 
 		for (int i=0; i<4; i++) {
-			// writeByte((unsigned char)(x2 >> 24));
-            *dat = (unsigned char)(x2 >> 24);
+			// writeByte((uint8_t)(x2 >> 24));
+            *dat = (uint8_t)(x2 >> 24);
             ++dat;
 			x2 <<= 8;
 		}
@@ -104,64 +110,55 @@ public:
         x2 = -1;
         dat = buffer;
     }
-
-public:
-    uint8_t* buffer;
-    uint8_t* dat;
-    // size_t pos;
 };
 
-// class TDecoder {
-// private:
-// 	unsigned int x1, x2, x;
-// public:
-// 	TDecoder(): x1(0), x2(-1) {} 
+class TDecoder : public TBase {
+private:
+	uint32_t x1, x2, x;
+public:
+	TDecoder(): x1(0), x2(-1) {} 
 
-// 	void Init() { 
-// 		for (int i=0; i<4; i++) {
-// 			x = (x << 8) + readByte();
-// 		}
-// 	}
+	void Init() { 
+		for (int i=0; i<4; i++) {
+			x = (x << 8) + *dat;
+			++dat;
+		}
+	}
 
-// 	int Decode(int P) {  
+	int Decode(int P) {  
 
-// 		const unsigned int xmid = x1 + (unsigned int)((uint64_t(x2 - x1) * uint64_t(P)) >> 17);
-// 		int bit = (x <= xmid);
-// 		if (bit) x2 = xmid;
-// 		else x1 = xmid + 1;
+		const uint32_t xmid = x1 + (uint32_t)((uint64_t(x2 - x1) * uint64_t(P)) >> 17);
+		int bit = (x <= xmid);
+		if (bit) x2 = xmid;
+		else x1 = xmid + 1;
 
-// 		while ((x1 ^ x2) < (1 << 24)) { 
-// 			x1 <<= 8;
-// 			x2 = (x2 << 8) + 255;
-// 			x = (x << 8) + readByte();
-// 		}
-// 		return (bit);
-// 	}
-// };
+		while ((x1 ^ x2) < (1 << 24)) { 
+			x1 <<= 8;
+			x2 = (x2 << 8) + 255;
+			x = (x << 8) + *dat;
+			++dat;
+		}
+		return (bit);
+	}
+};
 
 class TPPM {
 public:
 	TPredictor** p1; //one byte context
-#ifdef USE_2_BYTES_CONTEXT
 	TPredictor** p2; //two bytes context
-#endif 
-	int m_context;
+	uint32_t m_context;
 
 public:
 
 	TPPM() {
 		p1 = 0;
 		p1 = (TPredictor**)malloc(256 * sizeof(*p1));
-		for (int i=0; i<256; ++i) {
-			p1[i] = new TPredictor[256]; 
-		}
-#ifdef USE_2_BYTES_CONTEXT
+		for (int i=0; i<256; ++i) p1[i] = new TPredictor[256]; 
+		
 		p2 = 0;
 		p2 = (TPredictor**)malloc(65536 * sizeof(*p2));
-		for (int i=0; i<65536; ++i) {
-			p2[i] = new TPredictor[256]; 
-		}
-#endif
+		for (int i=0; i<65536; ++i) p2[i] = new TPredictor[256]; 
+
 		m_context = 0;
 	}
 	~TPPM() {
@@ -171,76 +168,86 @@ public:
 			}
 			free(p1);
 		}
-#ifdef USE_2_BYTES_CONTEXT
+
 		if (p2) {
 			for (int i=0; i<65536; ++i) {
 				delete[] p2[i];
 			}
 			free(p2);
 		}
-#endif
+
 	}
 
 	TEncoder encoder;
-	// TDecoder decoder;
+	TDecoder decoder;
 
     void reset() {
         m_context = 0;
         encoder.reset();
-        for (int i=0; i<256; ++i) p1[i]->reset();
-        for (int i=0; i<65536; ++i) p2[i]->reset();
+        for (int i=0; i<256; ++i){
+			for (int j=0; j<256; ++j) {
+				p1[i][j].reset();
+			}
+		}
+        for (int i=0; i<65536; ++i){
+			for (int j=0; j<256; ++j) {
+				p2[i][j].reset();
+			}
+		}
     }
 
-	void Encode(int value, int context) { 
-		m_context <<= 8;
-		m_context |= context;
-
+	void Encode(int value) { 
 		for (int i=7, j=1; i>=0; i--) {  
 			int bit = (value >> i) & 1;
 
 			int probability1 = p1[m_context & 0xff][j].P();
 			int probability = probability1;
-#ifdef USE_2_BYTES_CONTEXT
+
 			int probability2 = p2[m_context & 0xffff][j].P();
 			if (abs(probability2 - 0xffff) > abs(probability1 - 0xffff)) {
+				// std::cerr << "choosing higher" << std::endl;
 				probability = probability2;
-			}
-#endif 
+			} 
+			// else {
+			// 	std::cerr << "choosing lower" << std::endl;
+			// }
+
 			encoder.Encode(probability, bit);
 			p1[m_context & 0xff][j].Update(bit);
-
-#ifdef USE_2_BYTES_CONTEXT
 			p2[m_context & 0xffff][j].Update(bit); 
-#endif
 
 			j += j + bit;
 		}
+
+		m_context <<= 8;
+		m_context |= value;
 	}
 
-// 	int Decode(int context) { 
-// 		m_context <<= 8;
-// 		m_context |= context;
-// 		int value = 1;
+	int Decode() { 
 		
-// 		do {
-// 			int probability1 = p1[m_context & 0xff][value].P();
-// 			int probability = probability1;
-// #ifdef USE_2_BYTES_CONTEXT
-// 			int probability2 = p2[m_context & 0xffff][value].P();
-// 			if (abs(probability2 - 0xffff) > abs(probability1 - 0xffff)) {
-// 				probability = probability2;
-// 			}
-// #endif 
-// 			int bit = decoder.Decode(probability);
-// 			p1[m_context & 0xff][value].Update(bit);
+		int value = 1;
+		
+		do {
+			int probability1 = p1[m_context & 0xff][value].P();
+			int probability = probability1;
+			int probability2 = p2[m_context & 0xffff][value].P();
+			if (abs(probability2 - 0xffff) > abs(probability1 - 0xffff)) {
+				probability = probability2;
+			}
+			int bit = decoder.Decode(probability);
+			p1[m_context & 0xff][value].Update(bit);
 
-// #ifdef USE_2_BYTES_CONTEXT
-// 			p2[m_context & 0xffff][value].Update(bit); 
-// #endif
-// 			value += value + bit;
-// 		} while (value < 256); 
-// 		return (value - 256);
-// 	}
+			p2[m_context & 0xffff][value].Update(bit); 
+			value += value + bit;
+		} while (value < 256); 
+
+		int ret = value - 256;
+		m_context <<= 8;
+		m_context |= ret;
+
+
+		return (ret);
+	}
 };
 
 
@@ -249,7 +256,7 @@ public:
 // 1-byte - identification byte (0xba)
 // 8-bytes - uncompressed size
 // ?-bytes - compressed data
-// void encode(unsigned char* data, int data_size) {
+// void encode(uint8_t* data, int data_size) {
 // 	TPPM ppm;
 //     ppm.encoder.buffer = new uint8_t[10000000];
 //     ppm.encoder.dat = ppm.encoder.buffer;
@@ -276,15 +283,15 @@ public:
 //     // //update signature and size
 // 	// g_buffer[0] = IDENT;
 // 	// for (int i=1; i<=sizeof(size); ++i) {
-// 	// 	g_buffer[i] = (unsigned char)((size >> (8 * (i-1))) & 0xff);
+// 	// 	g_buffer[i] = (uint8_t)((size >> (8 * (i-1))) & 0xff);
 // 	// }
 // }
 
-// void decode(unsigned char* result, int& result_size) {
+// void decode(uint8_t* result, int& result_size) {
 // 	TPPM ppm;
 // 	// check identification byte
 // 	current_byte = 0;
-// 	unsigned char byte = readByte();
+// 	uint8_t byte = readByte();
 // 	if (byte != IDENT) {
 // 		printf("Bad file format\n");
 // 		exit(1);
@@ -324,18 +331,18 @@ public:
 // 		return -1;
 // 	}
 
-// 	unsigned char* data = (unsigned char*)malloc(data_size * sizeof(*data));
+// 	uint8_t* data = (uint8_t*)malloc(data_size * sizeof(*data));
 // 	FILE* f = fopen(fileName, "rb");
 // 	fread(data, 1, data_size, f);
 // 	fclose(f);
 
 // 	//we need copy for testing because original data are changed
-// 	unsigned char* copy = (unsigned char*)malloc(data_size);
+// 	uint8_t* copy = (uint8_t*)malloc(data_size);
 // 	memcpy(copy, data, data_size);
 
 // 	//Encoding
 // 	clock_t start = clock();
-// 	g_buffer = (unsigned char*)malloc(data_size + data_size/2);
+// 	g_buffer = (uint8_t*)malloc(data_size + data_size/2);
 // 	encode(data, data_size);
 // 	int compressed_size = current_byte;
 // 	clock_t end = clock();
@@ -345,7 +352,7 @@ public:
 // 	//Decoding
 // 	clock_t start1 = clock();
 // 	int test_size = data_size + data_size/2;
-// 	unsigned char* test = (unsigned char*)malloc(test_size);
+// 	uint8_t* test = (uint8_t*)malloc(test_size);
 // 	decode(test, test_size);
 // 	clock_t end1 = clock();
 // 	printf("Decoding done, time %2.3f s.\n", (double)(end1 - start1)/CLOCKS_PER_SEC);

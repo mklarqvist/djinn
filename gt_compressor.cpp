@@ -140,19 +140,20 @@ GenotypeCompressorModelling::GenotypeCompressorModelling(int64_t n_s) : Genotype
     ppm_bin2.encoder.buffer = new uint8_t[10000000];
     ppm_bin2.encoder.dat = ppm_bin2.encoder.buffer;
 
-    rle1_context = 0; bits1_context = 0;
-    rle1.encoder.buffer = new uint8_t[10000000];
-    rle1.encoder.dat = rle1.encoder.buffer;
-    bits1.encoder.buffer = new uint8_t[10000000];
-    bits1.encoder.dat = bits1.encoder.buffer;
-    
-    rle2_context = 0; bits2_context = 0;
-    rle2.encoder.buffer = new uint8_t[10000000];
-    rle2.encoder.dat = rle2.encoder.buffer;
-    bits2.encoder.buffer = new uint8_t[10000000];
-    bits2.encoder.dat = bits2.encoder.buffer;
-
     bytes_out2 = 0; bytes_out3 = 0;
+
+#if DEBUG_PBWT
+    for (int i = 0; i < 2; ++i) {
+        debug_bins[i].resize(n_samples*block_size + 65536);
+    }
+#endif
+
+    mref = std::make_shared<GeneralModel>(2, 512);
+    mlog_rle = std::make_shared<GeneralModel>(16, 32768);
+    mrle = std::make_shared<GeneralModel>(256, 65536);
+    mref->StartEncoding();
+    mlog_rle->StartEncoding();
+    mrle->StartEncoding();
 }
 
 GenotypeCompressorModelling::~GenotypeCompressorModelling() { delete[] models;}
@@ -260,17 +261,64 @@ int GenotypeCompressorModelling::Encode2N2MC(uint8_t* data, const int32_t n_data
 #if 1
         // Approach: split range [0, N-1] into M bins and compute which bins have
         // >0 alts present.
-        int n_steps = 128;
+        int n_steps = std::ceil((float)2*n_samples / 128);
         const uint32_t step_size = std::ceil((float)2*n_samples / n_steps);
-        uint64_t bins1[2] = {0};
+        uint32_t n_bins = std::ceil((float)n_steps/64);
+        uint64_t* bins1 = new uint64_t[n_bins]; // todo: fix memory
+        memset(bins1, 0, sizeof(uint64_t)*n_bins);
+
         for (int i = 0; i < 2*n_samples; ++i) {
-            
             if (base_models[0].pbwt->prev[i]) {
                 bins1[i/step_size/64] |= (1L << ((i/step_size) % 64));
                 // std::cerr << i << "," << i/step_size/64 << "," << ((i/step_size)%64) << " step=" << step_size << " " << std::bitset<64>((1L << ((i/step_size) % 64))) << std::endl;
             }
         }
         // std::cerr << std::bitset<64>(bins1[0]) << " " << std::bitset<64>(bins1[1]) << std::endl;
+
+
+        // temp
+        uint8_t ref = base_models[0].pbwt->prev[0];
+        uint32_t n_run = 1;
+        for (int i = 1; i < 2*n_samples; ++i) {
+            if (ref != base_models[0].pbwt->prev[i]) {
+                // std::cerr << n_run << "(" << ilog2(n_run) << ")|" << (int)ref << ",";
+                mref->EncodeSymbol(ref);
+                mlog_rle->model_context <<= 1;
+                mlog_rle->model_context |= (ref & 1);
+                mlog_rle->model_context &= mlog_rle->model_ctx_mask;
+                mlog_rle->EncodeSymbolNoUpdate(ilog2(n_run));
+                mlog_rle->model_context <<= 4;
+                mlog_rle->model_context |= ilog2(n_run);
+                mlog_rle->model_context &= mlog_rle->model_ctx_mask;
+                uint32_t max_value_prefix = 1u << (ilog2(n_run));
+                uint16_t add = max_value_prefix - n_run;
+                // std::cerr << n_run << "," << max_value_prefix << "->" << add << std::endl;
+                while (add > 255) {
+                    mrle->model_context <<= 8;
+                    mrle->model_context |= (add & 255);
+                    mrle->model_context &= mrle->model_ctx_mask;
+                    // std::cerr << "before=" << add << std::endl;
+                    mrle->EncodeSymbolNoUpdate(add & 255);
+                    // std::cerr << "after" << std::endl;
+                    add -= 255;
+                }
+
+                ref = base_models[0].pbwt->prev[i];
+                n_run = 0;
+                // 1) Store ref
+                // 2) Store ceil(log2(n_run))
+                // 3) Store 2^(ceil(log2(n_run))-1) - n_run
+            }
+            ++n_run;
+        }
+
+        if (n_run) {
+            // std::cerr << n_run << "(" << ilog2(n_run) << ")|" << (int)ref;
+            mref->EncodeSymbol(ref);
+            mlog_rle->EncodeSymbol(ilog2(n_run));
+        }
+        // std::cerr << std::endl;
+        //
         
         uint8_t pack1 = 0; uint8_t n_pack1 = 0;
 
@@ -289,18 +337,18 @@ int GenotypeCompressorModelling::Encode2N2MC(uint8_t* data, const int32_t n_data
                     // base_models[0].EncodeSymbol(base_models[0].pbwt->prev[j]);
 
                     if (n_pack1 % 8 == 0 && n_pack1 != 0) {
-                        ppm1.Encode(pack1, pack1_context);
-                        pack1_context <<= 8;
-                        pack1_context |= pack1;
+                        ppm1.Encode(pack1);
+                        // pack1_context <<= 8;
+                        // pack1_context |= pack1;
                         pack1 = 0; n_pack1 = 0;
 
                         // if (pack1_context != 0) std::cerr << "(int)" << std::bitset<32>(pack1_context) << std::endl;
                         
                     } 
-                        // std::cerr << "adding: " << (int)base_models[0].pbwt->prev[j] << "@" << j << std::endl;
-                        n_obs += (base_models[0].pbwt->prev[j] == 1);
-                        pack1 |= base_models[0].pbwt->prev[j] << n_pack1;
-                        ++n_pack1;
+                    // std::cerr << "adding: " << (int)base_models[0].pbwt->prev[j] << "@" << j << std::endl;
+                    n_obs += (base_models[0].pbwt->prev[j] == 1);
+                    pack1 |= base_models[0].pbwt->prev[j] << n_pack1;
+                    ++n_pack1;
                     
                 }
             } 
@@ -311,23 +359,40 @@ int GenotypeCompressorModelling::Encode2N2MC(uint8_t* data, const int32_t n_data
         // std::cerr << n_obs << "==" << base_models[0].pbwt->n_queue[1] << std::endl;
         assert(n_obs == base_models[0].pbwt->n_queue[1]);
 
-        for (int j = 0; j < 2; ++j) {
+#if DEBUG_PBWT
+// assert(debug_bins[0].UpdateDigest((uint8_t*)bins1, n_bins*sizeof(uint64_t)));
+
+for (int j = 0; j < n_bins; ++j) {
+    uint64_t ref = bins1[j];
+    for (int i = 0; i < 8; ++i) {
+        debug_bins[0].buffer[debug_bins[0].len] = (ref & 255);
+        ++debug_bins[0].len;
+    //    assert(debug_bins[0].UpdateDigest(ref & 255));
+       ref >>= 8;
+    }
+}
+#endif
+
+        for (int j = 0; j < n_bins; ++j) {
             // std::cerr << std::bitset<64>(bins1[j]) << " ";
+            uint64_t ref = bins1[j];
             for (int i = 0; i < 8; ++i) {
-                ppm_bin1.Encode(bins1[j] & 255, pack1bin_context);
-                pack1bin_context <<= 8;
-                pack1bin_context |= (bins1[j] & 255);
-                bins1[j] <<= 8;
+                ppm_bin1.Encode(ref & 255);
+                // pack1bin_context <<= 8;
+                // pack1bin_context |= (ref & 255);
+                ref >>= 8;
             }
         }
         // std::cerr << std::endl;
 
     
         if (n_pack1) {
-            ppm1.Encode(pack1, pack1_context);
-            pack1_context <<= 8;
-            pack1_context |= pack1;
+            ppm1.Encode(pack1);
+            // pack1_context <<= 8;
+            // pack1_context |= pack1;
         }
+
+        delete[] bins1;
 
         // uint64_t bins2 = 0;
         // for (int i = 0; i < n_samples; ++i) {
@@ -574,6 +639,12 @@ int GenotypeCompressorModelling::Compress(djinn_block_t*& block) {
             std::cerr << std::dec << std::endl;
         }
     }
+
+    debug_bins[0].FinalizeDigest();
+    std::cerr << "[SHA512] Digest-bins-" << 0 << "=" << std::hex << (int)debug_bins[0].digest[0];
+    for (int j = 1; j < 64; ++j) std::cerr << std::hex << (int)debug_bins[0].digest[j];
+    std::cerr << std::dec << std::endl;
+    std::cerr << "Len=" << debug_bins[0].len << "->" << debug_bins[0].len/processed_lines_local << "->" << debug_bins[0].len/processed_lines_local/8 << std::endl;
 #endif
 
     size_t p1   = base_models[0].FinishEncoding();
@@ -585,38 +656,64 @@ int GenotypeCompressorModelling::Compress(djinn_block_t*& block) {
     size_t extra1 = base_model_bitmaps[0].FinishEncoding();
     size_t extra2 = base_model_bitmaps[1].FinishEncoding();
 
+    ppm1.encoder.Flush();
+    ppm2.encoder.Flush();
+    ppm_bin1.encoder.Flush();
+    ppm_bin2.encoder.Flush();
     size_t s_pp1m = ppm1.encoder.dat-ppm1.encoder.buffer;
     size_t s_pp2m = ppm2.encoder.dat-ppm2.encoder.buffer;
     size_t s_pp1m_bin1 = ppm_bin1.encoder.dat-ppm_bin1.encoder.buffer;
     size_t s_pp2m_bin2 = ppm_bin2.encoder.dat-ppm_bin2.encoder.buffer;
 
-    size_t s_runs1 = rle1.encoder.dat-rle1.encoder.buffer;
-    size_t s_bits1 = bits1.encoder.dat-bits1.encoder.buffer;
-    size_t s_runs2 = rle2.encoder.dat-rle2.encoder.buffer;
-    size_t s_bits2 = bits2.encoder.dat-bits2.encoder.buffer;
-    rle1.reset(); bits1.reset(); rle2.reset(); bits2.reset();
-    rle1_context = 0; bits1_context = 0; rle2_context = 0; bits2_context = 0;
-
     std::cerr << "ppm1=" << (int)s_pp1m << " (" << (float)p1/s_pp1m << "-fold)" << std::endl;
     std::cerr << "ppm2=" << (int)s_pp2m << " (" << (float)p2/s_pp2m << "-fold)" << std::endl;
     std::cerr << "ppm1bin=" << (int)s_pp1m_bin1 << " (" << (float)extra1/s_pp1m_bin1 << "-fold)" << std::endl;
     std::cerr << "ppm2bin=" << (int)s_pp2m_bin2 << " (" << (float)extra2/s_pp2m_bin2 << "-fold)" << std::endl;
-    std::cerr << "rle=" << s_runs1 << "+" << s_runs2 << ", bits=" << s_bits1 << "+" << s_bits2 << " = " << s_runs1+s_bits1+s_runs2+s_bits2 << " (" << (float)(p1+extra1+p2+extra2)/(s_runs1+s_bits1+s_runs2+s_bits2) << "-fold, " << (float)(s_pp1m+s_pp2m+s_pp1m_bin1+s_pp2m_bin2)/(s_runs1+s_bits1+s_runs2+s_bits2) << "-fold)" << std::endl;
-    std::cerr << "[M3] A=" << s_runs1+s_bits1 << " B=" << s_runs2+s_bits2 << std::endl;
+
+    size_t smref = mref->FinishEncoding();
+    size_t smlrle = mlog_rle->FinishEncoding();
+    size_t smrle = mrle->FinishEncoding();
+
+    std::cerr << "[TEST] " << smref << "," << smlrle << "," << smrle << "==" << smref + smlrle + smrle << std::endl;
+    mref->Reset(); mref->StartEncoding();
+    mlog_rle->Reset(); mlog_rle->StartEncoding();
+    mrle->Reset(); mrle->StartEncoding();
+
+#if DEBUG_PBWT
+    TPPM test2; 
+    test2.decoder.buffer = ppm_bin1.encoder.buffer;
+    test2.decoder.dat = ppm_bin1.encoder.buffer;
+    test2.decoder.Init();
+
+    uint32_t tester = 0;
+    for (int i = 0; i < debug_bins[0].len; ++i) {
+        uint8_t decoded = test2.Decode();
+        if(debug_bins[0].buffer[i] != decoded) {
+            std::cerr << i << ": " << (int)debug_bins[0].buffer[i] << "!=" << (int)decoded << std::endl;
+            exit(1);
+        }
+        // ++tester;
+        // std::cerr << decoded << ",";
+    }
+    std::cerr << "[TEST]" << "PASSED" << std::endl;
+    debug_bins[0].len = 0;
+#endif
 
     ppm1.reset();
     ppm2.reset();
     ppm_bin1.reset();
     ppm_bin2.reset();
+    // ppm1.encoder.dat = ppm1.encoder.buffer;
+    // ppm2.encoder.dat = ppm2.encoder.buffer;
+    // ppm_bin1.encoder.dat = ppm_bin1.encoder.buffer;
+    // ppm_bin2.encoder.dat = ppm_bin2.encoder.buffer;
     pack1bin_context = 0;
     pack2bin_context = 0;
     pack1_context = 0;
     pack2_context = 0;
 
     bytes_out2 += s_pp1m + s_pp2m + s_pp1m_bin1 + s_pp2m_bin2;
-    bytes_out3 += s_bits1 + s_runs1 + s_bits2 + s_runs2;
     std::cerr << "[MODEL2] " << bytes_in << "->" << bytes_out2 << " (" << (double)bytes_in/bytes_out2 << "-fold ubcf, " << (double)bytes_in_vcf/bytes_out2 << "-fold vcf)" << std::endl;
-    std::cerr << "[MODEL3] " << bytes_in << "->" << bytes_out3 << " (" << (double)(bytes_in)/bytes_out3 << "-fold ubcf, " << (double)(bytes_in_vcf)/bytes_out3 << "-fold vcf)" << std::endl;
 
     // size_t praw = ZstdCompress(buf_raw.data, buf_raw.len,
     //                            buf_compress.data, buf_compress.capacity(),
@@ -741,6 +838,7 @@ int GenotypeCompressorModelling::Compress(djinn_block_t*& block) {
         for (int i = 0; i < 6; ++i) {
             debug_pbwt[i].reset();
         }
+        debug_bins[0].reset();
 #endif
 
     return oblock->size();

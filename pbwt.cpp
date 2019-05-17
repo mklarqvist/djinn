@@ -255,23 +255,22 @@ int PBWT::ReverseUpdateBitmap(const uint8_t* arr) {
 
 /*======   Canonical representation   ======*/
 
-GeneralPBWTModel::GeneralPBWTModel() noexcept :
+GeneralModel::GeneralModel() noexcept :
     max_model_symbols(0),
     model_context_shift(0),
-    model_context(0),
+    model_context(0), model_ctx_mask(0),
     n_buffer(10000000), buffer(new uint8_t[n_buffer]),
-    n_additions(0), n_variants(0)
+    n_additions(0)
 {}
 
-GeneralPBWTModel::GeneralPBWTModel(int64_t n_samples, int n_symbols) :
+GeneralModel::GeneralModel(int n_symbols) :
     max_model_symbols(n_symbols),
     model_context_shift(ceil(log2(n_symbols))),
-    model_context(0),
-    pbwt(std::make_shared<PBWT>(n_samples, n_symbols)),
+    model_context(0), model_ctx_mask(MODEL_SIZE - 1),
     range_coder(std::make_shared<RangeCoder>()),
     n_buffer(10000000),
     buffer(new uint8_t[n_buffer]),
-    n_additions(0), n_variants(0)
+    n_additions(0)
 {
     assert(n_symbols > 1);
     models.resize(MODEL_SIZE);
@@ -280,9 +279,104 @@ GeneralPBWTModel::GeneralPBWTModel(int64_t n_samples, int n_symbols) :
     Reset();
 }
 
-GeneralPBWTModel::~GeneralPBWTModel() {
+GeneralModel::GeneralModel(int n_symbols, int model_size) :
+    max_model_symbols(n_symbols),
+    model_context_shift(ceil(log2(n_symbols))),
+    model_context(0), model_ctx_mask(model_size - 1),
+    range_coder(std::make_shared<RangeCoder>()),
+    n_buffer(10000000),
+    buffer(new uint8_t[n_buffer]),
+    n_additions(0)
+{
+    assert(n_symbols > 1);
+    models.resize(model_size);
+    for (int i = 0; i < model_size; ++i) models[i] = std::make_shared<FrequencyModel>();
+
+    Reset();
+}
+
+GeneralModel::~GeneralModel() {
     delete[] buffer;
 }
+
+void GeneralModel::Reset() {
+    n_additions = 0;
+    ResetModels();
+    ResetContext();
+}
+
+void GeneralModel::ResetModels() {
+    for (int i = 0; i < models.size(); ++i)
+        models[i]->Initiate(max_model_symbols, max_model_symbols);
+}
+
+void GeneralModel::ResetContext() { model_context = 0; }
+
+int GeneralModel::FinishEncoding() {
+    range_coder->FinishEncode();
+    int ret = range_coder->OutSize();
+    return(ret);
+}
+
+int GeneralModel::FinishDecoding() {
+    range_coder->FinishDecode();
+    return 1;
+}
+
+void GeneralModel::StartEncoding() {
+    range_coder->SetOutput(buffer);
+    range_coder->StartEncode();
+}
+
+void GeneralModel::StartDecoding(uint8_t* data) {
+    range_coder->SetInput(data);
+    range_coder->StartDecode();
+}
+
+void GeneralModel::EncodeSymbol(const uint16_t symbol) {
+    // std::cerr << "Adding symbol: " << symbol << "@" << model_context << "," << model_context_shift << "," << model_ctx_mask << std::endl; 
+    // assert(range_coder.get() != nullptr);
+    // assert(models[model_context].get() != nullptr);
+    models[model_context]->EncodeSymbol(range_coder.get(), symbol);
+    model_context <<= model_context_shift;
+    model_context |= symbol;
+    model_context &= model_ctx_mask;
+    // _mm_prefetch((const char *)&(models[model_context]), _MM_HINT_T0);
+    ++n_additions;
+}
+
+void GeneralModel::EncodeSymbolNoUpdate(const uint16_t symbol) {
+    models[model_context]->EncodeSymbol(range_coder.get(), symbol);
+
+    ++n_additions;
+}
+
+uint16_t GeneralModel::DecodeSymbol() {
+    uint16_t symbol = models[model_context]->DecodeSymbol(range_coder.get());
+    model_context <<= model_context_shift;
+    model_context |= symbol;
+    model_context &= model_ctx_mask;
+    assert(model_context < models.size());
+    // _mm_prefetch((const char *)&(models[model_context]), _MM_HINT_T0);
+    return symbol;
+}
+
+/*======   Canonical representation   ======*/
+
+GeneralPBWTModel::GeneralPBWTModel() noexcept :
+    n_variants(0)
+{}
+
+GeneralPBWTModel::GeneralPBWTModel(int64_t n_samples, int n_symbols) :
+    GeneralModel(n_symbols),
+    pbwt(std::make_shared<PBWT>(n_samples, n_symbols)),
+    n_variants(0)
+{
+    assert(n_symbols > 1);
+    Reset();
+}
+
+GeneralPBWTModel::~GeneralPBWTModel() { }
 
 // Constructor outside constructor.
 void GeneralPBWTModel::Construct(int64_t n_samples, int n_symbols) {
@@ -299,17 +393,10 @@ void GeneralPBWTModel::Construct(int64_t n_samples, int n_symbols) {
     Reset();
 }
 
-void GeneralPBWTModel::ResetModels() {
-    for (int i = 0; i < MODEL_SIZE; ++i)
-        models[i]->Initiate(max_model_symbols, max_model_symbols);
-}
-
 void GeneralPBWTModel::ResetPBWT() {
     if (pbwt.get() != nullptr)
         pbwt->reset();
 }
-
-void GeneralPBWTModel::ResetContext() { model_context = 0; }
 
 void GeneralPBWTModel::Reset() {
     n_additions = 0;
@@ -323,45 +410,6 @@ void GeneralPBWTModel::ResetExceptPBWT() {
     n_additions = 0;
     ResetModels();
     ResetContext();
-}
-
-int GeneralPBWTModel::FinishEncoding() {
-    range_coder->FinishEncode();
-    int ret = range_coder->OutSize();
-    return(ret);
-}
-
-int GeneralPBWTModel::FinishDecoding() {
-    range_coder->FinishDecode();
-    return 1;
-}
-
-void GeneralPBWTModel::StartEncoding() {
-    range_coder->SetOutput(buffer);
-    range_coder->StartEncode();
-}
-
-void GeneralPBWTModel::StartDecoding(uint8_t* data) {
-    range_coder->SetInput(data);
-    range_coder->StartDecode();
-}
-
-void GeneralPBWTModel::EncodeSymbol(const uint16_t symbol) {
-    models[model_context]->EncodeSymbol(range_coder.get(), symbol);
-    model_context <<= model_context_shift;
-    model_context |= symbol;
-    model_context &= (MODEL_SIZE-1);
-    _mm_prefetch((const char *)&(models[model_context]), _MM_HINT_T0);
-    ++n_additions;
-}
-
-uint16_t GeneralPBWTModel::DecodeSymbol() {
-    uint16_t symbol = models[model_context]->DecodeSymbol(range_coder.get());
-    model_context <<= model_context_shift;
-    model_context |= symbol;
-    model_context &= (MODEL_SIZE-1);
-    _mm_prefetch((const char *)&(models[model_context]), _MM_HINT_T0);
-    return symbol;
 }
 
 }

@@ -85,37 +85,53 @@ public:
 
 #define MODEL_SIZE 65536
 
-class GeneralPBWTModel {
+class GeneralModel {
+public:
+    GeneralModel() noexcept;
+    GeneralModel(int n_symbols);
+    GeneralModel(int n_symbols, int model_size);
+    virtual ~GeneralModel();
+
+    int FinishEncoding();
+    int FinishDecoding();
+    void StartEncoding();
+    void StartDecoding(uint8_t* data);
+    void EncodeSymbol(const uint16_t symbol);
+    void EncodeSymbolNoUpdate(const uint16_t symbol);
+    uint16_t DecodeSymbol();
+
+    void ResetModels();
+    void ResetContext();
+    virtual void Reset();
+
+public:
+    int max_model_symbols;
+    int model_context_shift;
+    uint32_t model_context, model_ctx_mask;
+    std::shared_ptr<RangeCoder> range_coder;
+    std::vector < std::shared_ptr<FrequencyModel> > models;
+    size_t n_additions;
+
+    size_t n_buffer;
+    uint8_t* buffer; // fix
+};
+
+class GeneralPBWTModel : public GeneralModel {
 public:
     GeneralPBWTModel() noexcept;
     GeneralPBWTModel(int64_t n_samples, int n_symbols);
     ~GeneralPBWTModel();
 
     void Construct(int64_t n_samples, int n_symbols);
-    void ResetModels();
     void ResetPBWT();
-    void ResetContext();
     void Reset();
     void ResetExceptPBWT();
-    int FinishEncoding();
-    int FinishDecoding();
-    void StartEncoding();
-    void StartDecoding(uint8_t* data);
-    void EncodeSymbol(const uint16_t symbol);
-    uint16_t DecodeSymbol();
+
 
     void operator++() { ++this->n_variants; } 
 
 public:
-    int max_model_symbols;
-    int model_context_shift;
-    uint32_t model_context;
     std::shared_ptr<PBWT> pbwt;
-    std::shared_ptr<RangeCoder> range_coder;
-    std::vector < std::shared_ptr<FrequencyModel> > models;
-    size_t n_buffer;
-    uint8_t* buffer; // fix
-    size_t n_additions;
     size_t n_variants;
 };
 

@@ -9,6 +9,29 @@
 #include <iostream>
 #include <chrono>
 
+
+
+int upper_power_of_two(int n)
+{
+    int v = n; 
+
+    v--;
+    v |= v >> 1;
+    v |= v >> 2;
+    v |= v >> 4;
+    v |= v >> 8;
+    v |= v >> 16;
+    v++; // next power of 2
+
+    int x = v >> 1; // previous power of 2
+
+    return x < v ? x : v; // round down to closest power 2
+
+    // return (v - n) > (n - x) ? x : v;
+}
+
+
+
 int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
     std::unique_ptr<djinn::VcfReader> reader = djinn::VcfReader::FromFile(filename);
     if (reader.get() == nullptr) {
@@ -47,6 +70,39 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
     uint32_t n_blocks = 8196; // Number of variants per data block.
     uint8_t* output_data = new uint8_t[n_blocks*reader->n_samples_*2];
 
+
+    uint8_t* truth = new uint8_t[2000000];
+    TPPM test; test.encoder.buffer = new uint8_t[2000000]; test.encoder.dat = test.encoder.buffer;
+    uint32_t input = 0;
+    for (int i = 0; i < 10000; ++i) {
+        for (int j = 0; j < 100; ++j) {
+            test.Encode(j);
+            truth[input] = j;
+            ++input;
+        }
+    }
+    test.encoder.Flush();
+    std::cerr << "Done=" << input << "->" << test.encoder.dat - test.encoder.buffer << std::endl;
+    TPPM test2;
+    test2.decoder.buffer = test.encoder.buffer;
+    test2.decoder.dat = test.encoder.buffer;
+    test2.decoder.Init();
+
+    uint32_t tester = 0;
+    for (int i = 0; i < input; ++i) {
+        uint8_t decoded = test2.Decode();
+        if(truth[i] != decoded) {
+            std::cerr << i << ": " << truth[i] << "!=" << decoded << std::endl;
+            exit(1);
+        }
+        ++tester;
+        // std::cerr << decoded << ",";
+    }
+    // std::cerr << std::endl;
+    
+    delete[] test.encoder.buffer;
+    
+
     // While there are bcf records available.
     while (reader->Next()) {
         //const char* chrom = bcf_seqname(hr,line) ;
@@ -56,8 +112,6 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
         //char *ref, *REF;
         //ref = REF = strdup(line->d.allele[0]);
         //while ( (*ref = toupper(*ref)) ) ++ref ;
-
-        // std::cerr << reader->bcf1_->pos+1 << std::endl;
         
         if (n_lines % n_blocks == 0 && n_lines != 0) {
             gtcomp.Compress(block);
