@@ -66,7 +66,6 @@ void FrequencyModel::Normalize() {
 }
 
 void FrequencyModel::EncodeSymbol(RangeCoder* rc, uint16_t sym) {
-    // std::cerr << "encoding symbol: " << sym << " with " << NSYM << "," << SHIFT << "," << STEP << std::endl;
     SymFreqs* s = F;
     uint32_t AccFreq = 0;
 
@@ -75,6 +74,8 @@ void FrequencyModel::EncodeSymbol(RangeCoder* rc, uint16_t sym) {
         _mm_prefetch((uint8_t*)(s+1), _MM_HINT_T0);
     }
 
+    // std::cerr << "encoding symbol: " << sym << " with " << NSYM << "," << SHIFT << "," << STEP << " -> " << AccFreq << "/" << s->Freq << "/" << TotFreq << std::endl;
+    // assert(AccFreq + s->Freq <= TotFreq);
     rc->Encode(AccFreq, s->Freq, TotFreq);
 
     s->Freq += STEP;
@@ -93,6 +94,48 @@ void FrequencyModel::EncodeSymbol(RangeCoder* rc, uint16_t sym) {
             s[-1] = t;
         }
     }
+}
+
+void FrequencyModel::EncodeSymbol(uint16_t sym) {
+    SymFreqs* s = F;
+    uint32_t AccFreq = 0;
+
+    while (s->Symbol != sym) {
+        AccFreq += s++->Freq;
+        _mm_prefetch((uint8_t*)(s+1), _MM_HINT_T0);
+    }
+
+    // std::cerr << "encoding symbol: " << sym << " with " << NSYM << "," << SHIFT << "," << STEP << " -> " << AccFreq << "/" << s->Freq << "/" << TotFreq << std::endl;
+    // assert(AccFreq + s->Freq <= TotFreq);
+    // rc->Encode(AccFreq, s->Freq, TotFreq);
+
+    s->Freq += STEP;
+    TotFreq += STEP;
+
+    if (TotFreq > ((1 << SHIFT) - STEP)) {
+        //std::cerr << "normalzing" << std::endl;
+        Normalize();
+    }
+
+    /* Keep approx sorted */
+    if(s != F) { // Prevent s[-1] to segfault when s == F
+        if (s[0].Freq > s[-1].Freq) {
+            SymFreqs t = s[0];
+            s[0]  = s[-1];
+            s[-1] = t;
+        }
+    }
+}
+
+double FrequencyModel::GetP(uint16_t sym) const {
+    SymFreqs* s = F;
+    uint32_t AccFreq = 0;
+
+    while (s->Symbol != sym) {
+        AccFreq += s++->Freq;
+        _mm_prefetch((uint8_t*)(s+1), _MM_HINT_T0);
+    }
+    return (AccFreq + s->Freq) / (double)TotFreq;
 }
 
 uint16_t FrequencyModel::DecodeSymbol(RangeCoder *rc) {

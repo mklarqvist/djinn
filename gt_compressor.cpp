@@ -149,12 +149,35 @@ GenotypeCompressorModelling::GenotypeCompressorModelling(int64_t n_s) : Genotype
 #endif
 
     mref = std::make_shared<GeneralModel>(2, 512);
-    mlog_rle = std::make_shared<GeneralModel>(16, 32768);
-    mrle = std::make_shared<GeneralModel>(256, 65536);
+    mlog_rle = std::make_shared<GeneralModel>(32, 32); // 2^5
+    mlog_rle_o1 = std::make_shared<GeneralModel>(32, 1024); // 2^10
+    mrle = std::make_shared<GeneralModel>(256, 32); // 2^5
+    mrle_o1 = std::make_shared<GeneralModel>(256, 1024); // 2^10
+    mrle2_1 = std::make_shared<GeneralModel>(256, 32);
+    mrle2_2 = std::make_shared<GeneralModel>(256, 32);
+    mrle4_1 = std::make_shared<GeneralModel>(256, 32);
+    mrle4_2 = std::make_shared<GeneralModel>(256, 32);
+    mrle4_3 = std::make_shared<GeneralModel>(256, 32);
+    mrle4_4 = std::make_shared<GeneralModel>(256, 32);
     mref->StartEncoding();
     mlog_rle->StartEncoding();
     mrle->StartEncoding();
+    mrle_o1->StartEncoding();
+    mrle2_1->StartEncoding();
+    mrle2_2->StartEncoding();
+    mlog_rle_o1->StartEncoding();
+    mrle4_1->StartEncoding();
+    mrle4_2->StartEncoding();
+    mrle4_3->StartEncoding();
+    mrle4_4->StartEncoding();
     bytes_out4 = 0;
+
+    // gtshark
+    ctx_model = std::make_shared<djinn_gt_ctx>();
+    ctx_model->data = std::make_shared<djinn_ctx_buf_t>(10000000);
+    ctx_model->rce = new CRangeEncoder();
+    ctx_model->rce->Start();
+    out_gts = 0;
 }
 
 GenotypeCompressorModelling::~GenotypeCompressorModelling() { delete[] models;}
@@ -280,53 +303,136 @@ int GenotypeCompressorModelling::Encode2N2MC(uint8_t* data, const int32_t n_data
         uint8_t ref = base_models[0].pbwt->prev[0];
         uint32_t n_run = 1;
         for (int i = 1; i < 2*n_samples; ++i) {
-            if (ref != base_models[0].pbwt->prev[i] || n_run == 65535) {
+            if (ref != base_models[0].pbwt->prev[i] || n_run == 4294967296) { // run has to be < 2^32
+                ctx_model->encode_run_len(ref, n_run);
+
                 // std::cerr << n_run << "(" << ilog2(n_run) << ")|" << (int)ref << ",";
                 mref->EncodeSymbol(ref);
+                mlog_rle->model_context = 0;
                 mlog_rle->model_context <<= 1;
                 mlog_rle->model_context |= (ref & 1);
                 mlog_rle->model_context &= mlog_rle->model_ctx_mask;
                 uint32_t log_length = ilog2(n_run);
                 // std::cerr << n_run << "->" << log_length << std::endl;
-                assert(log_length-1 < 16);
-                mlog_rle->EncodeSymbol(log_length-1);
+                assert(log_length-1 < 32);
+                
+                // mlog_rle_o1->model_context = 0;
+                mlog_rle_o1->model_context <<= 1;
+                mlog_rle_o1->model_context |= (ref & 1);
+                mlog_rle_o1->model_context &= mlog_rle_o1->model_ctx_mask;
+
+                double P1 = mlog_rle->models[mlog_rle->model_context]->GetP(log_length-1);
+                double P2 = mlog_rle_o1->models[mlog_rle_o1->model_context]->GetP(log_length-1);
+
+                // std::cerr << P1 << "," << P2 << std::endl;
+
+                if (P1 < P2) {
+                    mlog_rle->EncodeSymbolNoUpdate(log_length-1);
+                    mlog_rle_o1->models[mlog_rle_o1->model_context]->EncodeSymbol(log_length-1);
+                } else {
+                    mlog_rle_o1->EncodeSymbolNoUpdate(log_length-1);
+                    mlog_rle->models[mlog_rle->model_context]->EncodeSymbol(log_length-1);
+                }
+                
+                // mlog_rle_o1->models[mlog_rle_o1->model_context]->EncodeSymbol(log_length-1);
+                // mlog_rle->EncodeSymbolNoUpdate(log_length-1);
+
+
+                mlog_rle_o1->model_context <<= 4;
+                mlog_rle_o1->model_context |= (log_length-1);
+                mlog_rle_o1->model_context &= mlog_rle_o1->model_ctx_mask;
+
+
                 // mlog_rle->model_context <<= 4;
-                // mlog_rle->model_context |= log_length;
+                // mlog_rle->model_context |= (log_length-1);
                 // mlog_rle->model_context &= mlog_rle->model_ctx_mask;
+
                 uint32_t max_value_prefix = 1u << (log_length);
                 int32_t  add = max_value_prefix - n_run;
                 // std::cerr << n_run << "," << max_value_prefix << "->" << add << std::endl;
-                // if (log_length == 1) {
-                //     // std::cerr << "single=" << n_run << "," << add << std::endl;
-                //     mrle->model_context <<= 8;
-                //     mrle->model_context |= (add & 255);
-                //     mrle->model_context &= mrle->model_ctx_mask;
-                // }
-                // else 
+                if (log_length == 1) {
+                    // std::cerr << "single=" << n_run << "," << add << std::endl;
+                    // mrle->model_context <<= 8;
+                    // mrle->model_context |= (add & 255);
+                    // mrle->model_context &= mrle->model_ctx_mask;
+                }
+                else 
                 if (log_length < 8) {
                     assert(add < 256);
-                    mrle->model_context <<= 8;
-                    mrle->model_context |= (add & 255);
+                    // mrle->model_context = 0;
+                    // mrle->model_context <<= 1;
+                    mrle->model_context = (ref & 1);
+                    mrle->model_context <<= 4;
+                    mrle->model_context |= (log_length-1);
                     mrle->model_context &= mrle->model_ctx_mask;
-                    mrle->EncodeSymbol(add & 255);
+
+                    mrle_o1->model_context <<= 1;
+                    mrle_o1->model_context |= (ref & 1);
+                    mrle_o1->model_context <<= 4;
+                    mrle_o1->model_context |= (log_length-1);
+                    mrle_o1->model_context &= mrle_o1->model_ctx_mask;
+
+                    double P1 = mrle->models[mrle->model_context]->GetP(add);
+                    double P2 = mrle_o1->models[mrle_o1->model_context]->GetP(add);
+
+                    // std::cerr << P1 << "," << P2 << std::endl;
+
+                    if (P1 > P2) {
+                        mrle->EncodeSymbolNoUpdate(add & 255);
+                        mrle_o1->models[mrle_o1->model_context]->EncodeSymbol(add & 255);
+                    } else {
+                        mrle_o1->EncodeSymbolNoUpdate(add & 255);
+                        mrle->models[mrle->model_context]->EncodeSymbol(add & 255);
+                    }
+                    
+                    // mrle->EncodeSymbolNoUpdate(add & 255);
+                    // mrle_o1->models[mrle_o1->model_context]->EncodeSymbol(add & 255);
+
                 } else if (log_length < 16) {
                     assert(add < 65536);
-                    for (int k = 0; k < 2; ++k) {
-                        mrle->model_context <<= 8;
-                        mrle->model_context |= (add & 255);
-                        mrle->model_context &= mrle->model_ctx_mask;
-                        mrle->EncodeSymbol(add & 255);
-                        add >>= 8;
-                    }
+
+                    mrle2_1->model_context = 0;
+                    mrle2_1->model_context <<= 1;
+                    mrle2_1->model_context |= (ref & 1);
+                    mrle2_1->model_context <<= 4;
+                    mrle2_1->model_context |= (log_length-1);
+                    mrle2_1->EncodeSymbolNoUpdate(add & 255);
+                    add >>= 8;
+                    mrle2_2->model_context = 0;
+                    mrle2_2->model_context <<= 1;
+                    mrle2_2->model_context |= (ref & 1);
+                    mrle2_2->model_context <<= 4;
+                    mrle2_2->model_context |= (log_length-1);
+                    mrle2_2->EncodeSymbolNoUpdate(add & 255);
                 } else {
-                    // std::cerr << "here" << std::endl;
-                    for (int k = 0; k < 4; ++k) {
-                        mrle->model_context <<= 8;
-                        mrle->model_context |= (add & 255);
-                        mrle->model_context &= mrle->model_ctx_mask;
-                        mrle->EncodeSymbol(add & 255);
-                        add >>= 8;
-                    }
+                    // std::cerr << "here=" << n_run << std::endl;
+                    mrle4_1->model_context = 0;
+                    mrle4_1->model_context <<= 1;
+                    mrle4_1->model_context |= (ref & 1);
+                    mrle4_1->model_context <<= 4;
+                    mrle4_1->model_context |= (log_length-1);
+                    mrle4_1->EncodeSymbolNoUpdate(add & 255);
+                    add >>= 8;
+                    mrle4_2->model_context = 0;
+                    mrle4_2->model_context <<= 1;
+                    mrle4_2->model_context |= (ref & 1);
+                    mrle4_2->model_context <<= 4;
+                    mrle4_2->model_context |= (log_length-1);
+                    mrle4_2->EncodeSymbolNoUpdate(add & 255);
+                    add >>= 8;
+                    mrle4_3->model_context = 0;
+                    mrle4_3->model_context <<= 1;
+                    mrle4_3->model_context |= (ref & 1);
+                    mrle4_3->model_context <<= 4;
+                    mrle4_3->model_context |= (log_length-1);
+                    mrle4_3->EncodeSymbolNoUpdate(add & 255);
+                    add >>= 8;
+                    mrle4_4->model_context = 0;
+                    mrle4_4->model_context <<= 1;
+                    mrle4_4->model_context |= (ref & 1);
+                    mrle4_4->model_context <<= 4;
+                    mrle4_4->model_context |= (log_length-1);
+                    mrle4_4->EncodeSymbolNoUpdate(add & 255);
                 }
 
                 ref = base_models[0].pbwt->prev[i];
@@ -336,76 +442,141 @@ int GenotypeCompressorModelling::Encode2N2MC(uint8_t* data, const int32_t n_data
         }
 
         if (n_run) {
-            // std::cerr << n_run << "(" << ilog2(n_run) << ")|" << (int)ref;
             mref->EncodeSymbol(ref);
+            mlog_rle->model_context = 0;
             mlog_rle->model_context <<= 1;
             mlog_rle->model_context |= (ref & 1);
             mlog_rle->model_context &= mlog_rle->model_ctx_mask;
             uint32_t log_length = ilog2(n_run);
             // std::cerr << n_run << "->" << log_length << std::endl;
-            assert(log_length-1 < 16);
-            mlog_rle->EncodeSymbol(log_length-1);
-            // mlog_rle->model_context <<= 4;
-            // mlog_rle->model_context |= log_length;
-            // mlog_rle->model_context &= mlog_rle->model_ctx_mask;
-            uint32_t max_value_prefix = 1u << (log_length);
-            int32_t add = max_value_prefix - n_run;
-            // std::cerr << n_run << "," << max_value_prefix << "->" << add << std::endl;
-            // uint32_t max_value_prefix = 1u << (log_length);
-                // int32_t  add = max_value_prefix - n_run;
-                // std::cerr << n_run << "," << max_value_prefix << "->" << add << std::endl;
-                // if (log_length == 1) {
-                //     // std::cerr << "single=" << n_run << "," << add << std::endl;
-                // }
-                // else 
-                if (log_length < 8) {
-                    assert(add < 256);
-                    mrle->model_context <<= 8;
-                    mrle->model_context |= (add & 255);
-                    mrle->model_context &= mrle->model_ctx_mask;
-                    // std::cerr << "before=" << add << std::endl;
-                    mrle->EncodeSymbol(add & 255);
-                    // std::cerr << "after" << std::endl;
-                    // add -= 255;
-                    // add = add < 256 ? 0 : add - 255;
-                    // assert(add == 0);
-                } else if (log_length < 16) {
-                    assert(add < 65536);
-                    for (int k = 0; k < 2; ++k) {
-                        // std::cerr << add << std::endl;
-                        mrle->model_context <<= 8;
-                        mrle->model_context |= (add & 255);
-                        mrle->model_context &= mrle->model_ctx_mask;
-                        // std::cerr << "before=" << add << std::endl;
-                        mrle->EncodeSymbol(add & 255);
-                        // std::cerr << "after" << std::endl;
-                        // add -= 255;
-                        //add = add < 256 ? 0 : add - 255;
-                        add >>= 8;
-                    }
-                    // std::cerr << add << std::endl;
-                    // assert(add == 0);
-                }
-                else {
-                    for (int k = 0; k < 4; ++k) {
-                        // std::cerr << add << std::endl;
-                        mrle->model_context <<= 8;
-                        mrle->model_context |= (add & 255);
-                        mrle->model_context &= mrle->model_ctx_mask;
-                        // std::cerr << "before=" << add << std::endl;
-                        mrle->EncodeSymbol(add & 255);
-                        // std::cerr << "after" << std::endl;
-                        // add -= 255;
-                        // add = add < 256 ? 0 : add - 255;
-                        add >>= 8;
-                    }
-                }
+            assert(log_length-1 < 32);
+            
+            // mlog_rle_o1->model_context = 0;
+            mlog_rle_o1->model_context <<= 1;
+            mlog_rle_o1->model_context |= (ref & 1);
+            mlog_rle_o1->model_context &= mlog_rle_o1->model_ctx_mask;
 
-            n_run = 0;
+            double P1 = mlog_rle->models[mlog_rle->model_context]->GetP(log_length-1);
+            double P2 = mlog_rle_o1->models[mlog_rle_o1->model_context]->GetP(log_length-1);
+
+            // std::cerr << P1 << "," << P2 << std::endl;
+
+            if (P1 < P2) {
+                mlog_rle->EncodeSymbolNoUpdate(log_length-1);
+                mlog_rle_o1->models[mlog_rle_o1->model_context]->EncodeSymbol(log_length-1);
+            } else {
+                mlog_rle_o1->EncodeSymbolNoUpdate(log_length-1);
+                mlog_rle->models[mlog_rle->model_context]->EncodeSymbol(log_length-1);
+            }
+            
+            // mlog_rle_o1->models[mlog_rle_o1->model_context]->EncodeSymbol(log_length-1);
+            // mlog_rle->EncodeSymbolNoUpdate(log_length-1);
+
+
+            mlog_rle_o1->model_context <<= 4;
+            mlog_rle_o1->model_context |= (log_length-1);
+            mlog_rle_o1->model_context &= mlog_rle_o1->model_ctx_mask;
+
+
+            // mlog_rle->model_context <<= 4;
+            // mlog_rle->model_context |= (log_length-1);
+            // mlog_rle->model_context &= mlog_rle->model_ctx_mask;
+
+            uint32_t max_value_prefix = 1u << (log_length);
+            int32_t  add = max_value_prefix - n_run;
+            // std::cerr << n_run << "," << max_value_prefix << "->" << add << std::endl;
+            if (log_length == 1) {
+                // std::cerr << "single=" << n_run << "," << add << std::endl;
+                // mrle->model_context <<= 8;
+                // mrle->model_context |= (add & 255);
+                // mrle->model_context &= mrle->model_ctx_mask;
+            }
+            else 
+            if (log_length < 8) {
+                assert(add < 256);
+                // mrle->model_context = 0;
+                // mrle->model_context <<= 1;
+                mrle->model_context = (ref & 1);
+                mrle->model_context <<= 4;
+                mrle->model_context |= (log_length-1);
+                mrle->model_context &= mrle->model_ctx_mask;
+
+                mrle_o1->model_context <<= 1;
+                mrle_o1->model_context |= (ref & 1);
+                mrle_o1->model_context <<= 4;
+                mrle_o1->model_context |= (log_length-1);
+                mrle_o1->model_context &= mrle_o1->model_ctx_mask;
+
+                double P1 = mrle->models[mrle->model_context]->GetP(add);
+                double P2 = mrle_o1->models[mrle_o1->model_context]->GetP(add);
+
+                // std::cerr << P1 << "," << P2 << std::endl;
+
+                if (P1 > P2) {
+                    mrle->EncodeSymbolNoUpdate(add & 255);
+                    mrle_o1->models[mrle_o1->model_context]->EncodeSymbol(add & 255);
+                } else {
+                    mrle_o1->EncodeSymbolNoUpdate(add & 255);
+                    mrle->models[mrle->model_context]->EncodeSymbol(add & 255);
+                }
+                
+                // mrle->EncodeSymbolNoUpdate(add & 255);
+                // mrle_o1->models[mrle_o1->model_context]->EncodeSymbol(add & 255);
+
+            } else if (log_length < 16) {
+                assert(add < 65536);
+
+                mrle2_1->model_context = 0;
+                mrle2_1->model_context <<= 1;
+                mrle2_1->model_context |= (ref & 1);
+                mrle2_1->model_context <<= 4;
+                mrle2_1->model_context |= (log_length-1);
+                mrle2_1->EncodeSymbolNoUpdate(add & 255);
+                add >>= 8;
+                mrle2_2->model_context = 0;
+                mrle2_2->model_context <<= 1;
+                mrle2_2->model_context |= (ref & 1);
+                mrle2_2->model_context <<= 4;
+                mrle2_2->model_context |= (log_length-1);
+                mrle2_2->EncodeSymbolNoUpdate(add & 255);
+            } else {
+                // std::cerr << "here=" << n_run << std::endl;
+                mrle4_1->model_context = 0;
+                mrle4_1->model_context <<= 1;
+                mrle4_1->model_context |= (ref & 1);
+                mrle4_1->model_context <<= 4;
+                mrle4_1->model_context |= (log_length-1);
+                mrle4_1->EncodeSymbolNoUpdate(add & 255);
+                add >>= 8;
+                mrle4_2->model_context = 0;
+                mrle4_2->model_context <<= 1;
+                mrle4_2->model_context |= (ref & 1);
+                mrle4_2->model_context <<= 4;
+                mrle4_2->model_context |= (log_length-1);
+                mrle4_2->EncodeSymbolNoUpdate(add & 255);
+                add >>= 8;
+                mrle4_3->model_context = 0;
+                mrle4_3->model_context <<= 1;
+                mrle4_3->model_context |= (ref & 1);
+                mrle4_3->model_context <<= 4;
+                mrle4_3->model_context |= (log_length-1);
+                mrle4_3->EncodeSymbolNoUpdate(add & 255);
+                add >>= 8;
+                mrle4_4->model_context = 0;
+                mrle4_4->model_context <<= 1;
+                mrle4_4->model_context |= (ref & 1);
+                mrle4_4->model_context <<= 4;
+                mrle4_4->model_context |= (log_length-1);
+                mrle4_4->EncodeSymbolNoUpdate(add & 255);
+            }
         }
         // std::cerr << std::endl;
         //
         
+        // ++processed_lines_local;
+        // ++processed_lines;
+        // return 1;
+
         uint8_t pack1 = 0; uint8_t n_pack1 = 0;
 
         // base_models[0].ResetContext();
@@ -758,13 +929,42 @@ int GenotypeCompressorModelling::Compress(djinn_block_t*& block) {
     
     size_t smref = mref->FinishEncoding();
     size_t smlrle = mlog_rle->FinishEncoding();
+    size_t smlrle_o1 = mlog_rle_o1->FinishEncoding();
     size_t smrle = mrle->FinishEncoding();
+    size_t smrle_o1 = mrle_o1->FinishEncoding();
+    size_t smrle2_1 = mrle2_1->FinishEncoding();
+    size_t smrle2_2 = mrle2_2->FinishEncoding();
 
-    std::cerr << "[TEST] " << smref << "," << smlrle << "," << smrle << "==" << smref + smlrle + smrle << std::endl;
-    bytes_out4 += smref + smlrle + smrle;
+    size_t smrle4_1 = mrle4_1->FinishEncoding();
+    size_t smrle4_2 = mrle4_2->FinishEncoding();
+    size_t smrle4_3 = mrle4_3->FinishEncoding();
+    size_t smrle4_4 = mrle4_4->FinishEncoding();
+
+    std::cerr << "[TEST] REF=" << smref << " LOG-RLE=" << smlrle << "," << smlrle_o1 << " RLE-1=" << smrle << "," << smrle_o1 << " RLE-2=" << smrle2_1 << "," << smrle2_2 << " RLE-4=" << smrle4_1 << "," << smrle4_2 << "," << smrle4_3 << "," << smrle4_4 << "==" << smref + smlrle + smlrle_o1 + smrle + smrle_o1 + smrle2_1 + smrle2_1 + smrle4_1 + smrle4_2 + smrle4_3 + smrle4_4 << std::endl;
+    bytes_out4 += smref + smlrle + smrle_o1 + smlrle_o1 + smrle + smrle2_1 + smrle2_2 + smrle4_1 + smrle4_2 + smrle4_3 + smrle4_4;
     mref->Reset(); mref->StartEncoding();
     mlog_rle->Reset(); mlog_rle->StartEncoding();
+    mlog_rle_o1->Reset(); mlog_rle_o1->StartEncoding();
     mrle->Reset(); mrle->StartEncoding();
+    mrle_o1->Reset(); mrle_o1->StartEncoding();
+    mrle2_1->Reset(); mrle2_1->StartEncoding();
+    mrle2_2->Reset(); mrle2_2->StartEncoding();
+
+    mrle4_1->Reset(); mrle4_1->StartEncoding();
+    mrle4_2->Reset(); mrle4_2->StartEncoding();
+    mrle4_3->Reset(); mrle4_3->StartEncoding();
+    mrle4_4->Reset(); mrle4_4->StartEncoding();
+
+    ctx_model->rce->End();
+    out_gts += ctx_model->data->pos - ctx_model->data->buffer;
+    std::cerr << "[GTSHARK] " << bytes_in << "->" << out_gts << " (" << (double)bytes_in/out_gts << "-fold ubcf, " << (double)bytes_in_vcf/out_gts << "-fold vcf)" << std::endl;
+    ctx_model->data->pos = ctx_model->data->buffer;
+    
+    ctx_model = std::make_shared<djinn_gt_ctx>();
+    ctx_model->data = std::make_shared<djinn_ctx_buf_t>(10000000);
+    ctx_model->rce = new CRangeEncoder();
+    ctx_model->rce->Start();
+
     
 #if DEBUG_PBWT
     TPPM test2; 

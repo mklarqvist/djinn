@@ -35,6 +35,7 @@
 
 //test
 #include "balz.h"
+#include "rc.h"
 
 namespace djinn {
 
@@ -292,7 +293,10 @@ private:
     DataDigest debug_bins[2];
 #endif
 
-    std::shared_ptr<GeneralModel> mref, mlog_rle, mrle;
+    std::shared_ptr<GeneralModel> mref, mlog_rle, mlog_rle_o1, mrle, mrle_o1, mrle2_1, mrle2_2, mrle4_1, mrle4_2, mrle4_3, mrle4_4;
+
+    int64_t out_gts;
+    std::shared_ptr<djinn_gt_ctx> ctx_model;
 };
 
 class GenotypeCompressorRLEBitmap : public GenotypeCompressor {
