@@ -275,11 +275,14 @@ private:
     int DebugContext(uint8_t* in, size_t len_in, uint8_t* ref_data, size_t n_cycles, int pbwt_sym, context_debug_decode decode_fn, const uint8_t* lookup_fn);
 #endif
 
+    int EncodeRLE(uint64_t ref, uint32_t len);
+
 private:
     GeneralPBWTModel base_models[4]; // 0-1: diploid biallelic no-missing; 2-3: diploid biallelic missing
     GeneralPBWTModel base_models_complex[2]; // 0-1: diploid n-allelic
     GeneralPBWTModel* models;
     GeneralPBWTModel base_model_bitmaps[2];
+    GeneralPBWTModel gt_pbwt;
     
     uint64_t bytes_out2, bytes_out3, bytes_out4;
     uint32_t pack1_context;
@@ -293,7 +296,8 @@ private:
     DataDigest debug_bins[2];
 #endif
 
-    std::shared_ptr<GeneralModel> mref, mlog_rle, mlog_rle_o1, mrle, mrle_o1, mrle2_1, mrle2_2, mrle4_1, mrle4_2, mrle4_3, mrle4_4;
+    std::shared_ptr<GeneralModel> mref, mlog_rle, mrle, mrle2_1, mrle2_2, mrle4_1, mrle4_2, mrle4_3, mrle4_4;
+    std::shared_ptr<GeneralModel> dirty_wah, mtype;
 
     int64_t out_gts;
     std::shared_ptr<djinn_gt_ctx> ctx_model;

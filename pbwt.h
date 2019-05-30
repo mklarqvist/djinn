@@ -58,6 +58,7 @@ public:
     void Initiate(int64_t n_s, int n_sym);
     void reset();
     int Update(const int* arr);
+    int UpdateBlank(const uint8_t* arr, uint32_t stride = 1);
     int Update(const uint8_t* arr, uint32_t stride = 1);
     int UpdateGeneral(const uint8_t* arr, uint32_t stride = 1);
     // Todo:
@@ -90,6 +91,7 @@ public:
     GeneralModel() noexcept;
     GeneralModel(int n_symbols);
     GeneralModel(int n_symbols, int model_size);
+    GeneralModel(int n_symbols, int model_size, int shift, int step);
     virtual ~GeneralModel();
 
     int FinishEncoding();

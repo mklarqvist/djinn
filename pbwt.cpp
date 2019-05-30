@@ -159,7 +159,35 @@ int PBWT::UpdateGeneral(const uint8_t* arr, uint32_t stride) {
 
     for (int i = 0; i < n_samples; ++i) {
         const uint8_t& gt = BCF_UNPACK_GENOTYPE_GENERAL(arr[ppa[i] * stride]);
-        if ( gt >= n_symbols) {
+        if (gt >= n_symbols) {
+            std::cerr << "error=" << (int)gt << "/" << n_symbols << std::endl;
+        }
+        assert(gt < n_symbols);
+        for (int j = 0; j < n_symbols; ++j) {
+            if (gt == j)
+                queue[j][n_queue[j]++] = ppa[i];
+        }
+        prev[i] = gt;
+    }
+
+    uint32_t of = 0;
+    for (int j = 0; j < n_symbols; ++j) {
+        for (uint32_t i = 0; i < n_queue[j]; ++i, ++of)
+            ppa[of] = queue[j][i];
+    }
+    assert(of == n_samples);
+    ++n_steps;
+
+    return(1);
+}
+
+int PBWT::UpdateBlank(const uint8_t* arr, uint32_t stride) {
+    // Reset queues.
+    memset(n_queue, 0, sizeof(uint32_t)*n_symbols);
+
+    for (int i = 0; i < n_samples; ++i) {
+        const uint8_t& gt = arr[ppa[i] * stride];
+        if (gt >= n_symbols) {
             std::cerr << "error=" << (int)gt << "/" << n_symbols << std::endl;
         }
         assert(gt < n_symbols);
@@ -291,6 +319,27 @@ GeneralModel::GeneralModel(int n_symbols, int model_size) :
     assert(n_symbols > 1);
     models.resize(model_size);
     for (int i = 0; i < model_size; ++i) models[i] = std::make_shared<FrequencyModel>();
+
+    Reset();
+}
+
+GeneralModel::GeneralModel(int n_symbols, int model_size, int shift, int step) :
+    max_model_symbols(n_symbols),
+    model_context_shift(ceil(log2(n_symbols))),
+    model_context(0), model_ctx_mask(model_size - 1),
+    range_coder(std::make_shared<RangeCoder>()),
+    n_buffer(10000000),
+    buffer(new uint8_t[n_buffer]),
+    n_additions(0)
+{
+    std::cerr << "init models: " << shift << "," << step << std::endl;
+    assert(n_symbols > 1);
+    models.resize(model_size);
+    for (int i = 0; i < model_size; ++i) {
+        models[i] = std::make_shared<FrequencyModel>();
+        models[i]->SHIFT = shift;
+        models[i]->STEP = step;
+    }
 
     Reset();
 }

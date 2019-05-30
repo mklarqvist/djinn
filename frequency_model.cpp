@@ -6,7 +6,7 @@
 namespace djinn {
 
 FrequencyModel::FrequencyModel() :
-    NSYM(0), STEP(2), SHIFT(16),
+    NSYM(0), STEP(1), SHIFT(28),
     TotFreq(0),
     F(nullptr)
 {
