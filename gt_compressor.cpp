@@ -176,7 +176,7 @@ GenotypeCompressorModelling::GenotypeCompressorModelling(int64_t n_s) : Genotype
     // gtshark
     ctx_model = std::make_shared<djinn_gt_ctx>();
     ctx_model->data = std::make_shared<djinn_ctx_buf_t>(10000000);
-    ctx_model->rce = new CRangeEncoder();
+    ctx_model->rce = std::make_shared<CRangeEncoder>();
     ctx_model->rce->Start();
     out_gts = 0;
 }

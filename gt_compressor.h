@@ -344,6 +344,235 @@ private:
     PBWT complex_pbwt[2]; // diploid n-allelic
 };
 
+class HaplotypeCompressor {
+public:
+    HaplotypeCompressor(int64_t n_s) {
+        n_samples = 2*n_s;
+        offset = 0;
+        n_in = 0;
+        bitmaps = new uint64_t*[n_samples];
+        for (int i = 0; i < n_samples; ++i) {
+            bitmaps[i] = new uint64_t[8192];
+            memset(bitmaps[i], 0, 8192*sizeof(uint64_t));
+        }
+    }
+
+    ~HaplotypeCompressor() {
+        if (bitmaps != nullptr) {
+            for (int i = 0; i < n_samples; ++i) delete[] bitmaps[i];
+            delete[] bitmaps;
+        }
+    }
+
+    int EncodeBitmap(bcf1_t* bcf, const bcf_hdr_t* hdr) {
+        if (bcf == NULL) return 0;
+        if (hdr == NULL) return 0;
+
+        const bcf_fmt_t* fmt = bcf_get_fmt(hdr, bcf, "GT");
+        if (fmt == NULL) return 0;
+        if (fmt->p_len != n_samples) {
+            std::cerr << "input is not equal" << std::endl;
+            return 0;
+        }
+
+        if (bcf->n_allele != 2) return 0;
+        n_in += fmt->p_len;
+
+        for (int i = 0; i < n_samples; ++i) {
+            // 1 bit reserved for archetyping.
+            bitmaps[i][offset / 63] |= (uint64_t)BCF_UNPACK_GENOTYPE(fmt->p[i]) << (offset % 63);
+        }
+        ++offset;
+
+        return 1;
+    }
+
+    int Compress() {
+        uint8_t* buf = new uint8_t[2000000];
+        uint8_t* buf2 = new uint8_t[2000000];
+        uint32_t buf2_off = 0;
+
+        uint32_t n_bitmaps = offset/63;
+        PBWT test(n_bitmaps*63,2);
+        uint8_t* unpack = new uint8_t[n_bitmaps*63];
+        for (int i = 0; i < n_samples; ++i) {
+            uint32_t of = 0;
+            for (int j = 0; j < n_bitmaps; ++j) {
+                uint64_t ref = bitmaps[i][j];
+                for (int k = 0; k < 63; ++k, ++of) {
+                    unpack[of] = ref & 1;
+                    ref >>= 1;
+                }
+            }
+            test.UpdateBlank(unpack, 1);
+        }
+
+        std::cerr << test.ToPrettyString() << std::endl;
+
+        uint64_t* pbwt_bitmap = new uint64_t[n_bitmaps];
+        for (int i = 0; i < n_samples; ++i) {
+            memset(pbwt_bitmap,0,sizeof(uint64_t)*n_bitmaps);
+            uint32_t of = 0;
+            for (int j = 0; j < n_bitmaps; ++j) {
+                uint64_t ref = bitmaps[i][j];
+                for (int k = 0; k < 63; ++k, ++of) {
+                    unpack[of] = ref & 1;
+                    ref >>= 1;
+                }
+            }
+            
+            // assert(test.)
+            // std::cerr << "repacking" << std::endl;
+            for (int j = 0; j < n_bitmaps*63; ++j) {
+                pbwt_bitmap[j / 63] |= (uint64_t)unpack[test.ppa[j]] << (j % 63);
+            }
+
+            // std::cerr << "wah+compress" << std::endl;
+
+            // compress repacked
+            uint64_t bref = pbwt_bitmap[0];
+            uint32_t n_run = 1;
+            uint32_t n_len = 0;
+            uint32_t cost = 0;
+            buf2_off = 0;
+        
+            uint32_t types[2] = {0};
+
+            for (int j = 1; j < n_bitmaps; ++j) {
+                // std::cerr << j << "/" << n_bitmaps << std::endl;
+                if (pbwt_bitmap[j] != bref) {
+                    if (n_run == 1) {
+                        // std::cerr << std::bitset<32>(bref) << " ";
+                        n_len += 63;
+                        
+                        *reinterpret_cast<uint64_t*>(&buf2[buf2_off]) = bref;
+                        buf2_off += sizeof(uint64_t);
+
+                        cost += sizeof(uint64_t);
+                        ++types[0];
+                    }
+                    else {
+                        // std::cerr << n_run << ":" << std::bitset<32>(bref) << " ";
+                        cost += sizeof(uint32_t);
+                        n_len += 63*n_run;
+                        ++types[1];
+
+                        uint32_t prun = ((bref & 1) << 31) | n_run;
+                        *reinterpret_cast<uint32_t*>(&buf2[buf2_off]) = prun;
+                        buf2_off += sizeof(uint32_t);
+                    }
+
+                    n_run = 0;
+                    bref = pbwt_bitmap[j];
+                }
+                ++n_run;
+            }
+
+            if (n_run) {
+                if (n_run == 1) {
+                    // std::cerr << std::bitset<32>(bref) << " ";
+                    n_len += 63;
+
+                    *reinterpret_cast<uint64_t*>(&buf2[buf2_off]) = bref;
+                    buf2_off += sizeof(uint64_t);
+
+                    cost += sizeof(uint64_t);
+                    ++types[0];
+                }
+                else {
+                    // std::cerr << n_run << ":" << std::bitset<32>(bref) << " ";
+                    cost += sizeof(uint32_t);
+                    n_len += 63*n_run;
+                    ++types[1];
+
+                    uint32_t prun = ((bref & 1) << 31) | n_run;
+                    *reinterpret_cast<uint32_t*>(&buf2[buf2_off]) = prun;
+                    buf2_off += sizeof(uint32_t);
+                }
+            }
+            // std::cerr << "compressing=" << buf2_off << std::endl;
+            size_t praw = Lz4Compress(buf2, buf2_off, buf, 2000000, 9);
+            
+            std::cerr << "Sample-" << i << ": " << offset << "->" << praw << " (" << (float)offset/praw << "-fold) " << offset << "->" << offset/63 << " typing=" << (float)types[0]/(types[0]+types[1]) << " and " << (float)types[1]/(types[0]+types[1]) << std::endl;
+            
+
+        }
+
+        delete[] pbwt_bitmap;
+        delete[] unpack;
+        delete[] buf2;
+
+
+        uint64_t total = 0;
+        for (int i = 0; i < n_samples; ++i) {
+            uint64_t bref = bitmaps[i][0];
+            uint32_t n_run = 1;
+            uint32_t n_len = 0;
+            uint32_t cost = 0;
+        
+            uint32_t types[2] = {0};
+
+            
+            for (int j = 1; j < n_bitmaps; ++j) {
+                if (bitmaps[i][j] != bref) {
+                    if (n_run == 1) {
+                        // std::cerr << std::bitset<32>(bref) << " ";
+                        n_len += 63;
+                        cost += sizeof(uint64_t);
+                        ++types[0];
+                    }
+                    else {
+                        // std::cerr << n_run << ":" << std::bitset<32>(bref) << " ";
+                        cost += sizeof(uint32_t);
+                        n_len += 63*n_run;
+                        ++types[1];
+                    }
+
+                    n_run = 0;
+                    bref = bitmaps[i][j];
+                }
+                ++n_run;
+            }
+
+            if (n_run) {
+                if (n_run == 1) {
+                    // std::cerr << std::bitset<32>(bref) << " ";
+                    n_len += 63;
+                    cost += sizeof(uint64_t);
+                    ++types[0];
+                }
+                else {
+                    // std::cerr << n_run << ":" << std::bitset<32>(bref) << " ";
+                    cost += sizeof(uint32_t);
+                    n_len += 63*n_run;
+                    ++types[1];
+                }
+            }
+            size_t praw = Lz4Compress((uint8_t*)&bitmaps[i][0], n_bitmaps*sizeof(uint64_t), buf, 2000000, 9);
+            
+            std::cerr << "Sample-" << i << ": " << cost << "->" << praw << " (" << (float)offset/praw << "-fold) " << offset << "->" << offset/63 << " typing=" << (float)types[0]/(types[0]+types[1]) << " and " << (float)types[1]/(types[0]+types[1]) << std::endl;
+            total += cost;
+        }
+        offset = 0;
+        std::cerr << "[hapWAH] " << n_in << "->" << total << " (" << (float)n_in/total << "-fold)" << std::endl;
+        n_in = 0;
+
+        for (int i = 0; i < n_samples; ++i) {
+            memset(bitmaps[i], 0, 8192*sizeof(uint64_t));
+        }
+
+        delete[] buf;
+
+        return total;
+    }
+
+    int64_t n_samples;
+    int64_t n_in;
+    // std::vector<std::shared_ptr<Buffer>> haps;
+    uint32_t offset;
+    uint64_t** bitmaps;
+};
+
 class GTCompressor {
 public:
     // Compression strategy used.

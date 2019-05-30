@@ -67,9 +67,11 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
     djinn::djinn_block_t* block = nullptr; // output djinn block
     
     uint64_t n_lines = 0;
-    uint32_t n_blocks = 8196; // Number of variants per data block.
-    // uint8_t* output_data = new uint8_t[n_blocks*reader->n_samples_*2];
-    uint8_t* output_data = new uint8_t[65536];
+    uint32_t n_blocks = 8192; // Number of variants per data block.
+    uint8_t* output_data = new uint8_t[655360];
+
+    djinn::HaplotypeCompressor hc(reader->n_samples_);
+    uint32_t hc_lines = 0;
 
     // While there are bcf records available.
     while (reader->Next()) {
@@ -80,6 +82,13 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
         //char *ref, *REF;
         //ref = REF = strdup(line->d.allele[0]);
         //while ( (*ref = toupper(*ref)) ) ++ref ;
+        
+        if (hc_lines == 1024*63) {
+            std::cerr << "Compressing sample-centric" << std::endl;
+            hc.Compress();
+            hc_lines = 0;
+        }
+        hc_lines += hc.EncodeBitmap(reader->bcf1_, reader->header_);
         
         if (n_lines % n_blocks == 0 && n_lines != 0) {
             gtcomp.Compress(block);
@@ -100,7 +109,7 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
     std::cout.write((char*)output_data, ret);
     std::cout.flush();
     delete block;
-    delete[] output_data;
+
     return n_lines;
 }
 
