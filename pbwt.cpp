@@ -463,6 +463,11 @@ uint16_t GeneralModel::DecodeSymbol() {
     return symbol;
 }
 
+uint16_t GeneralModel::DecodeSymbolNoUpdate() {
+    uint16_t symbol = models[model_context]->DecodeSymbol(range_coder.get());
+    return symbol;
+}
+
 /*======   Canonical representation   ======*/
 
 GeneralPBWTModel::GeneralPBWTModel() noexcept :

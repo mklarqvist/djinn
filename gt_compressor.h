@@ -286,7 +286,7 @@ private:
     
     uint64_t bytes_out2, bytes_out3, bytes_out4;
 
-    djinn_ctx_model djn_ctx;
+    djinn_ctx_model djn_ctx, djn_ctx_decode;
 };
 
 class GenotypeCompressorRLEBitmap : public GenotypeCompressor {

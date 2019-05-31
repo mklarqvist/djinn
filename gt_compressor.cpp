@@ -139,7 +139,8 @@ GenotypeCompressorModelling::GenotypeCompressorModelling(int64_t n_s) : Genotype
     // model
     bytes_out4 = 0;
     djn_ctx.SetSamples(2*n_samples);
-    djn_ctx.StartEncoding();
+    djn_ctx.StartEncoding(true, false);
+    djn_ctx_decode.SetSamples(2*n_samples);
 }
 
 GenotypeCompressorModelling::~GenotypeCompressorModelling() { delete[] models;}
@@ -241,22 +242,23 @@ int GenotypeCompressorModelling::Encode2N2MC(uint8_t* data, const int32_t n_data
     // ++base_models[1];
     
     if (permute_pbwt) {
-        uint32_t alts = 0;
-        for (int i = 0; i < 2*n_samples; ++i) {
-            if (BCF_UNPACK_GENOTYPE(data[i]) != 0) ++alts;
-        }
+        // uint32_t alts = 0;
+        // for (int i = 0; i < 2*n_samples; ++i) {
+        //     if (BCF_UNPACK_GENOTYPE(data[i]) != 0) ++alts;
+        // }
 
         
-        // base_models[1].pbwt->Update(&data[1], 2);
-        if (alts < 10) { // dont update if < 10 alts
-            for (int i = 0; i < 2*n_samples; ++i) {
-                base_models[0].pbwt->prev[i] = BCF_UNPACK_GENOTYPE(data[base_models[0].pbwt->ppa[i]]);
-            }
-        } else {
-            base_models[0].pbwt->Update(data, 1);
-        }
+        // // base_models[1].pbwt->Update(&data[1], 2);
+        // if (alts < 10) { // dont update if < 10 alts
+        //     for (int i = 0; i < 2*n_samples; ++i) {
+        //         base_models[0].pbwt->prev[i] = BCF_UNPACK_GENOTYPE(data[base_models[0].pbwt->ppa[i]]);
+        //     }
+        // } else {
+        //     base_models[0].pbwt->Update(data, 1);
+        // }
 
-        djn_ctx.Encode(base_models[0].pbwt->prev, 2*n_samples);
+        // djn_ctx.Encode(base_models[0].pbwt->prev, 2*n_samples);
+        djn_ctx.EncodeBcf(data);
 
     } // end permute pbwt
     else {
@@ -460,7 +462,16 @@ int GenotypeCompressorModelling::Compress(djinn_block_t*& block) {
 
     // base_models[0].Reset();
     bytes_out4 += djn_ctx.FinishEncoding();
-    djn_ctx.StartEncoding(false);
+
+    // djinn_ctx_model test;
+    // test.SetSamples(2*n_samples);
+    djn_ctx_decode.StartDecoding(djn_ctx.buffer, false);
+    uint8_t* t;
+    for (int i = 0; i < processed_lines_local; ++i) {
+        djn_ctx_decode.DecodeRaw(t);
+    }
+
+    djn_ctx.StartEncoding(true, false);
 
 #if DEBUG_PBWT
     TPPM test2; 

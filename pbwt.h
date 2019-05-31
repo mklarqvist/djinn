@@ -104,6 +104,7 @@ public:
     void EncodeSymbol(const uint16_t symbol);
     void EncodeSymbolNoUpdate(const uint16_t symbol);
     uint16_t DecodeSymbol();
+    uint16_t DecodeSymbolNoUpdate();
 
     void ResetModels();
     void ResetContext();

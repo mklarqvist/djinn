@@ -99,9 +99,7 @@ public:
     void Initiate(int nsym, int max_sym);
     void Normalize();
     void EncodeSymbol(RangeCoder* rc, uint16_t sym);
-    void EncodeSymbolNoUpdate(RangeCoder* rc, uint16_t sym);
     uint16_t DecodeSymbol(RangeCoder* rc);
-    
     void EncodeSymbol(uint16_t sym);
     double GetP(uint16_t sym) const;
 
