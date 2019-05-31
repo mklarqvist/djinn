@@ -23,6 +23,8 @@
 #include "pbwt.h"
 #include "compressors.h"
 
+#include "ctx_model1.h"
+
 // temp
 #include <bitset>
 #include <chrono>
@@ -275,8 +277,6 @@ private:
     int DebugContext(uint8_t* in, size_t len_in, uint8_t* ref_data, size_t n_cycles, int pbwt_sym, context_debug_decode decode_fn, const uint8_t* lookup_fn);
 #endif
 
-    int EncodeRLE(uint64_t ref, uint32_t len);
-
 private:
     GeneralPBWTModel base_models[4]; // 0-1: diploid biallelic no-missing; 2-3: diploid biallelic missing
     GeneralPBWTModel base_models_complex[2]; // 0-1: diploid n-allelic
@@ -285,22 +285,8 @@ private:
     GeneralPBWTModel gt_pbwt;
     
     uint64_t bytes_out2, bytes_out3, bytes_out4;
-    uint32_t pack1_context;
-    uint32_t pack2_context;
-    uint32_t pack1bin_context;
-    uint32_t pack2bin_context;
-    TPPM ppm1, ppm2, ppm_bin1, ppm_bin2;
-    uint32_t n_bins, bin_stride;
-    uint64_t* bins1;
-#if DEBUG_PBWT
-    DataDigest debug_bins[2];
-#endif
 
-    std::shared_ptr<GeneralModel> mref, mlog_rle, mrle, mrle2_1, mrle2_2, mrle4_1, mrle4_2, mrle4_3, mrle4_4;
-    std::shared_ptr<GeneralModel> dirty_wah, mtype;
-
-    int64_t out_gts;
-    std::shared_ptr<djinn_gt_ctx> ctx_model;
+    djinn_ctx_model djn_ctx;
 };
 
 class GenotypeCompressorRLEBitmap : public GenotypeCompressor {

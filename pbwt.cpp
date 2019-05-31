@@ -307,6 +307,22 @@ GeneralModel::GeneralModel(int n_symbols) :
     Reset();
 }
 
+GeneralModel::GeneralModel(int n_symbols, std::shared_ptr<RangeCoder> rc)  :
+    max_model_symbols(n_symbols),
+    model_context_shift(ceil(log2(n_symbols))),
+    model_context(0), model_ctx_mask(MODEL_SIZE - 1),
+    range_coder(rc),
+    n_buffer(0),
+    buffer(nullptr),
+    n_additions(0)
+{
+    assert(n_symbols > 1);
+    models.resize(MODEL_SIZE);
+    for (int i = 0; i < MODEL_SIZE; ++i) models[i] = std::make_shared<FrequencyModel>();
+
+    Reset();
+}
+
 GeneralModel::GeneralModel(int n_symbols, int model_size) :
     max_model_symbols(n_symbols),
     model_context_shift(ceil(log2(n_symbols))),
@@ -314,6 +330,22 @@ GeneralModel::GeneralModel(int n_symbols, int model_size) :
     range_coder(std::make_shared<RangeCoder>()),
     n_buffer(10000000),
     buffer(new uint8_t[n_buffer]),
+    n_additions(0)
+{
+    assert(n_symbols > 1);
+    models.resize(model_size);
+    for (int i = 0; i < model_size; ++i) models[i] = std::make_shared<FrequencyModel>();
+
+    Reset();
+}
+
+GeneralModel::GeneralModel(int n_symbols, int model_size, std::shared_ptr<RangeCoder> rc) :
+    max_model_symbols(n_symbols),
+    model_context_shift(ceil(log2(n_symbols))),
+    model_context(0), model_ctx_mask(model_size - 1),
+    range_coder(rc),
+    n_buffer(0),
+    buffer(nullptr),
     n_additions(0)
 {
     assert(n_symbols > 1);
@@ -333,6 +365,27 @@ GeneralModel::GeneralModel(int n_symbols, int model_size, int shift, int step) :
     n_additions(0)
 {
     std::cerr << "init models: " << shift << "," << step << std::endl;
+    assert(n_symbols > 1);
+    models.resize(model_size);
+    for (int i = 0; i < model_size; ++i) {
+        models[i] = std::make_shared<FrequencyModel>();
+        models[i]->SHIFT = shift;
+        models[i]->STEP = step;
+    }
+
+    Reset();
+}
+
+GeneralModel::GeneralModel(int n_symbols, int model_size, int shift, int step, std::shared_ptr<RangeCoder> rc) :
+    max_model_symbols(n_symbols),
+    model_context_shift(ceil(log2(n_symbols))),
+    model_context(0), model_ctx_mask(model_size - 1),
+    range_coder(rc),
+    n_buffer(0),
+    buffer(nullptr),
+    n_additions(0)
+{
+    std::cerr << "provided rc init models: " << shift << "," << step << std::endl;
     assert(n_symbols > 1);
     models.resize(model_size);
     for (int i = 0; i < model_size; ++i) {

@@ -90,8 +90,11 @@ class GeneralModel {
 public:
     GeneralModel() noexcept;
     GeneralModel(int n_symbols);
+    GeneralModel(int n_symbols, std::shared_ptr<RangeCoder> rc);
     GeneralModel(int n_symbols, int model_size);
+    GeneralModel(int n_symbols, int model_size, std::shared_ptr<RangeCoder> rc);
     GeneralModel(int n_symbols, int model_size, int shift, int step);
+    GeneralModel(int n_symbols, int model_size, int shift, int step, std::shared_ptr<RangeCoder> rc);
     virtual ~GeneralModel();
 
     int FinishEncoding();
