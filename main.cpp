@@ -9,7 +9,8 @@
 #include <iostream>
 #include <chrono>
 
-
+// Definition for microsecond timer.
+typedef std::chrono::high_resolution_clock::time_point clockdef;
 
 int upper_power_of_two(int n)
 {
@@ -90,6 +91,7 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
         // }
         // hc_lines += hc.EncodeBitmap(reader->bcf1_, reader->header_);
         
+        
         if (n_lines % n_blocks == 0 && n_lines != 0) {
             gtcomp.Compress(block);
             // block->Serialize(std::cout);
@@ -97,7 +99,13 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
             std::cerr << "Data=" << ret << std::endl;
             std::cout.write((char*)output_data, ret);
         }
+        clockdef t1 = std::chrono::high_resolution_clock::now();
         gtcomp.Encode(reader->bcf1_, reader->header_);
+        clockdef t2 = std::chrono::high_resolution_clock::now();
+        auto time_span = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1);
+        if (reader->n_samples_ > 50000) 
+            std::cerr << "Line= " << n_lines << " pos=" << reader->bcf1_->pos+1 << " elapsed=" << time_span.count() << "ms" << std::endl;
+
         ++n_lines;
     }
 

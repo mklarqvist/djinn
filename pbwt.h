@@ -97,6 +97,13 @@ public:
     GeneralModel(int n_symbols, int model_size, int shift, int step, std::shared_ptr<RangeCoder> rc);
     virtual ~GeneralModel();
 
+    int Initiate(int n_symbols);
+    int Initiate(int n_symbols, std::shared_ptr<RangeCoder> rc);
+    int Initiate(int n_symbols, int model_size);
+    int Initiate(int n_symbols, int model_size, std::shared_ptr<RangeCoder> rc);
+    int Initiate(int n_symbols, int model_size, int shift, int step);
+    int Initiate(int n_symbols, int model_size, int shift, int step, std::shared_ptr<RangeCoder> rc);
+
     int FinishEncoding();
     int FinishDecoding();
     void StartEncoding();

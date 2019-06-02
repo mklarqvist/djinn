@@ -123,11 +123,6 @@ GenotypeCompressorModelling::GenotypeCompressorModelling(int64_t n_s) : Genotype
     base_models_complex[0].StartEncoding();
     base_models_complex[1].StartEncoding();
 
-    base_model_bitmaps[0].Construct(1, 2);
-    base_model_bitmaps[1].Construct(1, 2);
-    base_model_bitmaps[0].StartEncoding();
-    base_model_bitmaps[1].StartEncoding();
-
     bytes_out2 = 0; bytes_out3 = 0;
 
 #if DEBUG_PBWT
@@ -240,86 +235,8 @@ int GenotypeCompressorModelling::Encode2N2MC(uint8_t* data, const int32_t n_data
 
     ++base_models[0];
     // ++base_models[1];
-    
-    if (permute_pbwt) {
-        // uint32_t alts = 0;
-        // for (int i = 0; i < 2*n_samples; ++i) {
-        //     if (BCF_UNPACK_GENOTYPE(data[i]) != 0) ++alts;
-        // }
 
-        
-        // // base_models[1].pbwt->Update(&data[1], 2);
-        // if (alts < 10) { // dont update if < 10 alts
-        //     for (int i = 0; i < 2*n_samples; ++i) {
-        //         base_models[0].pbwt->prev[i] = BCF_UNPACK_GENOTYPE(data[base_models[0].pbwt->ppa[i]]);
-        //     }
-        // } else {
-        //     base_models[0].pbwt->Update(data, 1);
-        // }
-
-        // djn_ctx.Encode(base_models[0].pbwt->prev, 2*n_samples);
-        djn_ctx.EncodeBcf(data);
-
-    } // end permute pbwt
-    else {
-#if 1
-        // Approach: split range [0, N-1] into M bins and compute which bins have
-        // >0 alts present.
-        int n_steps = 16;
-        const uint32_t step_size = std::ceil((float)n_samples / n_steps);
-        uint64_t bins1 = 0;
-        for (int i = 0, j = 0; i < n_samples; ++i, j += 2) {
-            if (BCF_UNPACK_GENOTYPE(data[j])) {
-                bins1 |= (1 << (i/step_size));
-            }
-        }
-
-        base_models[0].ResetContext();
-        base_model_bitmaps[0].ResetContext();
-        uint32_t offset = 0, offset_end = 0;
-        for (int i = 0; i < n_steps; ++i) {
-            if (bins1 & (1 << i)) {
-                base_model_bitmaps[0].EncodeSymbol(1);
-                offset_end = offset + step_size < n_samples ? offset + step_size : n_samples;
-                for (int j = offset; j < offset_end; ++j) {
-                    base_models[0].EncodeSymbol(BCF_UNPACK_GENOTYPE(data[0+j*2]));
-                }
-            } else base_model_bitmaps[0].EncodeSymbol(0);
-            offset += step_size;
-        }
-
-        uint64_t bins2 = 0;
-        for (int i = 0, j = 1; i < n_samples; ++i, j += 2) {
-            if (BCF_UNPACK_GENOTYPE(data[j])) {
-                bins2 |= (1 << (i/step_size));
-            }
-        }
-
-        base_models[1].ResetContext();
-        base_model_bitmaps[1].ResetContext();
-        offset = 0, offset_end = 0;
-        for (int i = 0; i < n_steps; ++i) {
-            if (bins2 & (1 << i)) {
-                base_model_bitmaps[1].EncodeSymbol(1);
-                offset_end = offset + step_size < n_samples ? offset + step_size : n_samples;
-                for (int j = offset; j < offset_end; ++j) {
-                    base_models[1].EncodeSymbol(BCF_UNPACK_GENOTYPE(data[1+j*2]));
-                }
-            } else base_model_bitmaps[1].EncodeSymbol(0);
-            offset += step_size;
-        }
-#else
-        base_models[0].ResetContext();
-        for (int j = 0; j < n_samples; ++j) {
-            base_models[0].EncodeSymbol(BCF_UNPACK_GENOTYPE(data[0+j*2]));
-        }
-
-        base_models[1].ResetContext();
-        for (int i = 0; i < n_samples; ++i) {
-            base_models[1].EncodeSymbol(BCF_UNPACK_GENOTYPE(data[1+i*2]));
-        }
-#endif
-    }
+    djn_ctx.EncodeBcf(data, 2);
 
     ++processed_lines_local;
     ++processed_lines;
@@ -387,6 +304,8 @@ int GenotypeCompressorModelling::Encode2NXM(uint8_t* data, const int32_t n_data,
     ++base_models_complex[0];
     ++base_models_complex[1];
 
+    djn_ctx.EncodeBcf(data, n_alleles);
+
     // std::cerr << "Ecndoe2nXM: " << n_alleles << std::endl;
     if (permute_pbwt) {
         // Todo: assert genotypes are set for this variant.
@@ -433,6 +352,7 @@ int GenotypeCompressorModelling::Compress(djinn_block_t*& block) {
     djinn_ctx_t* data_out = (djinn_ctx_t*)block->data;
     data_out->reset();
 
+    /*
 #if DEBUG_PBWT
     // Finish digests.
     for (int i = 0; i < 6; ++i) {
@@ -460,19 +380,6 @@ int GenotypeCompressorModelling::Compress(djinn_block_t*& block) {
     size_t extra1 = base_model_bitmaps[0].FinishEncoding();
     size_t extra2 = base_model_bitmaps[1].FinishEncoding();
 
-    // base_models[0].Reset();
-    bytes_out4 += djn_ctx.FinishEncoding();
-
-    // djinn_ctx_model test;
-    // test.SetSamples(2*n_samples);
-    djn_ctx_decode.StartDecoding(djn_ctx.buffer, false);
-    uint8_t* t;
-    for (int i = 0; i < processed_lines_local; ++i) {
-        djn_ctx_decode.DecodeRaw(t);
-    }
-
-    djn_ctx.StartEncoding(true, false);
-
 #if DEBUG_PBWT
     TPPM test2; 
     test2.decoder.buffer = ppm_bin1.encoder.buffer;
@@ -492,8 +399,6 @@ int GenotypeCompressorModelling::Compress(djinn_block_t*& block) {
     std::cerr << "[TEST]" << "PASSED" << std::endl;
     debug_bins[0].len = 0;
 #endif
-
-    std::cerr << "[MODEL-RLEC] " << bytes_in << "->" << bytes_out4 << " (" << (double)bytes_in/bytes_out4 << "-fold ubcf, " << (double)bytes_in_vcf/bytes_out4 << "-fold vcf)" << std::endl;
 
     // size_t praw = ZstdCompress(buf_raw.data, buf_raw.len,
     //                            buf_compress.data, buf_compress.capacity(),
@@ -588,10 +493,7 @@ int GenotypeCompressorModelling::Compress(djinn_block_t*& block) {
 
     bytes_out += p1 + p2 + p1E + p2E + p2X + p2X2 + extra1 + extra2;
 
-#if DEBUG_SIZE
-    std::cerr << "[WRITE] Variants=" << processed_lines_local << " 2N2MC=" << p1 << "," << p2 << " 2N2MM=" << p1E << "," << p2E << " 2NXM=" << p2X << "," << p2X2 << " SKIP=" << extra1 << "," << extra2 << std::endl;
-    std::cerr << "[PROGRESS] " << bytes_in << "->" << bytes_out << " (" << (double)bytes_in/bytes_out << "-fold ubcf, " << (double)bytes_in_vcf/bytes_out << "-fold vcf)" << std::endl;
-#endif
+
     processed_lines_local = 0;
     buf_raw.reset();
     
@@ -602,8 +504,30 @@ int GenotypeCompressorModelling::Compress(djinn_block_t*& block) {
         }
         debug_bins[0].reset();
 #endif
+    */
+    // base_models[0].Reset();
+    bytes_out4 += djn_ctx.FinishEncoding();
 
-    return oblock->size();
+#if DEBUG_SIZE
+    std::cerr << "[PROGRESS] Variants=" << processed_lines << "," << processed_lines_local << ": " << bytes_in << "->" << bytes_out4 << " (" << (double)bytes_in/bytes_out4 << "-fold ubcf, " << (double)bytes_in_vcf/bytes_out4 << "-fold vcf)" << std::endl;
+#endif
+
+    // djn_ctx_decode.StartDecoding(djn_ctx.model.p, false);
+    // uint8_t* t = new uint8_t[1024];
+    // for (int i = 0; i < processed_lines_local; ++i) {
+    //     djn_ctx_decode.DecodeRaw(t);
+    // }
+
+    for (int i = 1; i < 4; ++i) base_models[i].Reset();
+    for (int i = 0; i < 2; ++i) base_models_complex[i].Reset();
+
+    djn_ctx.StartEncoding(true, false);
+    // delete[] t;
+
+    processed_lines_local = 0;
+
+    // return oblock->size();
+    return 0;
 }
 
 #if DEBUG_CONTEXT

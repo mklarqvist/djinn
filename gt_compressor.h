@@ -281,8 +281,6 @@ private:
     GeneralPBWTModel base_models[4]; // 0-1: diploid biallelic no-missing; 2-3: diploid biallelic missing
     GeneralPBWTModel base_models_complex[2]; // 0-1: diploid n-allelic
     GeneralPBWTModel* models;
-    GeneralPBWTModel base_model_bitmaps[2];
-    GeneralPBWTModel gt_pbwt;
     
     uint64_t bytes_out2, bytes_out3, bytes_out4;
 

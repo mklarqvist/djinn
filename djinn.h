@@ -195,7 +195,7 @@ struct djinn_data_container_t {
         return 3*sizeof(int) + sizeof(uint32_t) + vptr_len;
     }
 
-    int n, n_c, n_v;          // n: size of decompressed data, n_c: size of compressed data, n_v: number of variants
+    int n, n_c, n_v;     // n: size of decompressed data, n_c: size of compressed data, n_v: number of variants
     uint8_t* vptr;       // pointer to data array in bcf1_t->shared.s, excluding the size+type and tag id bytes
     uint32_t vptr_len;   // length of the vptr block or, when set, of the vptr_mod block, excluding offset
     uint32_t vptr_off:31,// vptr offset, i.e., the size of the INFO key plus size+type bytes
