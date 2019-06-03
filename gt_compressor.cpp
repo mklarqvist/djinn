@@ -105,24 +105,9 @@ int32_t GenotypeCompressor::RemapGenotypeEOV(uint8_t* data, const uint32_t len) 
 
 /*======   Context-modelling approach   ======*/
 
-GenotypeCompressorModelling::GenotypeCompressorModelling(int64_t n_s) : GenotypeCompressor(n_s),
-    models(nullptr)
+GenotypeCompressorModelling::GenotypeCompressorModelling(int64_t n_s) : GenotypeCompressor(n_s)
 {
     strategy = CompressionStrategy::CONTEXT;
-    base_models[0].Construct(n_samples*2, 2);
-    base_models[1].Construct(n_samples, 2);
-    base_models[2].Construct(n_samples, 4);
-    base_models[3].Construct(n_samples, 4);
-    base_models_complex[0].Construct(n_samples, 16);
-    base_models_complex[1].Construct(n_samples, 16);
-
-    base_models[0].StartEncoding();
-    base_models[1].StartEncoding();
-    base_models[2].StartEncoding();
-    base_models[3].StartEncoding();
-    base_models_complex[0].StartEncoding();
-    base_models_complex[1].StartEncoding();
-
     bytes_out2 = 0; bytes_out3 = 0;
 
 #if DEBUG_PBWT
@@ -138,18 +123,7 @@ GenotypeCompressorModelling::GenotypeCompressorModelling(int64_t n_s) : Genotype
     djn_ctx_decode.SetSamples(2*n_samples);
 }
 
-GenotypeCompressorModelling::~GenotypeCompressorModelling() { delete[] models;}
-
-bool GenotypeCompressorModelling::CheckLimit() const {
-    return (processed_lines_local == block_size || 
-            base_models[0].range_coder->OutSize() > 9000000 || 
-            base_models[1].range_coder->OutSize() > 9000000 || 
-            base_models[2].range_coder->OutSize() > 9000000 || 
-            base_models[3].range_coder->OutSize() > 9000000 ||
-            base_models_complex[0].range_coder->OutSize() > 9000000 ||
-            base_models_complex[1].range_coder->OutSize() > 9000000 ||
-            buf_raw.len > 9000000);
-}
+GenotypeCompressorModelling::~GenotypeCompressorModelling() { }
 
 int GenotypeCompressorModelling::Encode2N(bcf1_t* bcf, const bcf_hdr_t* hdr) {
     if (bcf == NULL) return 0;
@@ -233,9 +207,6 @@ int GenotypeCompressorModelling::Encode2N2MC(uint8_t* data, const int32_t n_data
     assert(debug_pbwt[1].UpdateDigestStride(&data[1], n_data, 2));
 #endif
 
-    ++base_models[0];
-    // ++base_models[1];
-
     djn_ctx.EncodeBcf(data, 2);
 
     ++processed_lines_local;
@@ -251,42 +222,9 @@ int GenotypeCompressorModelling::Encode2N2MM(uint8_t* data, const int32_t n_data
     assert(debug_pbwt[3].UpdateDigestStride(&data[1], n_data, 2));
 #endif
 
-    ++base_models[2];
-    ++base_models[3];
+    djn_ctx.EncodeBcf(data, 15);
 
-    if (permute_pbwt) {
-        // std::cerr << "Encode2N2MM" << std::endl;
-        
-        base_models[2].pbwt->Update(&data[0], 2);
-        base_models[3].pbwt->Update(&data[1], 2);
-
-        base_models[2].ResetContext();
-        for (int i = 0; i < n_samples; ++i) {
-            // assert(base_models[2].pbwt->prev[i] < 4);
-            base_models[2].EncodeSymbol(base_models[2].pbwt->prev[i]);
-        }
-
-        base_models[3].ResetContext();
-        for (int i = 0; i < n_samples; ++i) {
-            // assert(base_models[3].pbwt->prev[i] < 4);
-            base_models[3].EncodeSymbol(base_models[3].pbwt->prev[i]);
-        }
-    } // end if permute pbwt
-    else {
-        base_models[2].ResetContext();
-        for (int i = 0; i < n_samples; ++i) {
-            // assert(base_models[2].pbwt->prev[i] < 4);
-            assert(BCF_UNPACK_GENOTYPE(data[0+i*2]) < 4);
-            base_models[2].EncodeSymbol(BCF_UNPACK_GENOTYPE(data[0+i*2]));
-        }
-
-        base_models[3].ResetContext();
-        for (int i = 0; i < n_samples; ++i) {
-            // assert(base_models[3].pbwt->prev[i] < 4);
-            assert(BCF_UNPACK_GENOTYPE(data[1+i*2]) < 4);
-            base_models[3].EncodeSymbol(BCF_UNPACK_GENOTYPE(data[1+i*2]));
-        }
-    } // end no permute pbwt
+    // std::cerr << "After Encode2N2MM: " << 15 << std::endl;
 
     ++processed_lines_local;
     ++processed_lines;
@@ -301,42 +239,9 @@ int GenotypeCompressorModelling::Encode2NXM(uint8_t* data, const int32_t n_data,
     assert(debug_pbwt[5].UpdateDigestStride(&data[1], n_data, 2));
 #endif
 
-    ++base_models_complex[0];
-    ++base_models_complex[1];
-
     djn_ctx.EncodeBcf(data, n_alleles);
 
-    // std::cerr << "Ecndoe2nXM: " << n_alleles << std::endl;
-    if (permute_pbwt) {
-        // Todo: assert genotypes are set for this variant.
-        base_models_complex[0].pbwt->UpdateGeneral(&data[0], 2);
-        base_models_complex[1].pbwt->UpdateGeneral(&data[1], 2);
-
-        base_models_complex[0].ResetContext();
-        for (int i = 0; i < n_samples; ++i) {
-            // assert(base_models_complex[0].pbwt->prev[i] < 16);
-            base_models_complex[0].EncodeSymbol(base_models_complex[0].pbwt->prev[i]);
-        }
-
-        base_models_complex[1].ResetContext();
-        for (int i = 0; i < n_samples; ++i) {
-            // assert(base_models_complex[1].pbwt->prev[i] < 16);
-            base_models_complex[1].EncodeSymbol(base_models_complex[1].pbwt->prev[i]);
-        }
-    } // end permute pbwt
-    else {
-        base_models_complex[0].ResetContext();
-        for (int i = 0; i < n_samples; ++i) {
-            // assert(base_models_complex[0].pbwt->prev[i] < 16);
-            base_models_complex[0].EncodeSymbol(BCF_UNPACK_GENOTYPE_GENERAL(data[0+i*2]));
-        }
-
-        base_models_complex[1].ResetContext();
-        for (int i = 0; i < n_samples; ++i) {
-            // assert(base_models_complex[1].pbwt->prev[i] < 16);
-            base_models_complex[1].EncodeSymbol(BCF_UNPACK_GENOTYPE_GENERAL(data[1+i*2]));
-        }
-    }
+    // std::cerr << "After Ecndoe2nXM: " << n_alleles << std::endl;
 
     ++processed_lines_local;
     ++processed_lines;
@@ -517,9 +422,6 @@ int GenotypeCompressorModelling::Compress(djinn_block_t*& block) {
     // for (int i = 0; i < processed_lines_local; ++i) {
     //     djn_ctx_decode.DecodeRaw(t);
     // }
-
-    for (int i = 1; i < 4; ++i) base_models[i].Reset();
-    for (int i = 0; i < 2; ++i) base_models_complex[i].Reset();
 
     djn_ctx.StartEncoding(true, false);
     // delete[] t;
@@ -766,14 +668,6 @@ int GenotypeCompressorRLEBitmap::Encode2N2MC(uint8_t* data, const int32_t n_data
     ++processed_lines_local;
     ++processed_lines;
     return 1;
-}
-
-bool GenotypeCompressorRLEBitmap::CheckLimit() const {
-    return (processed_lines_local == block_size || 
-            buf_wah[0].len > 9000000 || 
-            buf_wah[1].len > 9000000 ||
-            buf_wah[2].len > 9000000 ||
-            buf_raw.len > 9000000 );
 }
 
 int GenotypeCompressorRLEBitmap::Encode2N2MM(uint8_t* data, const int32_t n_data) {

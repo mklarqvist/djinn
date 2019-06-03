@@ -152,6 +152,9 @@ struct djinn_ctx_model_t {
 };
 
 class djinn_ctx_model {
+private:
+    static constexpr uint64_t bits[16] = {0, 72340172838076672ULL, 144680345676153344ULL, 217020518514230016ULL, 289360691352306688ULL, 361700864190383360ULL, 434041037028460032ULL, 506381209866536704ULL, 578721382704613376ULL, 651061555542690048ULL, 723401728380766720ULL, 795741901218843392ULL, 868082074056920064ULL, 940422246894996736ULL, 1012762419733073408ULL, 1085102592571150080ULL};
+
 public:
     djinn_ctx_model() : 
         n_samples(0), 
@@ -192,14 +195,18 @@ public:
         if (n_samples == 0) return -1;
         if (data == nullptr) return -2;
 
-        // uint64_t alts = 0;
-        uint32_t hist_alts[256] = {0};
+        memset(hist_alts, 0, 256*sizeof(uint32_t));
         for (int i = 0; i < n_samples; ++i) {
             ++hist_alts[BCF_UNPACK_GENOTYPE_GENERAL(data[i])];
         }
 
+        // for (int i = 0; i < 256; ++i) {
+        //     if (hist_alts[i]) std::cerr << i << ":" << hist_alts[i] << ",";
+        // }
+        // std::cerr << " data2m=" << model_2mc.range_coder->OutSize() << " dataNm=" << model_nm.range_coder->OutSize() << std::endl;
+
         if (alt_alleles <= 2 && hist_alts[14] == 0 && hist_alts[15] == 0) { // does not check for missingness
-            
+            marchetype->EncodeSymbol(0); // add archtype as 2mc
 
             if (hist_alts[1] < 10) { // dont update if < 10 alts
                 for (int i = 0; i < n_samples; ++i) {
@@ -209,11 +216,11 @@ public:
                 model_2mc.pbwt.Update(data, 1);
             }
 
-            marchetype->EncodeSymbol(0); // add archtype as 2mc
+            
             return Encode2mc(model_2mc.pbwt.prev, n_samples);
         } else {
-            model_nm.pbwt.UpdateGeneral(data, 1); // otherwise
             marchetype->EncodeSymbol(1);
+            model_nm.pbwt.UpdateGeneral(data, 1); // otherwise
             return EncodeNm(model_nm.pbwt.prev, n_samples);
         }
     }
@@ -250,8 +257,6 @@ public:
         memset(wah_bitmaps, 0, n_wah*sizeof(uint64_t));
 
         for (int i = 0; i < n_samples; ++i) {
-            // std::cerr << (int)data[i] << " ";
-            // std::cerr <<(4*(i % 16)) << std::endl;
             wah_bitmaps[i / 16] |= (uint64_t)data[i] << (4*(i % 16));
         }
 
@@ -284,7 +289,7 @@ public:
             } else { // is RLE
                 // Decode an RLE
                 uint64_t ref = 1; uint32_t len = 1;
-                DecodeWahRLE(ref, len);
+                DecodeWahRLE(ref, len, &model_2mc);
                 // std::cerr << "decoded RLE=" << ref << " len=" << len << std::endl;
                 n_samples_obs += len*64;
             }
@@ -354,23 +359,24 @@ public:
 
         ++model_nm.n_variants;
 
+        // std::cerr << "refnm=" << std::bitset<64>(wah[0]) << std::endl;
+
         uint64_t wah_ref = wah[0];
         uint64_t wah_run = 1;
 
         for (int i = 1; i < len; ++i) {
-            if ((wah_ref != 1229782938247303441ULL) || (wah_ref != wah[i])) {// 000100010001
+            if ((wah_ref != bits[1] && wah_ref != bits[2] && wah_ref != bits[0]) || (wah_ref != wah[i])) {
                 if ((wah_ref != wah_bitmaps[i]) || wah_run == 1) {
+                    // std::cerr << "Bitmap=" << std::bitset<64>(wah_ref) << " = " << wah_ref << std::endl;
                     model_nm.mtype->EncodeSymbol(0);
-                    
-                    // std::cerr << "Bitmap=" << std::bitset<64>(wah_ref) << std::endl;
                     for (int i = 0; i < 8; ++i) {
                         model_nm.dirty_wah->EncodeSymbol(wah_ref & 255);
                         wah_ref >>= 8;
                     }
                 } else {
+                    // std::cerr << "RLE=" << wah_ref << "(" << (wah_ref&15) << "):" << wah_run << std::endl;
                     model_nm.mtype->EncodeSymbol(1);
                     EncodeWahRLE_nm(wah_ref, wah_run, &model_nm);
-                    // std::cerr << "RLE=" << wah_ref << "," << wah_run << std::endl;
                 }
                 wah_run = 0;
                 wah_ref = wah[i];
@@ -379,19 +385,19 @@ public:
         }
 
         if (wah_run) {
-            if ((wah_ref != 1229782938247303441ULL) || wah_run == 1) {
+            if ((wah_ref != bits[1] && wah_ref != bits[2] && wah_ref != bits[0]) || wah_run == 1) {
+                // std::cerr << "Bitmap=" << std::bitset<64>(wah_ref) << " = " << wah_ref << std::endl;
                 model_nm.mtype->EncodeSymbol(0);
                 
-                // std::cerr << "Bitmap=" << std::bitset<64>(wah_ref) << std::endl;
                 for (int i = 0; i < 8; ++i) {
                     model_nm.dirty_wah->EncodeSymbol(wah_ref & 255);
                     wah_ref >>= 8;
                 }
                 
             } else {
+                // std::cerr << "RLE=" << wah_ref << "(" << (wah_ref&15) << "):" << wah_run << std::endl;
                 model_nm.mtype->EncodeSymbol(1);
                 EncodeWahRLE_nm(wah_ref, wah_run, &model_nm);
-                // std::cerr << "RLE=" << wah_ref << "," << wah_run << std::endl;
             }
         }
 
@@ -410,25 +416,21 @@ public:
         }
         else if (log_length <= 8) {
             assert(len < 256);
-
             model->mrle->model_context <<= 1;
             model->mrle->model_context |= (ref & 1);
             model->mrle->model_context <<= 4;
             model->mrle->model_context |= log_length;
             model->mrle->model_context &= model->mrle->model_ctx_mask;
-            // std::cerr << "inserting=" << (len&255) << std::endl;
             model->mrle->EncodeSymbolNoUpdate(len & 255);
 
         } else if (log_length <= 16) {
             assert(len < 65536);
-
             model->mrle2_1->model_context <<= 1;
             model->mrle2_1->model_context |= (ref & 1);
             model->mrle2_1->model_context <<= 4;
             model->mrle2_1->model_context |= log_length;
             model->mrle2_1->model_context &= model->mrle2_1->model_ctx_mask;
             model->mrle2_1->EncodeSymbolNoUpdate(len & 255);
-            // std::cerr << "inserting1=" << (len&255) << std::endl;
             len >>= 8;
             model->mrle2_2->model_context <<= 1;
             model->mrle2_2->model_context |= (ref & 1);
@@ -436,7 +438,6 @@ public:
             model->mrle2_2->model_context |= log_length;
             model->mrle2_2->model_context &= model->mrle2_2->model_ctx_mask;
             model->mrle2_2->EncodeSymbolNoUpdate(len & 255);
-            // std::cerr << "inserting2=" << (len&255) << std::endl;
         } else {
             model->mrle4_1->model_context <<= 1;
             model->mrle4_1->model_context |= (ref & 1);
@@ -475,37 +476,32 @@ public:
         uint32_t log_length = round_log2(len);
         model->mlog_rle->EncodeSymbol(log_length);
 
-        // std::cerr << "RLE=" << (ref&1) << ",len=" << len << ",log=" << log_length << std::endl;
+        // std::cerr << "nmRLE=" << (ref&15) << ",len=" << len << ",log=" << log_length << std::endl;
 
         if (log_length < 2) {
-            std::cerr << "single=" << len << "," << (ref&1) << std::endl;
+            std::cerr << "single=" << len << "," << (ref&15) << std::endl;
         }
         else if (log_length <= 8) {
             assert(len < 256);
-
             model->mrle->model_context = (ref & 15);
             model->mrle->model_context <<= 4;
             model->mrle->model_context |= log_length;
             model->mrle->model_context &= model->mrle->model_ctx_mask;
-            // std::cerr << "inserting=" << (len&255) << std::endl;
             model->mrle->EncodeSymbolNoUpdate(len & 255);
 
         } else if (log_length <= 16) {
             assert(len < 65536);
-
             model->mrle2_1->model_context = (ref & 15);
             model->mrle2_1->model_context <<= 4;
             model->mrle2_1->model_context |= log_length;
             model->mrle2_1->model_context &= model->mrle2_1->model_ctx_mask;
             model->mrle2_1->EncodeSymbolNoUpdate(len & 255);
-            // std::cerr << "inserting1=" << (len&255) << std::endl;
             len >>= 8;
             model->mrle2_2->model_context = (ref & 15);
             model->mrle2_2->model_context <<= 4;
             model->mrle2_2->model_context |= log_length;
             model->mrle2_2->model_context &= model->mrle2_2->model_ctx_mask;
             model->mrle2_2->EncodeSymbolNoUpdate(len & 255);
-            // std::cerr << "inserting2=" << (len&255) << std::endl;
         } else {
             model->mrle4_1->model_context = (ref & 15);
             model->mrle4_1->model_context <<= 4;
@@ -535,59 +531,110 @@ public:
         return 1;
     }
 
-    int DecodeWahRLE(uint64_t& ref, uint32_t& len) {
-        ref = model_2mc.mref->DecodeSymbol();
-        uint32_t log_length = model_2mc.mlog_rle->DecodeSymbol();
+    int DecodeWahRLE(uint64_t& ref, uint32_t& len, djinn_ctx_model_t* model) {
+        ref = model->mref->DecodeSymbol();
+        uint32_t log_length = model->mlog_rle->DecodeSymbol();
         // std::cerr << "ref=" << ref << " log=" << log_length << std::endl;
 
         if (log_length < 2) {
             std::cerr << "single=" << len << "," << (ref&1) << std::endl;
         }
         else if (log_length <= 8) {
-            model_2mc.mrle->model_context <<= 1;
-            model_2mc.mrle->model_context |= (ref & 1);
-            model_2mc.mrle->model_context <<= 4;
-            model_2mc.mrle->model_context |= log_length;
-            model_2mc.mrle->model_context &= model_2mc.mrle->model_ctx_mask;
-            len = model_2mc.mrle->DecodeSymbolNoUpdate();
+            model->mrle->model_context <<= 1;
+            model->mrle->model_context |= (ref & 1);
+            model->mrle->model_context <<= 4;
+            model->mrle->model_context |= log_length;
+            model->mrle->model_context &= model->mrle->model_ctx_mask;
+            len = model->mrle->DecodeSymbolNoUpdate();
         } else if (log_length <= 16) {
-            model_2mc.mrle2_1->model_context <<= 1;
-            model_2mc.mrle2_1->model_context |= (ref & 1);
-            model_2mc.mrle2_1->model_context <<= 4;
-            model_2mc.mrle2_1->model_context |= log_length;
-            model_2mc.mrle2_1->model_context &= model_2mc.mrle2_1->model_ctx_mask;
-            len = model_2mc.mrle2_1->DecodeSymbolNoUpdate();
-            model_2mc.mrle2_2->model_context <<= 1;
-            model_2mc.mrle2_2->model_context |= (ref & 1);
-            model_2mc.mrle2_2->model_context <<= 4;
-            model_2mc.mrle2_2->model_context |= log_length;
-            model_2mc.mrle2_2->model_context &= model_2mc.mrle2_2->model_ctx_mask;
-            len |= (uint32_t)model_2mc.mrle2_2->DecodeSymbolNoUpdate() << 8;
+            model->mrle2_1->model_context <<= 1;
+            model->mrle2_1->model_context |= (ref & 1);
+            model->mrle2_1->model_context <<= 4;
+            model->mrle2_1->model_context |= log_length;
+            model->mrle2_1->model_context &= model->mrle2_1->model_ctx_mask;
+            len = model->mrle2_1->DecodeSymbolNoUpdate();
+            model->mrle2_2->model_context <<= 1;
+            model->mrle2_2->model_context |= (ref & 1);
+            model->mrle2_2->model_context <<= 4;
+            model->mrle2_2->model_context |= log_length;
+            model->mrle2_2->model_context &= model->mrle2_2->model_ctx_mask;
+            len |= (uint32_t)model->mrle2_2->DecodeSymbolNoUpdate() << 8;
         } else {
-            model_2mc.mrle4_1->model_context <<= 1;
-            model_2mc.mrle4_1->model_context |= (ref & 1);
-            model_2mc.mrle4_1->model_context <<= 4;
-            model_2mc.mrle4_1->model_context |= log_length;
-            model_2mc.mrle4_1->model_context &= model_2mc.mrle4_1->model_ctx_mask;
-            len = model_2mc.mrle4_1->DecodeSymbolNoUpdate();
-            model_2mc.mrle4_2->model_context <<= 1;
-            model_2mc.mrle4_2->model_context |= (ref & 1);
-            model_2mc.mrle4_2->model_context <<= 4;
-            model_2mc.mrle4_2->model_context |= log_length;
-            model_2mc.mrle4_2->model_context &= model_2mc.mrle4_2->model_ctx_mask;
-            len |= (uint32_t)model_2mc.mrle4_2->DecodeSymbolNoUpdate() << 8;
-            model_2mc.mrle4_3->model_context <<= 1;
-            model_2mc.mrle4_3->model_context |= (ref & 1);
-            model_2mc.mrle4_3->model_context <<= 4;
-            model_2mc.mrle4_3->model_context |= log_length;
-            model_2mc.mrle4_3->model_context &= model_2mc.mrle4_3->model_ctx_mask;
-            len |= (uint32_t)model_2mc.mrle4_3->DecodeSymbolNoUpdate() << 16;
-            model_2mc.mrle4_4->model_context <<= 1;
-            model_2mc.mrle4_4->model_context |= (ref & 1);
-            model_2mc.mrle4_4->model_context <<= 4;
-            model_2mc.mrle4_4->model_context |= log_length;
-            model_2mc.mrle4_4->model_context &= model_2mc.mrle4_4->model_ctx_mask;
-            len |= (uint32_t)model_2mc.mrle4_4->DecodeSymbolNoUpdate() << 24;
+            model->mrle4_1->model_context <<= 1;
+            model->mrle4_1->model_context |= (ref & 1);
+            model->mrle4_1->model_context <<= 4;
+            model->mrle4_1->model_context |= log_length;
+            model->mrle4_1->model_context &= model->mrle4_1->model_ctx_mask;
+            len = model->mrle4_1->DecodeSymbolNoUpdate();
+            model->mrle4_2->model_context <<= 1;
+            model->mrle4_2->model_context |= (ref & 1);
+            model->mrle4_2->model_context <<= 4;
+            model->mrle4_2->model_context |= log_length;
+            model->mrle4_2->model_context &= model->mrle4_2->model_ctx_mask;
+            len |= (uint32_t)model->mrle4_2->DecodeSymbolNoUpdate() << 8;
+            model->mrle4_3->model_context <<= 1;
+            model->mrle4_3->model_context |= (ref & 1);
+            model->mrle4_3->model_context <<= 4;
+            model->mrle4_3->model_context |= log_length;
+            model->mrle4_3->model_context &= model->mrle4_3->model_ctx_mask;
+            len |= (uint32_t)model->mrle4_3->DecodeSymbolNoUpdate() << 16;
+            model->mrle4_4->model_context <<= 1;
+            model->mrle4_4->model_context |= (ref & 1);
+            model->mrle4_4->model_context <<= 4;
+            model->mrle4_4->model_context |= log_length;
+            model->mrle4_4->model_context &= model->mrle4_4->model_ctx_mask;
+            len |= (uint32_t)model->mrle4_4->DecodeSymbolNoUpdate() << 24;
+        }
+
+        return 1;
+    }
+
+    int DecodeWahRLE_nm(uint64_t& ref, uint32_t& len, djinn_ctx_model_t* model) {
+        ref = model->mref->DecodeSymbol();
+        uint32_t log_length = model->mlog_rle->DecodeSymbol();
+        // std::cerr << "ref=" << ref << " log=" << log_length << std::endl;
+
+        if (log_length < 2) {
+            std::cerr << "single=" << len << "," << (ref&1) << std::endl;
+        }
+        else if (log_length <= 8) {
+            model->mrle->model_context = (ref & 15);
+            model->mrle->model_context <<= 4;
+            model->mrle->model_context |= log_length;
+            model->mrle->model_context &= model->mrle->model_ctx_mask;
+            len = model->mrle->DecodeSymbolNoUpdate();
+        } else if (log_length <= 16) {
+            model->mrle2_1->model_context = (ref & 15);
+            model->mrle2_1->model_context <<= 4;
+            model->mrle2_1->model_context |= log_length;
+            model->mrle2_1->model_context &= model->mrle2_1->model_ctx_mask;
+            len = model->mrle2_1->DecodeSymbolNoUpdate();
+            model->mrle2_2->model_context = (ref & 1);
+            model->mrle2_2->model_context <<= 4;
+            model->mrle2_2->model_context |= log_length;
+            model->mrle2_2->model_context &= model->mrle2_2->model_ctx_mask;
+            len |= (uint32_t)model->mrle2_2->DecodeSymbolNoUpdate() << 8;
+        } else {
+            model->mrle4_1->model_context = (ref & 1);
+            model->mrle4_1->model_context <<= 4;
+            model->mrle4_1->model_context |= log_length;
+            model->mrle4_1->model_context &= model->mrle4_1->model_ctx_mask;
+            len = model->mrle4_1->DecodeSymbolNoUpdate();
+            model->mrle4_2->model_context = (ref & 1);
+            model->mrle4_2->model_context <<= 4;
+            model->mrle4_2->model_context |= log_length;
+            model->mrle4_2->model_context &= model->mrle4_2->model_ctx_mask;
+            len |= (uint32_t)model->mrle4_2->DecodeSymbolNoUpdate() << 8;
+            model->mrle4_3->model_context = (ref & 1);
+            model->mrle4_3->model_context <<= 4;
+            model->mrle4_3->model_context |= log_length;
+            model->mrle4_3->model_context &= model->mrle4_3->model_ctx_mask;
+            len |= (uint32_t)model->mrle4_3->DecodeSymbolNoUpdate() << 16;
+            model->mrle4_4->model_context = (ref & 1);
+            model->mrle4_4->model_context <<= 4;
+            model->mrle4_4->model_context |= log_length;
+            model->mrle4_4->model_context &= model->mrle4_4->model_ctx_mask;
+            len |= (uint32_t)model->mrle4_4->DecodeSymbolNoUpdate() << 24;
         }
 
         return 1;
@@ -624,6 +671,7 @@ public:
         range_coder->FinishEncode();
         model_2mc.FinishEncoding();
         model_nm.FinishEncoding();
+
         std::cerr << range_coder->OutSize() << " and " << model_2mc.range_coder->OutSize() << " and " << model_nm.range_coder->OutSize() << std::endl;
         return range_coder->OutSize() + model_2mc.range_coder->OutSize() + model_nm.range_coder->OutSize();
     }
@@ -648,6 +696,8 @@ public:
     uint32_t p_len; // data length
     uint32_t p_cap:31, p_free:1;
     uint32_t n_variants;
+
+    uint32_t hist_alts[256];
     
     std::shared_ptr<RangeCoder> range_coder;
     std::shared_ptr<GeneralModel> marchetype; // 0 for 2MC, 1 for 2M, 2 else

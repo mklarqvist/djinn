@@ -217,7 +217,6 @@ public:
     int32_t RemapGenotypeEOV(uint8_t* data, const uint32_t len);
 
     //
-    virtual bool CheckLimit() const =0;
     virtual int Compress(djinn_block_t*& block) =0;
 
 public:
@@ -250,8 +249,6 @@ public:
     GenotypeCompressorModelling(int64_t n_s);
     ~GenotypeCompressorModelling();
 
-    bool CheckLimit() const override;
-
     //
     // int Encode(bcf1_t* bcf, const bcf_hdr_t* hdr) override;
 
@@ -278,10 +275,7 @@ private:
 #endif
 
 private:
-    GeneralPBWTModel base_models[4]; // 0-1: diploid biallelic no-missing; 2-3: diploid biallelic missing
-    GeneralPBWTModel base_models_complex[2]; // 0-1: diploid n-allelic
-    GeneralPBWTModel* models;
-    
+   
     uint64_t bytes_out2, bytes_out3, bytes_out4;
 
     djinn_ctx_model djn_ctx, djn_ctx_decode;
@@ -300,8 +294,6 @@ public:
 
     // Encode data using htslib.
     int Encode2N(bcf1_t* bcf, const bcf_hdr_t* hdr) override { return(-1); }
-
-    bool CheckLimit() const override;
 
     int Compress(djinn_block_t*& block) override;
 
