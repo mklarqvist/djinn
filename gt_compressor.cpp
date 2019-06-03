@@ -249,13 +249,13 @@ int GenotypeCompressorModelling::Encode2NXM(uint8_t* data, const int32_t n_data,
 }
 
 int GenotypeCompressorModelling::Compress(djinn_block_t*& block) {
-    if (block == nullptr) {
-        block = new djinn_ctx_block_t();
-        block->type = djinn_block_t::BlockType::CONTEXT;
-        block->data = new djinn_ctx_t();
-    }
-    djinn_ctx_t* data_out = (djinn_ctx_t*)block->data;
-    data_out->reset();
+    // if (block == nullptr) {
+    //     block = new djinn_ctx_block_t();
+    //     block->type = djinn_block_t::BlockType::CONTEXT;
+    //     block->data = new djinn_ctx_t();
+    // }
+    // djinn_ctx_t* data_out = (djinn_ctx_t*)block->data;
+    // data_out->reset();
 
     /*
 #if DEBUG_PBWT
@@ -405,9 +405,9 @@ int GenotypeCompressorModelling::Compress(djinn_block_t*& block) {
 #if DEBUG_PBWT
         // Reset digests.
         for (int i = 0; i < 6; ++i) {
-            debug_pbwt[i].reset();
+            debug_pbwt[i].Reset();
         }
-        debug_bins[0].reset();
+        debug_bins[0].Reset();
 #endif
     */
     // base_models[0].Reset();
@@ -416,15 +416,55 @@ int GenotypeCompressorModelling::Compress(djinn_block_t*& block) {
 #if DEBUG_SIZE
     std::cerr << "[PROGRESS] Variants=" << processed_lines << "," << processed_lines_local << ": " << bytes_in << "->" << bytes_out4 << " (" << (double)bytes_in/bytes_out4 << "-fold ubcf, " << (double)bytes_in_vcf/bytes_out4 << "-fold vcf)" << std::endl;
 #endif
+    
+    // djinn_block_t* blk = nullptr;
+    djn_ctx.GetBlockReference(block); // return me
+    // djn_ctx_decode.StartDecoding(block, false);
+    
+    // Start manual decoding
+    // djinn_ctx_t* dat_out = (djinn_ctx_t*)block->data;
+    // uint8_t* t = new uint8_t[64];
 
-    // djn_ctx_decode.StartDecoding(djn_ctx.model.p, false);
-    // uint8_t* t = new uint8_t[1024];
-    // for (int i = 0; i < processed_lines_local; ++i) {
-    //     djn_ctx_decode.DecodeRaw(t);
+    // for (int i = 0; i < djn_ctx_decode.n_variants; ++i) {
+    //     djn_ctx_decode.DecodeNext(t);
     // }
+
+    /*
+    if (dat_out->ctx_models[1].n_v) {
+        std::cerr << "model1: " << dat_out->ctx_models[1].vptr_len << " and " << dat_out->ctx_models[1].n_v << std::endl;
+        for (int i = 0; i < dat_out->ctx_models[1].n_v; ++i) {
+            djn_ctx_decode.DecodeRaw(t);
+        }
+    }
+
+    if (dat_out->ctx_models[3].n_v) {
+        std::cerr << "model2: " << dat_out->ctx_models[3].vptr_len << " and " << dat_out->ctx_models[3].n_v << std::endl;
+        for (int i = 0; i < dat_out->ctx_models[3].n_v; ++i) {
+            djn_ctx_decode.DecodeRaw_nm(t);
+        }
+    }
+    */
+
+    // for (int i = 0; i < djn_ctx.model_2mc.dirty_wah->models.size(); ++i) {
+    //     const int inner = djn_ctx.model_2mc.dirty_wah->models[i]->n_symbols;
+    //     uint32_t obs = 0;
+    //     std::cerr << "Model " << i << ": ";
+    //     for (int j = 0; j < inner; ++j) {
+    //         if (djn_ctx.model_2mc.dirty_wah->models[i]->F[j].Freq > 1) { 
+    //             std::cerr << djn_ctx.model_2mc.dirty_wah->models[i]->F[j].Symbol << ":" << djn_ctx.model_2mc.dirty_wah->models[i]->F[j].Freq << ", ";
+    //         ++obs;
+    //         }
+    //     }
+    //     std::cerr << std::endl;
+    // }
+
+    // djinn_ctx_block_t* bb = (djinn_ctx_block_t*)block;
+    // std::cerr << "Outsize=" << bb->size() << std::endl;
+
 
     djn_ctx.StartEncoding(true, false);
     // delete[] t;
+    // delete blk;
 
     processed_lines_local = 0;
 
@@ -610,8 +650,8 @@ int GenotypeCompressorRLEBitmap::Encode2N2MC(uint8_t* data, const int32_t n_data
 
     if (permute_pbwt) {
         // Update diploid, biallelic, no-missing PBWT for haplotype 1 and 2.
-        base_pbwt[0].Update(&data[0], 2);
-        base_pbwt[1].Update(&data[1], 2);
+        base_pbwt[0].UpdateBcf(&data[0], 2);
+        base_pbwt[1].UpdateBcf(&data[1], 2);
 
         EncodeRLEBitmap2N2MC(0);
     } else {
@@ -687,8 +727,8 @@ int GenotypeCompressorRLEBitmap::Encode2N2MM(uint8_t* data, const int32_t n_data
 
     if (permute_pbwt) {
         // Update diploid, biallelic, no-missing PBWT for haplotype 1 and 2.
-        base_pbwt[2].Update(&data[0], 2);
-        base_pbwt[3].Update(&data[1], 2);
+        base_pbwt[2].UpdateBcf(&data[0], 2);
+        base_pbwt[3].UpdateBcf(&data[1], 2);
 
         int ret1 = EncodeRLEBitmap2N2MM(2);
     } else {
@@ -781,8 +821,8 @@ int GenotypeCompressorRLEBitmap::Encode2NXM(uint8_t* data, const int32_t n_data,
 #endif
 
     if (permute_pbwt) {
-        complex_pbwt[0].UpdateGeneral(&data[0], 2);
-        complex_pbwt[1].UpdateGeneral(&data[1], 2);
+        complex_pbwt[0].UpdateBcfGeneral(&data[0], 2);
+        complex_pbwt[1].UpdateBcfGeneral(&data[1], 2);
         
         EncodeRLEBitmap2NXM(0);
     } else {
@@ -919,16 +959,16 @@ int GenotypeCompressorRLEBitmap::Compress(djinn_block_t*& block) {
 #if DEBUG_PBWT
         // Reset digests.
         for (int i = 0; i < 6; ++i) {
-            debug_pbwt[i].reset();
+            debug_pbwt[i].Reset();
         }
 #endif
 
-    base_pbwt[0].reset();
-    base_pbwt[1].reset();
-    base_pbwt[2].reset();
-    base_pbwt[3].reset();
-    complex_pbwt[0].reset();
-    complex_pbwt[1].reset();
+    base_pbwt[0].Reset();
+    base_pbwt[1].Reset();
+    base_pbwt[2].Reset();
+    base_pbwt[3].Reset();
+    complex_pbwt[0].Reset();
+    complex_pbwt[1].Reset();
 
     processed_lines_local = 0;
     buf_raw.reset();

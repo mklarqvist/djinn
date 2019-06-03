@@ -46,10 +46,11 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
     hdr.base_ploidy = 2;
     hdr.n_samples = reader->n_samples_;
     hdr.version[0] = 0; hdr.version[1] = 1; hdr.version[2] = 0;
-    std::cout.write((char*)hdr.version, sizeof(uint8_t)*3);
-    std::cout.write((char*)&hdr.base_ploidy, sizeof(uint8_t));
-    std::cout.write((char*)&hdr.n_samples, sizeof(int64_t));
-    std::cout.flush();
+    
+    // std::cout.write((char*)hdr.version, sizeof(uint8_t)*3);
+    // std::cout.write((char*)&hdr.base_ploidy, sizeof(uint8_t));
+    // std::cout.write((char*)&hdr.n_samples, sizeof(int64_t));
+    // std::cout.flush();
 
     djinn::GTCompressor gtcomp;
     if (type & 1) {
@@ -97,7 +98,7 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
             // block->Serialize(std::cout);
             int ret = block->Serialize(output_data);
             std::cerr << "Data=" << ret << std::endl;
-            std::cout.write((char*)output_data, ret);
+            // std::cout.write((char*)output_data, ret);
         }
         clockdef t1 = std::chrono::high_resolution_clock::now();
         gtcomp.Encode(reader->bcf1_, reader->header_);
@@ -114,9 +115,26 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
     // block->Serialize(std::cout);
     int ret = block->Serialize(output_data);
     std::cerr << "Data=" << ret << std::endl;
-    std::cout.write((char*)output_data, ret);
-    std::cout.flush();
+    // std::cout.write((char*)output_data, ret);
+    // std::cout.flush();
     delete block;
+
+    // Debug
+    std::shared_ptr<djinn::GenotypeCompressorModelling> ins = std::static_pointer_cast<djinn::GenotypeCompressorModelling>(gtcomp.instance);
+    for (int i = 0; i < ins->djn_ctx.model_2mc.dirty_wah->models.size(); ++i) {
+        const int inner = ins->djn_ctx.model_2mc.dirty_wah->models[i]->n_symbols;
+        uint32_t obs = 0;
+        std::sort(ins->djn_ctx.model_2mc.dirty_wah->models[i]->F, &ins->djn_ctx.model_2mc.dirty_wah->models[i]->F[ins->djn_ctx.model_2mc.dirty_wah->models[i]->n_symbols]);
+        std::cout << i << "\t" <<  ins->djn_ctx.model_2mc.dirty_wah->models[i]->F[0].Freq;
+        for (int j = 1; j < inner; ++j) {
+            assert(ins->djn_ctx.model_2mc.dirty_wah->models[i]->F[j].Symbol  == j);
+            // if (ins->djn_ctx.model_2mc.dirty_wah->models[i]->F[j].Freq > 1) { 
+                std::cout << "\t" << ins->djn_ctx.model_2mc.dirty_wah->models[i]->F[j].Freq;
+                ++obs;
+            // }
+        }
+        std::cout << std::endl;
+    }
 
     return n_lines;
 }
@@ -130,6 +148,9 @@ int DecompressExample(const std::string& file, int type) {
     uint64_t filesize = f.tellg();
     f.seekg(0);
 
+    return 1;
+
+    /*
     // std::cerr << "filesize=" << filesize << "@" << f.tellg() << std::endl;
 
     djinn::djinn_hdr_t hdr;
@@ -236,6 +257,7 @@ int DecompressExample(const std::string& file, int type) {
     delete[] vcf_buffer;
 
     return 1;
+    */
 }
 
 void usage() {

@@ -17,13 +17,14 @@
 ###################################################################
 
 OPTFLAGS  := -O3
-CFLAGS     = -std=c99 $(OPTFLAGS) $(DEBUG_FLAGS)
-CPPFLAGS   = -std=c++0x $(OPTFLAGS) $(DEBUG_FLAGS)
-CPP_SOURCE = frequency_model.cpp main.cpp pbwt.cpp range_coder.cpp gt_compressor.cpp djinn.cpp
+CFLAGS     = -std=c99 $(OPTFLAGS) $(DEBUG_FLAGS) -g
+CPPFLAGS   = -std=c++0x $(OPTFLAGS) $(DEBUG_FLAGS) -g
+CPP_SOURCE = frequency_model.cpp main.cpp pbwt.cpp gt_compressor.cpp djinn.cpp ctx_model.cpp
 C_SOURCE   = 
 OBJECTS    = $(C_SOURCE:.c=.o) $(CPP_SOURCE:.cpp=.o)
 DEBUG_FLAGS =
 DEBUG_LIBS  =
+OPENSSL_PATH = 
 
 # Default target
 all: djinn
@@ -39,10 +40,10 @@ debug: djinn
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 %.o: %.cpp
-	$(CXX) $(CPPFLAGS) -c -o $@ $<
+	$(CXX) $(CPPFLAGS) $(OPENSSL_PATH) -c -o $@ $<
 
 djinn: $(OBJECTS)
-	$(CXX) $(CPPFLAGS) $(OBJECTS) -lzstd -llz4 -lhts $(DEBUG_LIBS) -o djinn
+	$(CXX) $(CPPFLAGS) $(OBJECTS) $(OPENSSL_PATH) -lzstd -llz4 -lhts $(DEBUG_LIBS) -o djinn
 
 clean:
 	rm -f $(OBJECTS)

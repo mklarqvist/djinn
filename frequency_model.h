@@ -1,6 +1,6 @@
 /*
 * Copyright (c) 2019
-* Author(s): Marcus D. R. Klarqvist and James Bonfield
+* Author(s): Marcus D. R. Klarqvist
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -49,7 +49,7 @@
  */
 
 /*
- * Code rewritten to templated C++11 and commented by Marcus D. R. Klarqvist
+ * Code rewritten to C++11 and commented by Marcus D. R. Klarqvist
  */
 
 #ifndef FREQUENCY_MODEL_H_
@@ -61,9 +61,105 @@
 #define _mm_prefetch(a,b)
 #endif
 
-#include "range_coder.h"
-
 namespace djinn {
+
+
+// Based on Subbotin Range Coder.
+class RangeCoder {
+private:
+    static constexpr uint32_t TopValue = 1 << 24;
+	static constexpr uint32_t Mask32 = (uint32_t)-1;
+
+public:
+    RangeCoder() : low(0), buffer(0), range(Mask32){}
+	virtual ~RangeCoder() {}
+
+public:
+    void SetInput(uint8_t* in) { out_buf = in_buf = in; }
+    void SetOutput(uint8_t* out) { in_buf = out_buf = out; }
+    char* GetInput() { return (char *)in_buf; }
+    char* GetOutput() { return (char *)out_buf; }
+    size_t OutSize() { return out_buf - in_buf; }
+    size_t InSize() { return in_buf - out_buf; }
+
+	void StartEncode() {
+		low = 0;
+		range = Mask32;
+	}
+
+    // uint32_t cumFreq, uint32_t freq, uint32_t totFreq
+	void Encode(uint32_t cumFreq, uint32_t symFreq, uint32_t totalFreqSum) {
+        assert(range > totalFreqSum);
+		range /= totalFreqSum;
+        low += range * cumFreq;
+        range *= symFreq;
+
+        while(range < TopValue) {
+            assert(range != 0);
+            // range = 0x00ffffff..
+            // low/high may be matching
+            //       eg 88332211/88342211 (range 00010000)
+            // or differing
+            //       eg 88ff2211/89002211 (range 00010000)
+            //
+            // If the latter, we need to reduce range down
+            // such that high=88ffffff.
+            // Eg. top-1      == 00ffffff
+            //     low|top-1  == 88ffffff
+            //     ...-low    == 0000ddee
+            if ( (uint8_t)((low ^ (low + range)) >> 56) )
+                range = (((uint32_t)(low) | (TopValue - 1)) - (uint32_t)(low));
+            *out_buf++ = low >> 56, range <<= 8, low <<= 8;
+        }
+	}
+
+	void FinishEncode() {
+		for (int i = 0; i < 8; i++) {
+            *out_buf++ = (uint8_t)(low >> 56);
+			low <<= 8;
+		}
+	}
+
+	void StartDecode() {
+		buffer = 0;
+		for (uint32_t i = 1; i <= 8; ++i) {
+			buffer |= (uint64_t)*in_buf << (64 - i * 8);
+            ++in_buf;
+		}
+
+		low = 0;
+		range = Mask32;
+	}
+
+	inline uint32_t GetFreq(uint32_t totalFreq) {
+		assert(totalFreq != 0);
+		return (uint32_t) (buffer / (range /= totalFreq));
+	}
+
+    // uint32_t cumFreq, uint32_t freq, uint32_t totFreq
+	void Decode(uint32_t lowEnd, uint32_t symFreq, uint32_t /*totalFreq_*/) {
+		uint32_t r = lowEnd * range;
+		buffer -= r;
+		low += r;
+		range *= symFreq;
+
+		while (range < TopValue) {
+			if ( (uint8_t)((low ^ (low + range)) >> 56) )
+				range = (((uint32_t)(low) | (TopValue - 1)) - (uint32_t)(low));
+
+			buffer = (buffer << 8) + *in_buf++;
+			low <<= 8, range <<= 8;
+		}
+	}
+
+	void FinishDecode() {}
+
+public:
+    uint64_t low, buffer;
+	uint32_t range;
+    uint8_t* in_buf;
+    uint8_t* out_buf;
+};
 
 /*
  *--------------------------------------------------------------------------
@@ -85,6 +181,8 @@ namespace djinn {
 class FrequencyModel {
 private:
     struct SymFreqs {
+        bool operator<(const SymFreqs& other) const { return(Symbol < other.Symbol); }
+        
         uint32_t Freq;
         uint16_t Symbol;
     };
@@ -103,12 +201,11 @@ public:
     void EncodeSymbol(uint16_t sym);
     double GetP(uint16_t sym) const;
 
-    void SetStep(int step) { STEP = step; }
-    void SetShift(int shift) { SHIFT = shift; }
-
 public:
-    int NSYM, STEP, SHIFT;
-    uint32_t TotFreq;  // Total frequency
+    uint32_t n_symbols;
+	uint32_t step_size;
+	uint32_t max_total;
+	uint32_t total_frequency;
 
     // Array of Symbols approximately sorted by Freq.
     SymFreqs sentinel;

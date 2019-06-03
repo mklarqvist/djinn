@@ -23,7 +23,7 @@
 #include "pbwt.h"
 #include "compressors.h"
 
-#include "ctx_model1.h"
+#include "ctx_model.h"
 
 // temp
 #include <bitset>
@@ -34,10 +34,6 @@
 #if DEBUG_PBWT
 #include <openssl/sha.h>
 #endif
-
-//test
-#include "balz.h"
-#include "rc.h"
 
 namespace djinn {
 
@@ -274,7 +270,7 @@ private:
     int DebugContext(uint8_t* in, size_t len_in, uint8_t* ref_data, size_t n_cycles, int pbwt_sym, context_debug_decode decode_fn, const uint8_t* lookup_fn);
 #endif
 
-private:
+public:
    
     uint64_t bytes_out2, bytes_out3, bytes_out4;
 
@@ -380,7 +376,7 @@ public:
                     ref >>= 1;
                 }
             }
-            test.UpdateBlank(unpack, 1);
+            test.Update(unpack, 1);
         }
 
         std::cerr << test.ToPrettyString() << std::endl;
@@ -582,11 +578,11 @@ public:
 
     inline void SetPermutePbwt(const bool yes) { this->instance->SetPermutePbwt(yes); }
 
-    inline int Encode(bcf1_t* bcf, const bcf_hdr_t* hdr) { this->instance->Encode(bcf, hdr); }
-    inline int Encode(uint8_t* data, const int32_t n_data, const int n_ploidy, const int n_alleles) { this->instance->Encode(data, n_data, n_ploidy, n_alleles); }
-    inline void Compress(djinn_block_t*& block) { this->instance->Compress(block); }
+    inline int Encode(bcf1_t* bcf, const bcf_hdr_t* hdr) { return this->instance->Encode(bcf, hdr); }
+    inline int Encode(uint8_t* data, const int32_t n_data, const int n_ploidy, const int n_alleles) { return this->instance->Encode(data, n_data, n_ploidy, n_alleles); }
+    inline int Compress(djinn_block_t*& block) { return this->instance->Compress(block); }
 
-private:
+public:
     CompressionStrategy strategy;
     std::shared_ptr<GenotypeCompressor> instance;
 };

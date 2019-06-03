@@ -47,7 +47,7 @@ const uint8_t TWK_BCF_GT_UNPACK_GENERAL_REV[131] =
 #define BCF_UNPACK_GENOTYPE(A) TWK_BCF_GT_UNPACK[(A) >> 1]
 #define BCF_UNPACK_GENOTYPE_GENERAL(A) TWK_BCF_GT_UNPACK_GENERAL[(A) >> 1]
 
-/*======   Canonical representation   ======*/
+/*======   PBWT   ======*/
 
 class PBWT {
 public:
@@ -55,16 +55,22 @@ public:
     PBWT(int64_t n_samples, int n_symbols);
     ~PBWT();
 
+    // Disallow all forms of copying and moving.
+    PBWT(const PBWT& other) = delete;
+    PBWT(PBWT&& other) noexcept = delete;
+    PBWT& operator=(const PBWT& other) = delete;
+    PBWT& operator=(PBWT&& other) noexcept = delete;
+
     void Initiate(int64_t n_s, int n_sym);
-    void reset();
-    int Update(const int* arr);
-    int UpdateBlank(const uint8_t* arr, uint32_t stride = 1);
+    void Reset();
+    
     int Update(const uint8_t* arr, uint32_t stride = 1);
-    int UpdateGeneral(const uint8_t* arr, uint32_t stride = 1);
-    // Todo:
-    // Update the PBWT given the following positions.
-    // Only useful for biallelic PBWTs.
-    int Update(const uint32_t* alt_pos, const uint32_t len);
+    int UpdateBcf(const uint8_t* arr, uint32_t stride = 1);
+    int UpdateBcfGeneral(const uint8_t* arr, uint32_t stride = 1);
+    // Encode WAH in 63-bits and return data.
+    int UpdateBcfWah(const uint8_t* arr, uint8_t* out, uint32_t stride = 1);
+    // Encode WAH in 64-bits with archetype data.
+    int UpdateBcfWah2(const uint8_t* arr, uint8_t* data, uint32_t* archetype, uint32_t stride = 1);
 
     int ReverseUpdate(const uint8_t* arr);
     int ReverseUpdateBitmap(const uint8_t* arr);
@@ -82,23 +88,17 @@ public:
     uint64_t*  prev_bitmap; // bitmap version
 };
 
-/*======   Higher order   ======*/
-
-#define MODEL_SIZE 65536
+/*======   Context model container   ======*/
 
 class GeneralModel {
 public:
     GeneralModel() noexcept;
-    GeneralModel(int n_symbols);
-    GeneralModel(int n_symbols, std::shared_ptr<RangeCoder> rc);
     GeneralModel(int n_symbols, int model_size);
     GeneralModel(int n_symbols, int model_size, std::shared_ptr<RangeCoder> rc);
     GeneralModel(int n_symbols, int model_size, int shift, int step);
     GeneralModel(int n_symbols, int model_size, int shift, int step, std::shared_ptr<RangeCoder> rc);
-    virtual ~GeneralModel();
+    ~GeneralModel();
 
-    int Initiate(int n_symbols);
-    int Initiate(int n_symbols, std::shared_ptr<RangeCoder> rc);
     int Initiate(int n_symbols, int model_size);
     int Initiate(int n_symbols, int model_size, std::shared_ptr<RangeCoder> rc);
     int Initiate(int n_symbols, int model_size, int shift, int step);
@@ -108,14 +108,16 @@ public:
     int FinishDecoding();
     void StartEncoding();
     void StartDecoding(uint8_t* data);
+
     void EncodeSymbol(const uint16_t symbol);
     void EncodeSymbolNoUpdate(const uint16_t symbol);
+    
     uint16_t DecodeSymbol();
     uint16_t DecodeSymbolNoUpdate();
 
     void ResetModels();
     void ResetContext();
-    virtual void Reset();
+    void Reset();
 
 public:
     int max_model_symbols;
@@ -123,29 +125,9 @@ public:
     uint32_t model_context, model_ctx_mask;
     std::shared_ptr<RangeCoder> range_coder;
     std::vector < std::shared_ptr<FrequencyModel> > models;
-    size_t n_additions;
-
-    size_t n_buffer;
-    uint8_t* buffer; // fix
-};
-
-class GeneralPBWTModel : public GeneralModel {
-public:
-    GeneralPBWTModel() noexcept;
-    GeneralPBWTModel(int64_t n_samples, int n_symbols);
-    ~GeneralPBWTModel();
-
-    void Construct(int64_t n_samples, int n_symbols);
-    void ResetPBWT();
-    void Reset();
-    void ResetExceptPBWT();
-
-
-    void operator++() { ++this->n_variants; } 
-
-public:
-    std::shared_ptr<PBWT> pbwt;
-    size_t n_variants;
+    size_t n_additions; // number of updates performed
+    size_t n_buffer; // buffer size
+    uint8_t* buffer; // buffer. todo: fixme
 };
 
 }

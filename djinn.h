@@ -39,15 +39,10 @@ struct djinn_hdr_t {
 
 struct djinn_ctx_ctrl_t {
     uint16_t pbwt: 1, 
-             di2mc1: 1, 
-             di2mc2: 1, 
-             di2mm1: 1, 
-             di2mm2: 1, 
-             di2x1:  1, 
-             di2x2:  1, 
-             di2mc_bit1: 1, 
-             di2mc_bit2: 1, 
-             unused: 7;
+             dimc: 1, 
+             dim: 1, 
+             nm: 1, 
+             unused: 12;
 };
 
 struct djinn_wah_ctrl_t {
@@ -61,14 +56,10 @@ struct djinn_wah_ctrl_t {
              unused: 9;
 };
 
-#define DJINN_CTX_MODEL_DI2MC1      0
-#define DJINN_CTX_MODEL_DI2MC2      1
-#define DJINN_CTX_MODEL_DI2MM1      2
-#define DJINN_CTX_MODEL_DI2MM2      3
-#define DJINN_CTX_MODEL_DI2X1       4
-#define DJINN_CTX_MODEL_DI2X2       5
-#define DJINN_CTX_MODEL_DI2MC_PART1 0
-#define DJINN_CTX_MODEL_DI2MC_PART2 1
+#define DJINN_CTX_MODEL_ARC  0
+#define DJINN_CTX_MODEL_DIMC 1
+#define DJINN_CTX_MODEL_DIM  2
+#define DJINN_CTX_MODEL_NM   3
 
 #define DJINN_WAH_MODEL_DI2MC1      0
 #define DJINN_WAH_MODEL_DI2MC2      1
@@ -76,16 +67,6 @@ struct djinn_wah_ctrl_t {
 #define DJINN_WAH_MODEL_DI2MM2      3
 #define DJINN_WAH_MODEL_DI2X1       4
 #define DJINN_WAH_MODEL_DI2X2       5
-
-struct djinn_data_t { // pure virtual base struct
-    virtual uint32_t size() const =0;
-    virtual uint16_t GetController() const =0;
-    virtual void reset() =0;
-    virtual int Serialize(std::ostream& stream) const =0;
-    virtual int Serialize(uint8_t* dst) const =0;
-    virtual uint32_t SerializedSize() const =0;
-    virtual int Deserialize(std::istream& stream, uint16_t ctrl) =0;
-};
 
 struct djinn_data_container_t {
     djinn_data_container_t() : n(0), n_c(0), n_v(0), vptr(nullptr), vptr_len(0), vptr_off(0), vptr_free(0){}
@@ -131,6 +112,7 @@ struct djinn_data_container_t {
         vptr = data;
         vptr_len = len;
         n = len;
+        return 1;
     }
 
     void reset() {
@@ -203,13 +185,24 @@ struct djinn_data_container_t {
                          //    data block is bigger than the original
 };
 
+struct djinn_data_t { // pure virtual base struct
+    virtual ~djinn_data_t(){}
+    
+    virtual uint32_t size() const =0;
+    virtual uint16_t GetController() const =0;
+    virtual void reset() =0;
+    virtual int Serialize(std::ostream& stream) const =0;
+    virtual int Serialize(uint8_t* dst) const =0;
+    virtual uint32_t SerializedSize() const =0;
+    virtual int Deserialize(std::istream& stream, uint16_t ctrl) =0;
+};
+
 struct djinn_ctx_t : public djinn_data_t {
 public:
     uint32_t size() const override {
         uint32_t tot = 0;
 
-        for (int i = 0; i < 6; ++i) tot += ctx_models[i].vptr_len;
-        for (int i = 0; i < 2; ++i) tot += ctx_partitions[i].vptr_len;
+        for (int i = 0; i < 4; ++i) tot += ctx_models[i].vptr_len;
 
         return tot;
     }
@@ -217,14 +210,9 @@ public:
     uint32_t SerializedSize() const override {
         uint32_t tot = 0;
 
-        for (int i = 0; i < 6; ++i) {
+        for (int i = 0; i < 4; ++i) {
             if (ctx_models[i].vptr_len) {
                 tot += 3*sizeof(int) + sizeof(uint32_t) + ctx_models[i].vptr_len;
-            }
-        }
-        for (int i = 0; i < 2; ++i) {
-            if (ctx_partitions[i].vptr_len) {
-                tot += 3*sizeof(int) + sizeof(uint32_t) + ctx_partitions[i].vptr_len;
             }
         }
 
@@ -234,27 +222,20 @@ public:
     uint16_t GetController() const override {
         uint16_t raw = 0;
         djinn_ctx_ctrl_t* ctrl = (djinn_ctx_ctrl_t*)&raw;
-        ctrl->di2mc1 = ctx_models[0].vptr_len > 0;
-        ctrl->di2mc2 = ctx_models[1].vptr_len > 0;
-        ctrl->di2mm1 = ctx_models[2].vptr_len > 0;
-        ctrl->di2mm2 = ctx_models[3].vptr_len > 0;
-        ctrl->di2x1  = ctx_models[4].vptr_len > 0;
-        ctrl->di2x2  = ctx_models[5].vptr_len > 0;
-        ctrl->di2mc_bit1 = ctx_partitions[0].vptr_len > 0;
-        ctrl->di2mc_bit2 = ctx_partitions[1].vptr_len > 0;
+        ctrl->dimc = ctx_models[0].vptr_len > 0;
+        ctrl->dim  = ctx_models[1].vptr_len > 0;
+        ctrl->nm   = ctx_models[2].vptr_len > 0;
 
         return raw;
     }
 
-    void reset() {
-        for (int i = 0; i < 6; ++i) ctx_models[i].reset();
-        for (int i = 0; i < 2; ++i) ctx_partitions[i].reset();
+    void reset() override {
+        for (int i = 0; i < 4; ++i) ctx_models[i].reset();
     }
 
     int Serialize(std::ostream& stream) const override {
         int ret = 0;
-        for (int i = 0; i < 6; ++i) ret += ctx_models[i].Serialize(stream);
-        for (int i = 0; i < 2; ++i) ret += ctx_partitions[i].Serialize(stream);
+        for (int i = 0; i < 4; ++i) ret += ctx_models[i].Serialize(stream);
 
         return ret;
     }
@@ -262,8 +243,7 @@ public:
     int Serialize(uint8_t* dst) const override {
         if (dst == nullptr) return -1;
         int ret = 0;
-        for (int i = 0; i < 6; ++i) ret += ctx_models[i].Serialize(&dst[ret]);
-        for (int i = 0; i < 2; ++i) ret += ctx_partitions[i].Serialize(&dst[ret]);
+        for (int i = 0; i < 4; ++i) ret += ctx_models[i].Serialize(&dst[ret]);
         return ret;
     }
 
@@ -273,15 +253,9 @@ public:
 
         int ret = 0;
         ctrl >>= 1;
-        for (int i = 0; i < 6; ++i) {
+        for (int i = 0; i < 4; ++i) {
             if (ctrl & 1) {
                 ret += ctx_models[i].Deserialize(stream);
-            }
-            ctrl >>= 1;
-        }
-        for (int i = 0; i < 2; ++i) {
-            if (ctrl & 1) {
-                ret += ctx_partitions[i].Deserialize(stream);
             }
             ctrl >>= 1;
         }
@@ -289,8 +263,7 @@ public:
     }
 
 public:
-    djinn_data_container_t ctx_models[6];
-    djinn_data_container_t ctx_partitions[2];
+    djinn_data_container_t ctx_models[4]; // arcetype, 2mc, 2m, nm
 };
 
 // TODOOOOO
@@ -328,7 +301,7 @@ struct djinn_wah_t : public djinn_data_t {
         return raw;
     }
     
-    void reset() {
+    void reset() override {
         for (int i = 0; i < 6; ++i) wah_models[i].reset();
     }
 
@@ -369,7 +342,7 @@ class djinn_block_t {
 public:
     enum class BlockType : uint32_t { UNKNOWN = 0, WAH = 1, CONTEXT = 2 };
 
-    djinn_block_t() : type(BlockType::UNKNOWN), n_rcds(0), p_len(0), ctrl(0), data(nullptr){}
+    djinn_block_t() : type(BlockType::UNKNOWN), n_rcds(0), p_len(0), ctrl(0), data(nullptr) {}
     virtual ~djinn_block_t() { delete data; }
 
     virtual int Serialize(std::ostream& stream) const { return -1; }

@@ -36,7 +36,7 @@ PBWT::PBWT(int64_t n_samples, int n_symbols) :
         queue[i] = new uint32_t[n_samples];
 
     memset(n_queue, 0, sizeof(uint32_t)*n_symbols);
-    reset();
+    Reset();
 }
 
 PBWT::~PBWT() {
@@ -73,10 +73,10 @@ void PBWT::Initiate(int64_t n_s, int n_sym) {
         queue[i] = new uint32_t[n_samples];
 
     memset(n_queue, 0, sizeof(uint32_t)*n_symbols);
-    reset();
+    Reset();
 }
 
-void PBWT::reset() {
+void PBWT::Reset() {
     if (ppa != nullptr) {
         for (int i = 0; i < n_samples; ++i)
             ppa[i] = i;
@@ -87,45 +87,15 @@ void PBWT::reset() {
     memset(n_queue, 0, sizeof(uint32_t)*n_symbols);
 }
 
-int PBWT::Update(const int* arr) {
-    memset(n_queue, 0, sizeof(uint32_t)*n_symbols);
-
-    for (int i = 0; i < n_samples; ++i) {
-        const uint8_t& gt = BCF_UNPACK_GENOTYPE(arr[ppa[i]]);
-        for (int j = 0; j < n_symbols; ++j) {
-            if (gt == j)
-                queue[j][n_queue[j]++] = ppa[i];
-        }
-        prev[i] = gt;
-        //std::cerr << " " << (int)gt;
-    }
-    //std::cerr << std::endl;
-
-    uint32_t of = 0;
-    for (int j = 0; j < n_symbols; ++j) {
-        for (int i = 0; i < n_queue[j]; ++i, ++of) {
-            ppa[of] = queue[j][i];
-        }
-    }
-    //for (int i = 0; i < n_q2; ++i, ++of) ppa[of] = q2[i];
-    assert(of == n_samples);
-    // debug should be sorted here
-    //for (int i = 0; i < n_samples; ++i) {
-        //   std::cerr << " " << (int)BCF_UNPACK_GENOTYPE(arr[ppa[i]]);
-    //}
-    //std::cerr << std::endl;
-    ++n_steps;
-
-    return(1);
-}
-
-int PBWT::Update(const uint8_t* arr, uint32_t stride) {
-    //n_q1 = n_q2 = 0;
+int PBWT::UpdateBcf(const uint8_t* arr, uint32_t stride) {
+    // Reset queues.
     memset(n_queue, 0, sizeof(uint32_t)*n_symbols);
 
     for (int i = 0; i < n_samples; ++i) {
         const uint8_t& gt = BCF_UNPACK_GENOTYPE(arr[ppa[i] * stride]);
-        if (gt >= n_symbols) std::cerr << "error=" << (int)arr[ppa[i]*stride] << "->" << (int)gt << ">=" << n_symbols << std::endl;
+        if (gt >= n_symbols) {
+            std::cerr << "error=" << (int)arr[ppa[i]*stride] << "->" << (int)gt << ">=" << n_symbols << std::endl;
+        }
         assert(gt < n_symbols);
         queue[gt][n_queue[gt]++] = ppa[i];
         prev[i] = gt;
@@ -153,7 +123,7 @@ int PBWT::Update(const uint8_t* arr, uint32_t stride) {
     return(1);
 }
 
-int PBWT::UpdateGeneral(const uint8_t* arr, uint32_t stride) {
+int PBWT::UpdateBcfGeneral(const uint8_t* arr, uint32_t stride) {
     // Reset queues.
     memset(n_queue, 0, sizeof(uint32_t)*n_symbols);
 
@@ -181,7 +151,7 @@ int PBWT::UpdateGeneral(const uint8_t* arr, uint32_t stride) {
     return(1);
 }
 
-int PBWT::UpdateBlank(const uint8_t* arr, uint32_t stride) {
+int PBWT::Update(const uint8_t* arr, uint32_t stride) {
     // Reset queues.
     memset(n_queue, 0, sizeof(uint32_t)*n_symbols);
 
@@ -291,76 +261,6 @@ GeneralModel::GeneralModel() noexcept :
     n_additions(0)
 {}
 
-GeneralModel::GeneralModel(int n_symbols) :
-    max_model_symbols(n_symbols),
-    model_context_shift(ceil(log2(n_symbols))),
-    model_context(0), model_ctx_mask(MODEL_SIZE - 1),
-    range_coder(std::make_shared<RangeCoder>()),
-    n_buffer(10000000),
-    buffer(new uint8_t[n_buffer]),
-    n_additions(0)
-{
-    assert(n_symbols > 1);
-    models.resize(MODEL_SIZE);
-    for (int i = 0; i < MODEL_SIZE; ++i) models[i] = std::make_shared<FrequencyModel>();
-
-    Reset();
-}
-
-int GeneralModel::Initiate(int n_symbols) {
-    max_model_symbols = n_symbols;
-    model_context_shift = ceil(log2(n_symbols));
-    model_context = 0; 
-    model_ctx_mask = MODEL_SIZE - 1;
-    range_coder = std::make_shared<RangeCoder>();
-    delete[] buffer;
-    n_buffer = 10000000;
-    buffer = new uint8_t[n_buffer];
-    n_additions = 0;
-    models.clear();
-
-    assert(n_symbols > 1);
-    models.resize(MODEL_SIZE);
-    for (int i = 0; i < MODEL_SIZE; ++i) models[i] = std::make_shared<FrequencyModel>();
-
-    Reset();
-}
-
-GeneralModel::GeneralModel(int n_symbols, std::shared_ptr<RangeCoder> rc)  :
-    max_model_symbols(n_symbols),
-    model_context_shift(ceil(log2(n_symbols))),
-    model_context(0), model_ctx_mask(MODEL_SIZE - 1),
-    range_coder(rc),
-    n_buffer(0),
-    buffer(nullptr),
-    n_additions(0)
-{
-    assert(n_symbols > 1);
-    models.resize(MODEL_SIZE);
-    for (int i = 0; i < MODEL_SIZE; ++i) models[i] = std::make_shared<FrequencyModel>();
-
-    Reset();
-}
-
-int GeneralModel::Initiate(int n_symbols, std::shared_ptr<RangeCoder> rc) {
-    max_model_symbols = n_symbols;
-    model_context_shift = ceil(log2(n_symbols));
-    model_context = 0; 
-    model_ctx_mask = MODEL_SIZE - 1;
-    range_coder = rc;
-    delete[] buffer;
-    n_buffer = 0;
-    buffer = nullptr;
-    n_additions = 0;
-    models.clear();
-
-    assert(n_symbols > 1);
-    models.resize(MODEL_SIZE);
-    for (int i = 0; i < MODEL_SIZE; ++i) models[i] = std::make_shared<FrequencyModel>();
-
-    Reset();
-}
-
 GeneralModel::GeneralModel(int n_symbols, int model_size) :
     max_model_symbols(n_symbols),
     model_context_shift(ceil(log2(n_symbols))),
@@ -394,6 +294,7 @@ int GeneralModel::Initiate(int n_symbols, int model_size) {
     for (int i = 0; i < model_size; ++i) models[i] = std::make_shared<FrequencyModel>();
 
     Reset();
+    return 1;
 }
 
 
@@ -430,6 +331,7 @@ int GeneralModel::Initiate(int n_symbols, int model_size, std::shared_ptr<RangeC
     for (int i = 0; i < model_size; ++i) models[i] = std::make_shared<FrequencyModel>();
 
     Reset();
+    return 1;
 }
 
 GeneralModel::GeneralModel(int n_symbols, int model_size, int shift, int step) :
@@ -441,13 +343,12 @@ GeneralModel::GeneralModel(int n_symbols, int model_size, int shift, int step) :
     buffer(new uint8_t[n_buffer]),
     n_additions(0)
 {
-    // std::cerr << "init models: " << shift << "," << step << std::endl;
     assert(n_symbols > 1);
     models.resize(model_size);
     for (int i = 0; i < model_size; ++i) {
         models[i] = std::make_shared<FrequencyModel>();
-        models[i]->SHIFT = shift;
-        models[i]->STEP = step;
+        models[i]->max_total = (1 << shift) - step;
+        models[i]->step_size = step;
     }
 
     Reset();
@@ -469,11 +370,12 @@ int GeneralModel::Initiate(int n_symbols, int model_size, int shift, int step) {
     models.resize(model_size);
     for (int i = 0; i < model_size; ++i) {
         models[i] = std::make_shared<FrequencyModel>();
-        models[i]->SHIFT = shift;
-        models[i]->STEP = step;
+        models[i]->max_total = (1 << shift) - step;
+        models[i]->step_size = step;
     }
 
     Reset();
+    return 1;
 }
 
 GeneralModel::GeneralModel(int n_symbols, int model_size, int shift, int step, std::shared_ptr<RangeCoder> rc) :
@@ -485,13 +387,12 @@ GeneralModel::GeneralModel(int n_symbols, int model_size, int shift, int step, s
     buffer(nullptr),
     n_additions(0)
 {
-    std::cerr << "provided rc init models: " << shift << "," << step << std::endl;
     assert(n_symbols > 1);
     models.resize(model_size);
     for (int i = 0; i < model_size; ++i) {
         models[i] = std::make_shared<FrequencyModel>();
-        models[i]->SHIFT = shift;
-        models[i]->STEP = step;
+        models[i]->max_total = (1 << shift) - step;
+        models[i]->step_size = step;
     }
 
     Reset();
@@ -513,11 +414,12 @@ int GeneralModel::Initiate(int n_symbols, int model_size, int shift, int step, s
     models.resize(model_size);
     for (int i = 0; i < model_size; ++i) {
         models[i] = std::make_shared<FrequencyModel>();
-        models[i]->SHIFT = shift;
-        models[i]->STEP = step;
+        models[i]->max_total = (1 << shift) - step;
+        models[i]->step_size = step;
     }
 
     Reset();
+    return 1;
 }
 
 GeneralModel::~GeneralModel() {
@@ -559,14 +461,11 @@ void GeneralModel::StartDecoding(uint8_t* data) {
 }
 
 void GeneralModel::EncodeSymbol(const uint16_t symbol) {
-    // std::cerr << "Adding symbol: " << symbol << "@" << model_context << "," << model_context_shift << "," << model_ctx_mask << std::endl; 
-    // assert(range_coder.get() != nullptr);
-    // assert(models[model_context].get() != nullptr);
     models[model_context]->EncodeSymbol(range_coder.get(), symbol);
     model_context <<= model_context_shift;
     model_context |= symbol;
     model_context &= model_ctx_mask;
-    // _mm_prefetch((const char *)&(models[model_context]), _MM_HINT_T0);
+    _mm_prefetch((const char *)(models[model_context].get()), _MM_HINT_T0);
     ++n_additions;
 }
 
@@ -582,64 +481,13 @@ uint16_t GeneralModel::DecodeSymbol() {
     model_context |= symbol;
     model_context &= model_ctx_mask;
     assert(model_context < models.size());
-    // _mm_prefetch((const char *)&(models[model_context]), _MM_HINT_T0);
+    _mm_prefetch((const char *)(models[model_context].get()), _MM_HINT_T0);
     return symbol;
 }
 
 uint16_t GeneralModel::DecodeSymbolNoUpdate() {
     uint16_t symbol = models[model_context]->DecodeSymbol(range_coder.get());
     return symbol;
-}
-
-/*======   Canonical representation   ======*/
-
-GeneralPBWTModel::GeneralPBWTModel() noexcept :
-    n_variants(0)
-{}
-
-GeneralPBWTModel::GeneralPBWTModel(int64_t n_samples, int n_symbols) :
-    GeneralModel(n_symbols),
-    pbwt(std::make_shared<PBWT>(n_samples, n_symbols)),
-    n_variants(0)
-{
-    assert(n_symbols > 1);
-    Reset();
-}
-
-GeneralPBWTModel::~GeneralPBWTModel() { }
-
-// Constructor outside constructor.
-void GeneralPBWTModel::Construct(int64_t n_samples, int n_symbols) {
-    max_model_symbols = n_symbols;
-    model_context_shift = ceil(log2(n_symbols));
-    model_context = 0;
-    pbwt = std::make_shared<PBWT>(n_samples, n_symbols);
-    range_coder = std::make_shared<RangeCoder>();
-
-    assert(n_symbols > 1);
-    models.resize(MODEL_SIZE);
-    for (int i = 0; i < MODEL_SIZE; ++i) models[i] = std::make_shared<FrequencyModel>();
-
-    Reset();
-}
-
-void GeneralPBWTModel::ResetPBWT() {
-    if (pbwt.get() != nullptr)
-        pbwt->reset();
-}
-
-void GeneralPBWTModel::Reset() {
-    n_additions = 0;
-    n_variants = 0;
-    ResetModels();
-    ResetPBWT();
-    ResetContext();
-}
-
-void GeneralPBWTModel::ResetExceptPBWT() {
-    n_additions = 0;
-    ResetModels();
-    ResetContext();
 }
 
 }
