@@ -17,17 +17,17 @@ djinn_ctx_model_t::~djinn_ctx_model_t() {
 
 void djinn_ctx_model_t::Initiate2mc() {
     range_coder = std::make_shared<RangeCoder>();
-    mref = std::make_shared<GeneralModel>(2, 1024, 24, 32, range_coder);
-    mlog_rle = std::make_shared<GeneralModel>(32, 4096, 24, 16, range_coder);
-    mrle = std::make_shared<GeneralModel>(256, 256, 24, 32, range_coder);
-    mrle2_1 = std::make_shared<GeneralModel>(256, 256, 24, 8, range_coder);
-    mrle2_2 = std::make_shared<GeneralModel>(256, 256, 24, 8, range_coder);
-    mrle4_1 = std::make_shared<GeneralModel>(256, 256, 24, 8, range_coder);
-    mrle4_2 = std::make_shared<GeneralModel>(256, 256, 24, 8, range_coder);
-    mrle4_3 = std::make_shared<GeneralModel>(256, 256, 24, 8, range_coder);
-    mrle4_4 = std::make_shared<GeneralModel>(256, 256, 24, 8, range_coder);
+    mref = std::make_shared<GeneralModel>(2, 512, 24, 32, range_coder);
+    mlog_rle = std::make_shared<GeneralModel>(32, 1024, 24, 16, range_coder);  // 1 bit ref, 4 bit alt -> 2^10 = 1024
+    mrle = std::make_shared<GeneralModel>(256, 32, 24, 32, range_coder); // 1 bit ref, 4 bit alt
+    mrle2_1 = std::make_shared<GeneralModel>(256, 32, 24, 8, range_coder);
+    mrle2_2 = std::make_shared<GeneralModel>(256, 32, 24, 8, range_coder);
+    mrle4_1 = std::make_shared<GeneralModel>(256, 32, 24, 8, range_coder);
+    mrle4_2 = std::make_shared<GeneralModel>(256, 32, 24, 8, range_coder);
+    mrle4_3 = std::make_shared<GeneralModel>(256, 32, 24, 8, range_coder);
+    mrle4_4 = std::make_shared<GeneralModel>(256, 32, 24, 8, range_coder);
     dirty_wah = std::make_shared<GeneralModel>(256, 256, 20, 32, range_coder);
-    mtype = std::make_shared<GeneralModel>(2, 1024, 24, 1, range_coder);
+    mtype = std::make_shared<GeneralModel>(2, 512, 24, 1, range_coder);
 
     // for (int i = 0; i < 1500; ++i) {
     //     // for (int j = 0; j < 256; ++j) {
