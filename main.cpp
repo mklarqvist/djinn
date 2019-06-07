@@ -13,27 +13,6 @@
 // Definition for microsecond timer.
 typedef std::chrono::high_resolution_clock::time_point clockdef;
 
-int upper_power_of_two(int n)
-{
-    int v = n; 
-
-    v--;
-    v |= v >> 1;
-    v |= v >> 2;
-    v |= v >> 4;
-    v |= v >> 8;
-    v |= v >> 16;
-    v++; // next power of 2
-
-    int x = v >> 1; // previous power of 2
-
-    return x < v ? x : v; // round down to closest power 2
-
-    // return (v - n) > (n - x) ? x : v;
-}
-
-
-
 int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
     std::unique_ptr<djinn::VcfReader> reader = djinn::VcfReader::FromFile(filename);
     if (reader.get() == nullptr) {
@@ -77,6 +56,8 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
     // uint32_t hc_lines = 0;
 
     // While there are bcf records available.
+    clockdef t1 = std::chrono::high_resolution_clock::now();
+    
     while (reader->Next()) {
         //const char* chrom = bcf_seqname(hr,line) ;
         //if (!p->chrom) p->chrom = strdup (chrom) ;
@@ -97,16 +78,19 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
         if (n_lines % n_blocks == 0 && n_lines != 0) {
             gtcomp.Compress(block);
             // block->Serialize(std::cout);
-            int ret = block->Serialize(output_data);
-            std::cerr << "Data=" << ret << std::endl;
+            // int ret = block->Serialize(output_data);
+            // std::cerr << "Data=" << ret << std::endl;
             // std::cout.write((char*)output_data, ret);
         }
-        clockdef t1 = std::chrono::high_resolution_clock::now();
+        
         gtcomp.Encode(reader->bcf1_, reader->header_);
-        clockdef t2 = std::chrono::high_resolution_clock::now();
-        auto time_span = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1);
-        if (reader->n_samples_ > 50000) 
-            std::cerr << "Line= " << n_lines << " pos=" << reader->bcf1_->pos+1 << " elapsed=" << time_span.count() << "ms" << std::endl;
+        
+        if (reader->n_samples_ > 50000 && (n_lines % 1000) == 0) {
+            clockdef t2 = std::chrono::high_resolution_clock::now();
+            auto time_span = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1);
+            std::cerr << "Line= " << n_lines << " pos=" << reader->bcf1_->pos+1 << " elapsed=" << time_span.count() << "ms (" << time_span.count()/1000 << "ms/it)" << std::endl;
+            t1 = std::chrono::high_resolution_clock::now();
+        }
 
         ++n_lines;
     }
@@ -121,21 +105,21 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
     delete block;
 
     // Debug
-    std::shared_ptr<djinn::GenotypeCompressorModelling> ins = std::static_pointer_cast<djinn::GenotypeCompressorModelling>(gtcomp.instance);
-    for (int i = 0; i < ins->djn_ctx.model_2mc.dirty_wah->models.size(); ++i) {
-        const int inner = ins->djn_ctx.model_2mc.dirty_wah->models[i]->n_symbols;
-        uint32_t obs = 0;
-        std::sort(ins->djn_ctx.model_2mc.dirty_wah->models[i]->F, &ins->djn_ctx.model_2mc.dirty_wah->models[i]->F[ins->djn_ctx.model_2mc.dirty_wah->models[i]->n_symbols]);
-        std::cout << i << "\t" <<  ins->djn_ctx.model_2mc.dirty_wah->models[i]->F[0].Freq;
-        for (int j = 1; j < inner; ++j) {
-            assert(ins->djn_ctx.model_2mc.dirty_wah->models[i]->F[j].Symbol  == j);
-            // if (ins->djn_ctx.model_2mc.dirty_wah->models[i]->F[j].Freq > 1) { 
-                std::cout << "\t" << ins->djn_ctx.model_2mc.dirty_wah->models[i]->F[j].Freq;
-                ++obs;
-            // }
-        }
-        std::cout << std::endl;
-    }
+    // std::shared_ptr<djinn::GenotypeCompressorModelling> ins = std::static_pointer_cast<djinn::GenotypeCompressorModelling>(gtcomp.instance);
+    // for (int i = 0; i < ins->djn_ctx.model_2mc.dirty_wah->models.size(); ++i) {
+    //     const int inner = ins->djn_ctx.model_2mc.dirty_wah->models[i]->n_symbols;
+    //     uint32_t obs = 0;
+    //     std::sort(ins->djn_ctx.model_2mc.dirty_wah->models[i]->F, &ins->djn_ctx.model_2mc.dirty_wah->models[i]->F[ins->djn_ctx.model_2mc.dirty_wah->models[i]->n_symbols]);
+    //     std::cout << i << "\t" <<  ins->djn_ctx.model_2mc.dirty_wah->models[i]->F[0].Freq;
+    //     for (int j = 1; j < inner; ++j) {
+    //         assert(ins->djn_ctx.model_2mc.dirty_wah->models[i]->F[j].Symbol  == j);
+    //         // if (ins->djn_ctx.model_2mc.dirty_wah->models[i]->F[j].Freq > 1) { 
+    //             std::cout << "\t" << ins->djn_ctx.model_2mc.dirty_wah->models[i]->F[j].Freq;
+    //             ++obs;
+    //         // }
+    //     }
+    //     std::cout << std::endl;
+    // }
 
     return n_lines;
 }

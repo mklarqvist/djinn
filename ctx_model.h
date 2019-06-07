@@ -115,11 +115,11 @@ public:
     int EncodeWahRLE(uint64_t ref, uint32_t len, djinn_ctx_model_t* model);
     int EncodeWahRLE_nm(uint64_t ref, uint32_t len, djinn_ctx_model_t* model);
     
-    int DecodeNext(uint8_t* data);
+    int DecodeNext(uint8_t* data, size_t& len);
     // int DecodeNextRaw(uint8_t* data);
 
-    int DecodeRaw(uint8_t* data);
-    int DecodeRaw_nm(uint8_t* data);
+    int DecodeRaw(uint8_t* data, size_t& len);
+    int DecodeRaw_nm(uint8_t* data, size_t& len);
     int DecodeWahRLE(uint64_t& ref, uint32_t& len, djinn_ctx_model_t* model);
     int DecodeWahRLE_nm(uint64_t& ref, uint32_t& len, djinn_ctx_model_t* model);
 

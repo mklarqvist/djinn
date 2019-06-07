@@ -37,7 +37,7 @@ int GenotypeCompressor::Encode(bcf1_t* bcf, const bcf_hdr_t* hdr) {
     const bcf_fmt_t* fmt = bcf_get_fmt(hdr, bcf, "GT");
     if (fmt == NULL) return 0;
     if (fmt->p_len / n_samples != 2) {
-        std::cerr << "input is not divisible by 2" << std::endl;
+        std::cerr << "input is not divisible by 2: " << fmt->p_len << "/" << n_samples << std::endl;
         return 0;
     }
 
@@ -576,12 +576,12 @@ GenotypeCompressorRLEBitmap::GenotypeCompressorRLEBitmap(int64_t n_s) : Genotype
         
     for (int i = 0; i < 6; ++i) n_variants[i] = 0;
     
-    base_pbwt[0].Initiate(n_s, 2);
+    base_pbwt[0].Initiate(2*n_s, 2);
     base_pbwt[1].Initiate(n_s, 2);
-    base_pbwt[2].Initiate(n_s, 4);
+    base_pbwt[2].Initiate(2*n_s, 4);
     base_pbwt[3].Initiate(n_s, 4);
 
-    complex_pbwt[0].Initiate(n_s, 16);
+    complex_pbwt[0].Initiate(2*n_s, 16);
     complex_pbwt[1].Initiate(n_s, 16);
 }
 
@@ -651,8 +651,8 @@ int GenotypeCompressorRLEBitmap::Encode2N2MC(uint8_t* data, const int32_t n_data
 
     if (permute_pbwt) {
         // Update diploid, biallelic, no-missing PBWT for haplotype 1 and 2.
-        base_pbwt[0].UpdateBcf(&data[0], 2);
-        base_pbwt[1].UpdateBcf(&data[1], 2);
+        base_pbwt[0].UpdateBcf(&data[0], 1);
+        // base_pbwt[1].UpdateBcf(&data[1], 2);
 
         EncodeRLEBitmap2N2MC(0);
     } else {
@@ -680,11 +680,11 @@ int GenotypeCompressorRLEBitmap::Encode2N2MC(uint8_t* data, const int32_t n_data
     buf_wah_before = buf_wah[1].len;
 #endif
 
-    if (permute_pbwt) {
-        EncodeRLEBitmap2N2MC(1);
-    } else {
-        EncodeRLEBitmap2N2MC(1, &data[1], 2);
-    }
+    // if (permute_pbwt) {
+    //     EncodeRLEBitmap2N2MC(1);
+    // } else {
+    //     EncodeRLEBitmap2N2MC(1, &data[1], 2);
+    // }
 
 #if DEBUG_WAH // Debug RLE-bitmap
     // Spawn copy of decompressor for RLE bitmaps.
@@ -728,8 +728,8 @@ int GenotypeCompressorRLEBitmap::Encode2N2MM(uint8_t* data, const int32_t n_data
 
     if (permute_pbwt) {
         // Update diploid, biallelic, no-missing PBWT for haplotype 1 and 2.
-        base_pbwt[2].UpdateBcf(&data[0], 2);
-        base_pbwt[3].UpdateBcf(&data[1], 2);
+        base_pbwt[2].UpdateBcf(&data[0], 1);
+        // base_pbwt[3].UpdateBcf(&data[1], 2);
 
         int ret1 = EncodeRLEBitmap2N2MM(2);
     } else {
@@ -758,11 +758,11 @@ int GenotypeCompressorRLEBitmap::Encode2N2MM(uint8_t* data, const int32_t n_data
     buf_wah_before = buf_wah[3].len;
 #endif
     
-    if (permute_pbwt) {
-        int ret2 = EncodeRLEBitmap2N2MM(3);
-    } else {
-        int ret2 = EncodeRLEBitmap2N2MM(3, &data[1], 2);
-    }
+    // if (permute_pbwt) {
+    //     int ret2 = EncodeRLEBitmap2N2MM(3);
+    // } else {
+    //     int ret2 = EncodeRLEBitmap2N2MM(3, &data[1], 2);
+    // }
 
 #if DEBUG_WAH // Debug RLE-bitmap
     // Spawn copy of decompressor for RLE bitmaps.
@@ -822,8 +822,8 @@ int GenotypeCompressorRLEBitmap::Encode2NXM(uint8_t* data, const int32_t n_data,
 #endif
 
     if (permute_pbwt) {
-        complex_pbwt[0].UpdateBcfGeneral(&data[0], 2);
-        complex_pbwt[1].UpdateBcfGeneral(&data[1], 2);
+        complex_pbwt[0].UpdateBcfGeneral(&data[0], 1);
+        // complex_pbwt[1].UpdateBcfGeneral(&data[1], 2);
         
         EncodeRLEBitmap2NXM(0);
     } else {
@@ -852,11 +852,11 @@ int GenotypeCompressorRLEBitmap::Encode2NXM(uint8_t* data, const int32_t n_data,
     buf_wah_before = buf_wah[5].len;
 #endif
 
-    if (permute_pbwt) {
-        EncodeRLEBitmap2NXM(1);
-    } else {
-        EncodeRLEBitmap2NXM(1, &data[1], 2);
-    }
+    // if (permute_pbwt) {
+    //     EncodeRLEBitmap2NXM(1);
+    // } else {
+    //     EncodeRLEBitmap2NXM(1, &data[1], 2);
+    // }
 
 #if DEBUG_WAH // Debug RLE-bitmap
     // Spawn copy of decompressor for RLE bitmaps.
@@ -971,7 +971,6 @@ int GenotypeCompressorRLEBitmap::Compress(djinn_block_t*& block) {
     complex_pbwt[0].Reset();
     complex_pbwt[1].Reset();
 
-    processed_lines_local = 0;
     buf_raw.reset();
     for (int i = 0; i < 6; ++i) n_variants[i] = 0;
 
@@ -987,9 +986,11 @@ int GenotypeCompressorRLEBitmap::Compress(djinn_block_t*& block) {
     
     // Debug compression:
 #if DEBUG_SIZE
-    std::cerr << "[PROGRESS ZSTD] " << bytes_in << "->" << bytes_out_zstd1 << " (" << (double)bytes_in/bytes_out_zstd1 << "-fold ubcf, " << (double)bytes_in_vcf/bytes_out_zstd1 << "-fold vcf)" << std::endl;
-    std::cerr << "[PROGRESS LZ4] "  << bytes_in << "->" << bytes_out_lz4 << " (" << (double)bytes_in/bytes_out_lz4 << "-fold ubcf, " << (double)bytes_in_vcf/bytes_out_lz4 << "-fold vcf)" << std::endl;
+    std::cerr << "[PROGRESS ZSTD] Variants=" << processed_lines << "," << processed_lines_local << ": " << bytes_in << "->" << bytes_out_zstd1 << " (" << (double)bytes_in/bytes_out_zstd1 << "-fold ubcf, " << (double)bytes_in_vcf/bytes_out_zstd1 << "-fold vcf)" << std::endl;
+    std::cerr << "[PROGRESS LZ4]  Variants=" << processed_lines << "," << processed_lines_local << ": " << bytes_in << "->" << bytes_out_lz4 << " (" << (double)bytes_in/bytes_out_lz4 << "-fold ubcf, " << (double)bytes_in_vcf/bytes_out_lz4 << "-fold vcf)" << std::endl;
 #endif
+    processed_lines_local = 0;
+
     return oblock->size();
 }
 
@@ -1012,7 +1013,7 @@ int GenotypeCompressorRLEBitmap::EncodeRLEBitmap2N2MC(const int target) {
     uint32_t observed_alts = 0;
     uint32_t observed_length = 0;
 
-    for (int i = 1; i < n_samples; ++i) {
+    for (int i = 1; i < 2*n_samples; ++i) {
         if (prev[i] != ref || rle_len == 16383) { // 2^14-1
             end_rle = i;
             ++n_objects;
@@ -1023,11 +1024,11 @@ int GenotypeCompressorRLEBitmap::EncodeRLEBitmap2N2MC(const int target) {
                 // Increment position
                 i += 31 - (end_rle - start_rle);
                 // Make sure the end position is within range.
-                end_rle = start_rle + 31 < n_samples ? start_rle + 31 : n_samples;
+                end_rle = start_rle + 31 < 2*n_samples ? start_rle + 31 : 2*n_samples;
                 // Update observed path.
-                observed_length += start_rle + 31 < n_samples ? 31 : n_samples - start_rle;
+                observed_length += start_rle + 31 < 2*n_samples ? 31 : 2*n_samples - start_rle;
                 // Assertion.
-                assert(end_rle <= n_samples);
+                assert(end_rle <= 2*n_samples);
                 
                 // Construct 32-bit bitmap
                 uint32_t bitmap = 0;
@@ -1049,7 +1050,7 @@ int GenotypeCompressorRLEBitmap::EncodeRLEBitmap2N2MC(const int target) {
                 ref = prev[i];
                 // Set run-length. If this is the final object then set to 0
                 // for downstream filter.
-                rle_len = (end_rle == n_samples) ? 0 : 1;
+                rle_len = (end_rle == 2*n_samples) ? 0 : 1;
                 // Update cost.
                 rle_cost += sizeof(uint32_t);
                 continue;
@@ -1099,7 +1100,7 @@ int GenotypeCompressorRLEBitmap::EncodeRLEBitmap2N2MC(const int target) {
 
     // Ascertain correctness:
     assert(observed_alts == base_pbwt[target].n_queue[1]);
-    assert(observed_length == n_samples);
+    assert(observed_length == 2*n_samples);
 
     // ++gt_width[n_objects];
 
@@ -1124,7 +1125,7 @@ int GenotypeCompressorRLEBitmap::EncodeRLEBitmap2N2MC(const int target, const ui
     uint32_t observed_alts = 0;
     uint32_t observed_length = 0;
 
-    for (int i = 1; i < n_samples; ++i) {
+    for (int i = 1; i < 2*n_samples; ++i) {
         if (BCF_UNPACK_GENOTYPE(data[i*stride]) != ref || rle_len == 16383) { // 2^14-1
             end_rle = i;
             ++n_objects;
@@ -1135,11 +1136,11 @@ int GenotypeCompressorRLEBitmap::EncodeRLEBitmap2N2MC(const int target, const ui
                 // Increment position
                 i += 31 - (end_rle - start_rle);
                 // Make sure the end position is within range.
-                end_rle = start_rle + 31 < n_samples ? start_rle + 31 : n_samples;
+                end_rle = start_rle + 31 < 2*n_samples ? start_rle + 31 : 2*n_samples;
                 // Update observed path.
-                observed_length += start_rle + 31 < n_samples ? 31 : n_samples - start_rle;
+                observed_length += start_rle + 31 < 2*n_samples ? 31 : 2*n_samples - start_rle;
                 // Assertion.
-                assert(end_rle <= n_samples);
+                assert(end_rle <= 2*n_samples);
                 
                 // Construct 32-bit bitmap
                 uint32_t bitmap = 0;
@@ -1161,7 +1162,7 @@ int GenotypeCompressorRLEBitmap::EncodeRLEBitmap2N2MC(const int target, const ui
                 ref = BCF_UNPACK_GENOTYPE(data[i*stride]);
                 // Set run-length. If this is the final object then set to 0
                 // for downstream filter.
-                rle_len = (end_rle == n_samples) ? 0 : 1;
+                rle_len = (end_rle == 2*n_samples) ? 0 : 1;
                 // Update cost.
                 rle_cost += sizeof(uint32_t);
                 continue;
@@ -1210,7 +1211,7 @@ int GenotypeCompressorRLEBitmap::EncodeRLEBitmap2N2MC(const int target, const ui
     observed_alts += (ref == 1) * rle_len;
 
     // Ascertain correctness:
-    assert(observed_length == n_samples);
+    assert(observed_length == 2*n_samples);
 
     // ++gt_width[n_objects];
 
@@ -1236,7 +1237,7 @@ int GenotypeCompressorRLEBitmap::EncodeRLEBitmap2N2MM(const int target) {
     // uint32_t observed_alts = 0;
     uint32_t observed_length = 0;
 
-    for (int i = 1; i < n_samples; ++i) {
+    for (int i = 1; i < 2*n_samples; ++i) {
         if (prev[i] != ref || rle_len == 8191) { // 2^13-1
             end_rle = i;
             ++n_objects;
@@ -1247,11 +1248,11 @@ int GenotypeCompressorRLEBitmap::EncodeRLEBitmap2N2MM(const int target) {
                 // Increment position
                 i += 15 - (end_rle - start_rle);
                 // Make sure the end position is within range.
-                end_rle = start_rle + 15 < n_samples ? start_rle + 15 : n_samples;
+                end_rle = start_rle + 15 < 2*n_samples ? start_rle + 15 : 2*n_samples;
                 // Update observed path.
-                observed_length += start_rle + 15 < n_samples ? 15 : n_samples - start_rle;
+                observed_length += start_rle + 15 < 2*n_samples ? 15 : 2*n_samples - start_rle;
                 // Assertion.
-                assert(end_rle <= n_samples);
+                assert(end_rle <= 2*n_samples);
                 
                 // Construct 32-bit bitmap
                 uint32_t bitmap = 0;
@@ -1279,7 +1280,7 @@ int GenotypeCompressorRLEBitmap::EncodeRLEBitmap2N2MM(const int target) {
                 ref = prev[i];
                 // Set run-length. If this is the final object then set to 0
                 // for downstream filter.
-                rle_len = (end_rle == n_samples) ? 0 : 1;
+                rle_len = (end_rle == 2*n_samples) ? 0 : 1;
                 // Update cost.
                 rle_cost += sizeof(uint32_t);
                 continue;
@@ -1329,7 +1330,7 @@ int GenotypeCompressorRLEBitmap::EncodeRLEBitmap2N2MM(const int target) {
 
     // Ascertain correctness:
     // assert(observed_alts == base_pbwt[target].n_queue[1]);
-    assert(observed_length == n_samples);
+    assert(observed_length == 2*n_samples);
 
     // ++gt_width[n_objects];
 
@@ -1354,7 +1355,7 @@ int GenotypeCompressorRLEBitmap::EncodeRLEBitmap2N2MM(const int target, const ui
     // uint32_t observed_alts = 0;
     uint32_t observed_length = 0;
 
-    for (int i = 1; i < n_samples; ++i) {
+    for (int i = 1; i < 2*n_samples; ++i) {
         if (BCF_UNPACK_GENOTYPE(data[i*stride]) != ref || rle_len == 8191) { // 2^13-1
             end_rle = i;
             ++n_objects;
@@ -1365,11 +1366,11 @@ int GenotypeCompressorRLEBitmap::EncodeRLEBitmap2N2MM(const int target, const ui
                 // Increment position
                 i += 15 - (end_rle - start_rle);
                 // Make sure the end position is within range.
-                end_rle = start_rle + 15 < n_samples ? start_rle + 15 : n_samples;
+                end_rle = start_rle + 15 < 2*n_samples ? start_rle + 15 : 2*n_samples;
                 // Update observed path.
-                observed_length += start_rle + 15 < n_samples ? 15 : n_samples - start_rle;
+                observed_length += start_rle + 15 < 2*n_samples ? 15 : 2*n_samples - start_rle;
                 // Assertion.
-                assert(end_rle <= n_samples);
+                assert(end_rle <= 2*n_samples);
                 
                 // Construct 32-bit bitmap
                 uint32_t bitmap = 0;
@@ -1397,7 +1398,7 @@ int GenotypeCompressorRLEBitmap::EncodeRLEBitmap2N2MM(const int target, const ui
                 ref = BCF_UNPACK_GENOTYPE(data[i*stride]);
                 // Set run-length. If this is the final object then set to 0
                 // for downstream filter.
-                rle_len = (end_rle == n_samples) ? 0 : 1;
+                rle_len = (end_rle == 2*n_samples) ? 0 : 1;
                 // Update cost.
                 rle_cost += sizeof(uint32_t);
                 continue;
@@ -1447,7 +1448,7 @@ int GenotypeCompressorRLEBitmap::EncodeRLEBitmap2N2MM(const int target, const ui
 
     // Ascertain correctness:
     // assert(observed_alts == base_pbwt[target].n_queue[1]);
-    assert(observed_length == n_samples);
+    assert(observed_length == 2*n_samples);
 
     // ++gt_width[n_objects];
 
@@ -1473,7 +1474,7 @@ int GenotypeCompressorRLEBitmap::EncodeRLEBitmap2NXM(const int target) {
     uint32_t observed_alts = 0;
     uint32_t observed_length = 0;
 
-    for (int i = 1; i < n_samples; ++i) {
+    for (int i = 1; i < 2*n_samples; ++i) {
         if (prev[i] != ref || rle_len == 134217727) { // 2^27-1
             end_rle = i;
             ++n_objects;
@@ -1484,11 +1485,11 @@ int GenotypeCompressorRLEBitmap::EncodeRLEBitmap2NXM(const int target) {
                 // Increment position
                 i += 15 - (end_rle - start_rle);
                 // Make sure the end position is within range.
-                end_rle = start_rle + 15 < n_samples ? start_rle + 15 : n_samples;
+                end_rle = start_rle + 15 < 2*n_samples ? start_rle + 15 : 2*n_samples;
                 // Update observed path.
-                observed_length += start_rle + 15 < n_samples ? 15 : n_samples - start_rle;
+                observed_length += start_rle + 15 < 2*n_samples ? 15 : 2*n_samples - start_rle;
                 // Assertion.
-                assert(end_rle <= n_samples);
+                assert(end_rle <= 2*n_samples);
                 
                 // Construct 32-bit bitmap
                 uint64_t bitmap = 0;
@@ -1516,7 +1517,7 @@ int GenotypeCompressorRLEBitmap::EncodeRLEBitmap2NXM(const int target) {
                 ref = prev[i];
                 // Set run-length. If this is the final object then set to 0
                 // for downstream filter.
-                rle_len = (end_rle == n_samples) ? 0 : 1;
+                rle_len = (end_rle == 2*n_samples) ? 0 : 1;
                 // Update cost.
                 rle_cost += sizeof(uint64_t);
                 continue;
@@ -1567,7 +1568,7 @@ int GenotypeCompressorRLEBitmap::EncodeRLEBitmap2NXM(const int target) {
 
     // Ascertain correctness:
     // assert(observed_alts == complex_pbwt[target].n_queue[1]);
-    assert(observed_length == n_samples);
+    assert(observed_length == 2*n_samples);
 
     // ++gt_width[n_objects];
 
@@ -1592,7 +1593,7 @@ int GenotypeCompressorRLEBitmap::EncodeRLEBitmap2NXM(const int target, const uin
     uint32_t observed_alts = 0;
     uint32_t observed_length = 0;
 
-    for (int i = 1; i < n_samples; ++i) {
+    for (int i = 1; i < 2*n_samples; ++i) {
         if (BCF_UNPACK_GENOTYPE_GENERAL(data[i*stride]) != ref || rle_len == 134217727) { // 2^27-1
             end_rle = i;
             ++n_objects;
@@ -1603,11 +1604,11 @@ int GenotypeCompressorRLEBitmap::EncodeRLEBitmap2NXM(const int target, const uin
                 // Increment position
                 i += 15 - (end_rle - start_rle);
                 // Make sure the end position is within range.
-                end_rle = start_rle + 15 < n_samples ? start_rle + 15 : n_samples;
+                end_rle = start_rle + 15 < 2*n_samples ? start_rle + 15 : 2*n_samples;
                 // Update observed path.
-                observed_length += start_rle + 15 < n_samples ? 15 : n_samples - start_rle;
+                observed_length += start_rle + 15 < 2*n_samples ? 15 : 2*n_samples - start_rle;
                 // Assertion.
-                assert(end_rle <= n_samples);
+                assert(end_rle <= 2*n_samples);
                 
                 // Construct 32-bit bitmap
                 uint64_t bitmap = 0;
@@ -1635,7 +1636,7 @@ int GenotypeCompressorRLEBitmap::EncodeRLEBitmap2NXM(const int target, const uin
                 ref = BCF_UNPACK_GENOTYPE_GENERAL(data[i*stride]);
                 // Set run-length. If this is the final object then set to 0
                 // for downstream filter.
-                rle_len = (end_rle == n_samples) ? 0 : 1;
+                rle_len = (end_rle == 2*n_samples) ? 0 : 1;
                 // Update cost.
                 rle_cost += sizeof(uint64_t);
                 continue;
@@ -1686,7 +1687,7 @@ int GenotypeCompressorRLEBitmap::EncodeRLEBitmap2NXM(const int target, const uin
 
     // Ascertain correctness:
     // assert(observed_alts == complex_pbwt[target].n_queue[1]);
-    assert(observed_length == n_samples);
+    assert(observed_length == 2*n_samples);
 
     // ++gt_width[n_objects];
 
