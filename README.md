@@ -27,27 +27,30 @@ This is a collaborative effort between Marcus D. R. Klarqvist ([@klarqvist](http
 
 ## Performance evaluation
 
-1kgp3-chr20-hg38 (n = 2548, m = 1706442)
+1kgp3-chr20-hg38 (n = 2,548, m = 1,706,442)
 
-| Approach                 | Output (MB) | Compression ratio (VCF) | Import time | Output VCF (time) | Output BCF (time) |
-|--------------------------|-------------|-------------------------|-------------|-------------------|-------------------|
-| hPBWT + RLE-H + LZ4-HC-9 | 32.4        | 538.36                  | 2m12.883s   | 23.905s           | 22.174s           |
-| hPBWT + RLE-H + ZSTD-19  | 27.79       | 627.67                  | 2m16.400s   | 23.838s           | 22.571s           |
-| hPBWT + arithmetic       | 18.49       | 943.37                  | 1m57.831s   | 26.179s           | 25.472s           |
-| WAH + LZ4-HC-9           | 60.36       | 288.98                  | 1m6.636s    | 10.080s           | 10.176s           |
-| WAH + ZSTD-19            | 48.48       | 359.8                   | 1m7.568s    | 10.381s           | 10.152s           |
-| arithmetic only          | 80.57       | 216.49                  | 1m57.925s   | 11.852s           | 11.021s           |
-| BGT*                     | 64.47       | 270.56                  | 2m20.834s   | CORRUPTED         | CORRUPTED         |
-| GTShark^                 | 12.6        | 1384.36                 | 2m23.363s   | 7m55.707s         | 2m19.970s         |
-| GQT                      | 233.7       | 74.64                   | 8m13.750s   | N/A               | N/A               |
-| BCF                      | 196.88      | 88.6                    | -           | 2m22.953s         | 22.482s (uBCF)    |
-| uBCF                     | 8683.26     | 2.01                    | -           | 2m4.911s          | 2m17.367s         |
-| VCF.gz**                 | 240.23      | 72.61                   | -           | 1m10.408s (zcat)  | 7m26.180s         |
-| VCF**                    | 17442.97    | 1                       | -           | -                 | 6m59.067s         |
+| Approach                                | Output (MB) | Compression ratio (VCF) | Import time | Output VCF (time) | Output BCF (time) |
+|-----------------------------------------|-------------|-------------------------|-------------|-------------------|-------------------|
+| hPBWT + EWAH + LZ4-HC-9                 | 25.36       | 687.81                  | 1m47.015s   | 23.905s           | 22.174s           |
+| hPBWT + EWAH + ZSTD-19                  | 22.12       | 788.56                  | 1m52.906s   | 23.838s           | 22.571s           |
+| hPBWT + arithmetic                      | 18.49       | 943.37                  | 1m57.831s   | 26.179s           | 25.472s           |
+| hpPBWT + arithmetic + no-random-access† | 14.71       | 1185.79                 | 1m42.815s   |                   |                   |
+| EWAH + LZ4-HC-9                         | 60.36       | 288.98                  | 1m6.636s    | 10.080s           | 10.176s           |
+| EWAH + ZSTD-19                          | 48.48       | 359.8                   | 1m7.568s    | 10.381s           | 10.152s           |
+| arithmetic only                         | 80.57       | 216.49                  | 1m57.925s   | 11.852s           | 11.021s           |
+| PBWT                                    | 29.81       | 585.14                  | 2m4.855s    | 2m51.207s         | 1m20.485s         |
+| BGT*                                    | 64.47       | 270.56                  | 2m20.834s   | CORRUPTED         | CORRUPTED         |
+| GTShark                                 | 12.6        | 1384.36                 | 2m23.363s   | 7m55.707s         | 2m19.970s         |
+| GQT                                     | 233.7       | 74.64                   | 8m13.750s   | N/A               | N/A               |
+| tsinfer‡                                | 184.89      | 94.34                   | 298m51.235s | N/A               | N/A               |
+| BCF                                     | 196.88      | 88.6                    | -           | 2m22.953s         | 22.482s (uBCF)    |
+| uBCF                                    | 8683.26     | 2.01                    | -           | 2m4.911s          | 2m17.367s         |
+| VCF.gz**                                | 240.23      | 72.61                   | -           | 1m10.408s (zcat)  | 7m26.180s         |
+| VCF**                                   | 17442.97    | 1                       | -           | -                 | 6m59.067s         |
 
 \* Listing size of the genotype component (`pbf` file); ^ listing size of the genotype component only (`_gt` file).
 
-HRC-chr11 (n = 32470, m = 1936990). 
+HRC-chr11 (n = 32,470, m = 1,936,990). 
 
 | Approach                 | Output (MB) | Compression ratio (VCF) | Import time | Output VCF (time)       | Output BCF (time) |
 |--------------------------|-------------|-------------------------|-------------|-------------------------|-------------------|
