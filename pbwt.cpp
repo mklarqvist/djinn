@@ -93,9 +93,9 @@ int PBWT::UpdateBcf(const uint8_t* arr, uint32_t stride) {
 
     for (int i = 0; i < n_samples; ++i) {
         const uint8_t& gt = BCF_UNPACK_GENOTYPE(arr[ppa[i] * stride]);
-        if (gt >= n_symbols) {
-            std::cerr << "error=" << (int)arr[ppa[i]*stride] << "->" << (int)gt << ">=" << n_symbols << std::endl;
-        }
+        // if (gt >= n_symbols) {
+        //     std::cerr << "error=" << (int)arr[ppa[i]*stride] << "->" << (int)gt << ">=" << n_symbols << std::endl;
+        // }
         assert(gt < n_symbols);
         queue[gt][n_queue[gt]++] = ppa[i];
         prev[i] = gt;

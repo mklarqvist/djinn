@@ -18,7 +18,7 @@ djinn_ctx_model_t::~djinn_ctx_model_t() {
 void djinn_ctx_model_t::Initiate2mc() {
     range_coder = std::make_shared<RangeCoder>();
     mref = std::make_shared<GeneralModel>(2, 512, 18, 32, range_coder);
-    mlog_rle = std::make_shared<GeneralModel>(32, 4096, 18, 16, range_coder);  // 1 bit ref, log2(32) = 5 bit -> 2^12 = 1024
+    mlog_rle = std::make_shared<GeneralModel>(16, 32, 18, 16, range_coder);  // 2^32 max -> log2() = 5
     mrle = std::make_shared<GeneralModel>(256, 64, 18, 32, range_coder); // 1 bit ref, 5 bit alt
     mrle2_1 = std::make_shared<GeneralModel>(256, 64, 18, 8, range_coder);
     mrle2_2 = std::make_shared<GeneralModel>(256, 64, 18, 8, range_coder);
@@ -26,30 +26,14 @@ void djinn_ctx_model_t::Initiate2mc() {
     mrle4_2 = std::make_shared<GeneralModel>(256, 64, 18, 8, range_coder);
     mrle4_3 = std::make_shared<GeneralModel>(256, 64, 18, 8, range_coder);
     mrle4_4 = std::make_shared<GeneralModel>(256, 64, 18, 8, range_coder);
-    dirty_wah = std::make_shared<GeneralModel>(256, 256, 18, 32, range_coder);
+    dirty_wah = std::make_shared<GeneralModel>(256, 256, 18, 16, range_coder);
     mtype = std::make_shared<GeneralModel>(2, 512, 18, 1, range_coder);
-
-    // for (int i = 0; i < 1500; ++i) {
-    //     // for (int j = 0; j < 256; ++j) {
-    //         dirty_wah->models[i]->total_frequency += 256;
-    //         dirty_wah->models[i]->F[256].Freq += 256;
-    //     // }
-    // }
-    // for (int i = 62000; i < 65536; ++i) {
-    //     dirty_wah->models[i]->total_frequency += 32;
-    //     dirty_wah->models[i]->F[255].Freq += 32;
-    // }
-
-    for (int i = 0; i < 256; ++i) {
-            dirty_wah->models[i]->total_frequency += 32;
-            dirty_wah->models[i]->F[1].Freq += 32;
-    }
 }
 
 void djinn_ctx_model_t::InitiateNm() {
     range_coder = std::make_shared<RangeCoder>();
     mref = std::make_shared<GeneralModel>(2, 512, 18, 32, range_coder);
-    mlog_rle = std::make_shared<GeneralModel>(32, 512, 18, 16, range_coder);  // 4 bit ref, log2(32) = 5 bit -> 2^9 = 512
+    mlog_rle = std::make_shared<GeneralModel>(64, 32, 18, 16, range_coder);  // 4 bit ref, log2(32) = 5 bit -> 2^9 = 512
     mrle = std::make_shared<GeneralModel>(256, 512, 24, 1, range_coder); // 4 bits ref + 5 bits log2(run) -> 2^9
     mrle2_1 = std::make_shared<GeneralModel>(256, 512, range_coder);
     mrle2_2 = std::make_shared<GeneralModel>(256, 512, range_coder);
@@ -151,7 +135,7 @@ void djinn_ctx_model::SetSamples(int64_t n_s) {
     n_samples_wah = (n_wah * 64) / 4;
 } 
 
-int djinn_ctx_model::EncodeBcf(uint8_t* data, uint8_t alt_alleles) {
+int djinn_ctx_model::EncodeBcf(uint8_t* data, uint8_t alt_alleles, const bool permute) {
     if (n_samples == 0) return -1;
     if (data == nullptr) return -2;
 
@@ -167,7 +151,7 @@ int djinn_ctx_model::EncodeBcf(uint8_t* data, uint8_t alt_alleles) {
     // for (int i = 0; i < 256; ++i) {
     //     if (hist_alts[i]) std::cerr << i << ":" << hist_alts[i] << ",";
     // }
-    // std::cerr << " data2m=" << model_2mc.range_coder->OutSize() << " dataNm=" << model_nm.range_coder->OutSize() << std::endl;
+    // std::cerr << " data2m=" << model_2mc.range_coder->OutSize() << " dataNm=" << model_nm.range_coder->OutSize() << " permute=" << permute << std::endl;
 
     // Biallelic, no missing, and no special EOV symbols.
     if (alt_alleles <= 2 && hist_alts[14] == 0 && hist_alts[15] == 0) {
@@ -331,37 +315,42 @@ int djinn_ctx_model::DecodeRaw_nm(uint8_t* data, size_t& len) {
 int djinn_ctx_model::EncodeWah(uint64_t* wah, uint32_t len) { // input WAH-encoded data
     if (wah == nullptr) return -1;
 
+    // std::cerr << len << "->" << len*64 << " convert to " << len*2 << "->" << len*2*32 << std::endl;
+    len *= 2;
     ++model_2mc.n_variants;
+    uint32_t* re = (uint32_t*)wah;
 
-    uint64_t wah_ref = wah[0];
-    uint64_t wah_run = 1;
+    // uint64_t wah_ref = wah[0];
+    // uint64_t wah_run = 1;
+    uint32_t wah_ref = re[0];
+    uint32_t wah_run = 1;
 
     for (int i = 1; i < len; ++i) {
-        if ((wah_ref != 0 && wah_ref != std::numeric_limits<uint64_t>::max()) || (wah_ref != wah[i])) {
-            if ((wah_ref != 0 && wah_ref != std::numeric_limits<uint64_t>::max()) || wah_run == 1) {
+        if ((wah_ref != 0 && wah_ref != std::numeric_limits<uint32_t>::max()) || (wah_ref != re[i])) {
+            if ((wah_ref != 0 && wah_ref != std::numeric_limits<uint32_t>::max()) || wah_run == 1) {
                 model_2mc.mtype->EncodeSymbol(0);
                 
-                // std::cerr << "Bitmap=" << std::bitset<64>(wah_ref) << std::endl;
-                for (int i = 0; i < 8; ++i) {
+                // std::cerr << "Bitmap=" << std::bitset<32>(wah_ref) << ": " << __builtin_popcount(wah_ref) << std::endl;
+                for (int i = 0; i < 4; ++i) {
                     model_2mc.dirty_wah->EncodeSymbol(wah_ref & 255);
-                    wah_ref >>= 8;
+                    wah_ref >>= 4;
                 }
             } else {
                 model_2mc.mtype->EncodeSymbol(1);
                 EncodeWahRLE(wah_ref, wah_run, &model_2mc);
             }
             wah_run = 0;
-            wah_ref = wah[i];
+            wah_ref = re[i];
         }
         ++wah_run;
     }
 
     if (wah_run) {
-        if ((wah_ref != 0 && wah_ref != std::numeric_limits<uint64_t>::max()) || wah_run == 1) {
+        if ((wah_ref != 0 && wah_ref != std::numeric_limits<uint32_t>::max()) || wah_run == 1) {
             model_2mc.mtype->EncodeSymbol(0);
             
-            // std::cerr << "Bitmap=" << std::bitset<64>(wah_ref) << std::endl;
-            for (int i = 0; i < 8; ++i) {
+            // std::cerr << "Bitmap=" << std::bitset<32>(wah_ref) << ": " << __builtin_popcount(wah_ref) << std::endl;
+            for (int i = 0; i < 4; ++i) {
                 model_2mc.dirty_wah->EncodeSymbol(wah_ref & 255);
                 wah_ref >>= 8;
             }
@@ -428,6 +417,9 @@ int djinn_ctx_model::EncodeWahNm(uint64_t* wah, uint32_t len) { // input WAH-enc
 }
 
 int djinn_ctx_model::EncodeWahRLE(uint64_t ref, uint32_t len, djinn_ctx_model_t* model) {
+    // Length cannot be 0 so remove 1
+    len -= 1;
+
     model->mref->EncodeSymbol(ref&1);
     uint32_t log_length = round_log2(len);
     model->mlog_rle->EncodeSymbol(log_length);
@@ -435,7 +427,7 @@ int djinn_ctx_model::EncodeWahRLE(uint64_t ref, uint32_t len, djinn_ctx_model_t*
     // std::cerr << "RLE=" << (ref&1) << ",len=" << len << ",log=" << log_length << std::endl;
 
     if (log_length < 2) {
-        std::cerr << "single=" << len << "," << (ref&1) << std::endl;
+        // std::cerr << "single=" << len << "," << (ref&1) << std::endl;
     }
     else if (log_length <= 8) {
         assert(len < 256);

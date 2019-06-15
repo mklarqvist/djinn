@@ -97,7 +97,8 @@ public:
     ~djinn_ctx_model();
 
     void SetSamples(int64_t n_s);
-    int EncodeBcf(uint8_t* data, uint8_t alt_alleles);
+
+    int EncodeBcf(uint8_t* data, uint8_t alt_alleles, const bool permute = true);
 
     void StartEncoding(bool use_pbwt, bool reset = false);
     size_t FinishEncoding();
@@ -114,10 +115,9 @@ public:
     int EncodeWahNm(uint64_t* wah, uint32_t len);
     int EncodeWahRLE(uint64_t ref, uint32_t len, djinn_ctx_model_t* model);
     int EncodeWahRLE_nm(uint64_t ref, uint32_t len, djinn_ctx_model_t* model);
-    
+
     int DecodeNext(uint8_t* data, size_t& len);
     // int DecodeNextRaw(uint8_t* data);
-
     int DecodeRaw(uint8_t* data, size_t& len);
     int DecodeRaw_nm(uint8_t* data, size_t& len);
     int DecodeWahRLE(uint64_t& ref, uint32_t& len, djinn_ctx_model_t* model);
@@ -135,8 +135,7 @@ public:
     uint32_t p_cap:31, p_free:1;
     uint32_t n_variants;
 
-    uint32_t hist_alts[256];
-    
+    uint32_t hist_alts[256];    
     std::shared_ptr<RangeCoder> range_coder;
     std::shared_ptr<GeneralModel> marchetype; // 0 for 2MC, 1 for 2M, 2 else
     djinn_ctx_model_t model_2mc;

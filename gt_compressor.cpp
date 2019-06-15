@@ -45,6 +45,20 @@ int GenotypeCompressor::Encode(bcf1_t* bcf, const bcf_hdr_t* hdr) {
     bytes_in += fmt->p_len;
     bytes_in_vcf += fmt->p_len * 2 - 1; // (char)(sep)(char)(tab)
 
+    bool permute = true;
+    if (bcf->n_allele > 2) {
+
+    } else {
+        if (strlen(bcf->d.allele[0]) != 1) {
+            // std::cerr << "not snv: " << bcf->d.allele[0] << std::endl;
+            permute = false;
+        }
+        if (strlen(bcf->d.allele[1]) != 1) {
+            // std::cerr << "not snv: " << bcf->d.allele[1] << std::endl;
+            permute = false;
+        }
+    }
+
     // if (bcf->n_allele < 16 && bcf->n_allele > 2) {
     //     for (int i = 0; i < bcf->n_allele; ++i) {
     //         std::cerr << bcf->d.allele[i] << ",";
@@ -53,10 +67,10 @@ int GenotypeCompressor::Encode(bcf1_t* bcf, const bcf_hdr_t* hdr) {
     // }
 
     // Todo: extend beyond 2N
-    return(Encode2N(fmt->p, fmt->p_len, bcf->n_allele));
+    return(Encode2N(fmt->p, fmt->p_len, bcf->n_allele, permute));
 }
 
-int GenotypeCompressor::Encode(uint8_t* data, const int32_t n_data, const int32_t ploidy, const int32_t n_alleles) {
+int GenotypeCompressor::Encode(uint8_t* data, const int32_t n_data, const int32_t ploidy, const int32_t n_alleles, const bool permute) {
     if (data == nullptr) return 0;
     if (n_data == 0) return 0;
     if (n_alleles <= 0) return 0;
@@ -69,7 +83,7 @@ int GenotypeCompressor::Encode(uint8_t* data, const int32_t n_data, const int32_
     bytes_in += n_data;
     bytes_in_vcf += n_data * 2 - 1;
 
-    return(Encode2N(data, n_data, n_alleles));
+    return(Encode2N(data, n_data, n_alleles, permute));
 }
 
 //
@@ -137,13 +151,13 @@ int GenotypeCompressorModelling::Encode2N(bcf1_t* bcf, const bcf_hdr_t* hdr) {
         return 0;
     }
 
-    if (bcf->n_allele == 2) return(Encode2N2M(fmt->p, fmt->p_len)); // biallelic
+    if (bcf->n_allele == 2) return(Encode2N2M(fmt->p, fmt->p_len, true)); // biallelic
     else if (bcf->n_allele < 14) {
 
         int replaced = RemapGenotypeEOV(fmt->p, fmt->p_len);
         if (replaced) {
             // std::cerr << "replaced: skipping " << replaced << std::endl;
-            return Encode2N2MM(fmt->p, fmt->p_len); // 2N2MM supports missing+EOV in RLE-bitmap mode.
+            return Encode2N2MM(fmt->p, fmt->p_len, true); // 2N2MM supports missing+EOV in RLE-bitmap mode.
         }
     }
     else {
@@ -159,9 +173,9 @@ int GenotypeCompressorModelling::Encode2N(bcf1_t* bcf, const bcf_hdr_t* hdr) {
     return 1;
 }
 
-int GenotypeCompressorModelling::Encode2N(uint8_t* data, const int32_t n_data, const int32_t n_alleles) {
-    if (n_alleles == 2) return(Encode2N2M(data, n_data)); // biallelic
-    else if (n_alleles < 14) return(Encode2NXM(data, n_data, n_alleles));  // #alleles < 14
+int GenotypeCompressorModelling::Encode2N(uint8_t* data, const int32_t n_data, const int32_t n_alleles, const bool permute) {
+    if (n_alleles == 2) return(Encode2N2M(data, n_data, permute)); // biallelic
+    else if (n_alleles < 14) return(Encode2NXM(data, n_data, n_alleles, permute));  // #alleles < 14
     else {
         // std::cerr << "alleles=" << n_alleles << std::endl;
         const uint8_t* gts = data;
@@ -176,12 +190,12 @@ int GenotypeCompressorModelling::Encode2N(uint8_t* data, const int32_t n_data, c
 }
 
 // Wrapper for 2N2M
-int GenotypeCompressorModelling::Encode2N2M(uint8_t* data, const int32_t n_data) {
+int GenotypeCompressorModelling::Encode2N2M(uint8_t* data, const int32_t n_data, const bool permute) {
     // Todo: assert genotypes are set for this variant.
     int replaced = RemapGenotypeEOV(data, n_data);
     if (replaced) {
         std::cerr << "replaced: divert to missing with " << replaced << std::endl;
-        return Encode2NXM(data ,n_data, 4); // todo: see if this is true
+        return Encode2NXM(data ,n_data, 4, permute); // todo: see if this is true
     }
 
     // for (int i = 0; i < 256; ++i) {
@@ -191,24 +205,24 @@ int GenotypeCompressorModelling::Encode2N2M(uint8_t* data, const int32_t n_data)
 
     if (alts[14] == 0 && alts[15] == 0) { // No missing values.
         // std::cerr << "divert 2N2MC" << std::endl;
-        return Encode2N2MC(data, n_data);
+        return Encode2N2MC(data, n_data, permute);
     } else { // Having missing values.
         // std::cerr << "using extended model" << std::endl;
         // std::cerr << "divert 2N2MM" << std::endl;
-        return Encode2N2MM(data, n_data);
+        return Encode2N2MM(data, n_data, permute);
     }
 
     return 1;
 }
 
 // 2N2M complete
-int GenotypeCompressorModelling::Encode2N2MC(uint8_t* data, const int32_t n_data) {
+int GenotypeCompressorModelling::Encode2N2MC(uint8_t* data, const int32_t n_data, const bool permute) {
 #if DEBUG_PBWT
     assert(debug_pbwt[0].UpdateDigestStride(&data[0], n_data, 2));
     assert(debug_pbwt[1].UpdateDigestStride(&data[1], n_data, 2));
 #endif
 
-    djn_ctx.EncodeBcf(data, 2);
+    djn_ctx.EncodeBcf(data, 2, permute);
 
     ++processed_lines_local;
     ++processed_lines;
@@ -217,13 +231,13 @@ int GenotypeCompressorModelling::Encode2N2MC(uint8_t* data, const int32_t n_data
 }
 
 // 2N2M with missing
-int GenotypeCompressorModelling::Encode2N2MM(uint8_t* data, const int32_t n_data) {
+int GenotypeCompressorModelling::Encode2N2MM(uint8_t* data, const int32_t n_data, const bool permute) {
 #if DEBUG_PBWT
     assert(debug_pbwt[2].UpdateDigestStride(&data[0], n_data, 2));
     assert(debug_pbwt[3].UpdateDigestStride(&data[1], n_data, 2));
 #endif
 
-    djn_ctx.EncodeBcf(data, 15);
+    djn_ctx.EncodeBcf(data, 15, permute);
 
     // std::cerr << "After Encode2N2MM: " << 15 << std::endl;
 
@@ -233,14 +247,14 @@ int GenotypeCompressorModelling::Encode2N2MM(uint8_t* data, const int32_t n_data
 }
 
 // 2N any M (up to 16)
-int GenotypeCompressorModelling::Encode2NXM(uint8_t* data, const int32_t n_data, const int32_t n_alleles) {
+int GenotypeCompressorModelling::Encode2NXM(uint8_t* data, const int32_t n_data, const int32_t n_alleles, const bool permute) {
 
 #if DEBUG_PBWT
     assert(debug_pbwt[4].UpdateDigestStride(&data[0], n_data, 2));
     assert(debug_pbwt[5].UpdateDigestStride(&data[1], n_data, 2));
 #endif
 
-    djn_ctx.EncodeBcf(data, n_alleles);
+    djn_ctx.EncodeBcf(data, n_alleles, permute);
 
     // std::cerr << "After Ecndoe2nXM: " << n_alleles << std::endl;
 
@@ -587,15 +601,15 @@ GenotypeCompressorRLEBitmap::GenotypeCompressorRLEBitmap(int64_t n_s) : Genotype
 
 GenotypeCompressorRLEBitmap::~GenotypeCompressorRLEBitmap() { }
 
-int GenotypeCompressorRLEBitmap::Encode2N(uint8_t* data, const int32_t n_data, const int32_t n_alleles) {
+int GenotypeCompressorRLEBitmap::Encode2N(uint8_t* data, const int32_t n_data, const int32_t n_alleles, const bool permute) {
     if (data == nullptr) return -1;
     if (n_data == 0) return -2;
     if (n_alleles == 0) return -3;
 
     // std::cerr << "n_alleles=" << n_alleles << std::endl;
 
-    if (n_alleles == 2) return(Encode2N2M(data, n_data)); // biallelic
-    else if (n_alleles < 14) return(Encode2NXM(data, n_data, n_alleles));  // alleles < 14 and 2 reserved for MISSING and EOV
+    if (n_alleles == 2) return(Encode2N2M(data, n_data, permute)); // biallelic
+    else if (n_alleles < 14) return(Encode2NXM(data, n_data, n_alleles, permute));  // alleles < 14 and 2 reserved for MISSING and EOV
     else {
         std::cerr << "raw alleles=" << n_alleles << std::endl;
         const uint8_t* gts = data;
@@ -610,14 +624,14 @@ int GenotypeCompressorRLEBitmap::Encode2N(uint8_t* data, const int32_t n_data, c
     return -4;
 }
 
-int GenotypeCompressorRLEBitmap::Encode2N2M(uint8_t* data, const int32_t n_data) {
+int GenotypeCompressorRLEBitmap::Encode2N2M(uint8_t* data, const int32_t n_data, const bool permute) {
     // std::cerr << "2N2M" << std::endl;
 
     // Todo: assert genotypes are set for this variant.
     int replaced = RemapGenotypeEOV(data, n_data);
     if (replaced) {
         // std::cerr << "replaced: skipping " << replaced << std::endl;
-        return Encode2N2MM(data, n_data); // 2N2MM supports missing+EOV in RLE-bitmap mode.
+        return Encode2N2MM(data, n_data, permute); // 2N2MM supports missing+EOV in RLE-bitmap mode.
     }
 
     // for (int i = 0; i < 256; ++i) {
@@ -626,16 +640,16 @@ int GenotypeCompressorRLEBitmap::Encode2N2M(uint8_t* data, const int32_t n_data)
     // std::cerr << std::endl;
 
     if (alts[15] == 0 && alts[14] == 0) { // No missing values and no EOV values
-        return Encode2N2MC(data, n_data);
+        return Encode2N2MC(data, n_data, permute);
     } else { // Having missing values.
         // std::cerr << "using extended model" << std::endl;
-        return Encode2N2MM(data, n_data);
+        return Encode2N2MM(data, n_data, permute);
     }
 
     return -1;
 }
 
-int GenotypeCompressorRLEBitmap::Encode2N2MC(uint8_t* data, const int32_t n_data) {
+int GenotypeCompressorRLEBitmap::Encode2N2MC(uint8_t* data, const int32_t n_data, const bool permute) {
     // std::cerr << "2N2MC" << std::endl;
 #if DEBUG_PBWT
     assert(debug_pbwt[0].UpdateDigestStride(&data[0], n_data, 2));
@@ -711,7 +725,7 @@ int GenotypeCompressorRLEBitmap::Encode2N2MC(uint8_t* data, const int32_t n_data
     return 1;
 }
 
-int GenotypeCompressorRLEBitmap::Encode2N2MM(uint8_t* data, const int32_t n_data) {
+int GenotypeCompressorRLEBitmap::Encode2N2MM(uint8_t* data, const int32_t n_data, const bool permute) {
 #if DEBUG_PBWT
     assert(debug_pbwt[2].UpdateDigestStride(&data[0], n_data, 2));
     assert(debug_pbwt[3].UpdateDigestStride(&data[1], n_data, 2));
@@ -791,7 +805,7 @@ int GenotypeCompressorRLEBitmap::Encode2N2MM(uint8_t* data, const int32_t n_data
     return 0;
 }
 
-int GenotypeCompressorRLEBitmap::Encode2NXM(uint8_t* data, const int32_t n_data, const int32_t n_alleles) { 
+int GenotypeCompressorRLEBitmap::Encode2NXM(uint8_t* data, const int32_t n_data, const int32_t n_alleles, const bool permute) { 
 #if DEBUG_PBWT
     assert(debug_pbwt[4].UpdateDigestStride(&data[0], n_data, 2));
     assert(debug_pbwt[5].UpdateDigestStride(&data[1], n_data, 2));

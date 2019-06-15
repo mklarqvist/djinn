@@ -198,15 +198,15 @@ public:
     void SetPermutePbwt(const bool yes) { permute_pbwt = yes; }
     
     // Encode data using literals.
-    virtual int Encode2N(uint8_t* data, const int32_t n_data, const int32_t n_alleles) =0;
-    virtual int Encode2N2M(uint8_t* data, const int32_t n_data) =0;
-    virtual int Encode2N2MC(uint8_t* data, const int32_t n_data) =0;
-    virtual int Encode2N2MM(uint8_t* data, const int32_t n_data) =0;
-    virtual int Encode2NXM(uint8_t* data, const int32_t n_data, const int32_t n_alleles) =0;
+    virtual int Encode2N(uint8_t* data, const int32_t n_data, const int32_t n_alleles, const bool permute) =0;
+    virtual int Encode2N2M(uint8_t* data, const int32_t n_data, const bool permute) =0;
+    virtual int Encode2N2MC(uint8_t* data, const int32_t n_data, const bool permute) =0;
+    virtual int Encode2N2MM(uint8_t* data, const int32_t n_data, const bool permute) =0;
+    virtual int Encode2NXM(uint8_t* data, const int32_t n_data, const int32_t n_alleles, const bool permute) =0;
 
     // Encode data using htslib.
     virtual int Encode(bcf1_t* bcf, const bcf_hdr_t* hdr);
-    virtual int Encode(uint8_t* data, const int32_t n_data, const int32_t ploidy, const int32_t n_alleles);
+    virtual int Encode(uint8_t* data, const int32_t n_data, const int32_t ploidy, const int32_t n_alleles, const bool permute);
     virtual int Encode2N(bcf1_t* bcf, const bcf_hdr_t* hdr) =0;
     
     //
@@ -251,15 +251,15 @@ public:
 private:
     // Diploid wrapper.
     int Encode2N(bcf1_t* bcf, const bcf_hdr_t* hdr) override;
-    int Encode2N(uint8_t* data, const int32_t n_data, const int32_t n_alleles) override;
-    int Encode2N2M(uint8_t* data, const int32_t n_data) override;
-    int Encode2N2MC(uint8_t* data, const int32_t n_data) override;
+    int Encode2N(uint8_t* data, const int32_t n_data, const int32_t n_alleles, const bool permute) override;
+    int Encode2N2M(uint8_t* data, const int32_t n_data, const bool permute) override;
+    int Encode2N2MC(uint8_t* data, const int32_t n_data, const bool permute) override;
 
     // 2N2M with missing
-    int Encode2N2MM(uint8_t* data, const int32_t n_data) override;
+    int Encode2N2MM(uint8_t* data, const int32_t n_data, const bool permute) override;
 
     // 2N any M (up to 16)
-    int Encode2NXM(uint8_t* data, const int32_t n_data, const int32_t n_alleles) override;
+    int Encode2NXM(uint8_t* data, const int32_t n_data, const int32_t n_alleles, const bool permute) override;
 
     int Compress(djinn_block_t*& block) override;
 
@@ -282,11 +282,11 @@ public:
     GenotypeCompressorRLEBitmap(int64_t n_s);
     ~GenotypeCompressorRLEBitmap();
 
-    int Encode2N(uint8_t* data, const int32_t n_data, const int32_t n_alleles) override;
-    int Encode2N2M(uint8_t* data, const int32_t n_data) override;
-    int Encode2N2MC(uint8_t* data, const int32_t n_data) override;
-    int Encode2N2MM(uint8_t* data, const int32_t n_data) override;
-    int Encode2NXM(uint8_t* data, const int32_t n_data, const int32_t n_alleles) override;
+    int Encode2N(uint8_t* data, const int32_t n_data, const int32_t n_alleles, const bool permute) override;
+    int Encode2N2M(uint8_t* data, const int32_t n_data, const bool permute) override;
+    int Encode2N2MC(uint8_t* data, const int32_t n_data, const bool permute) override;
+    int Encode2N2MM(uint8_t* data, const int32_t n_data, const bool permute) override;
+    int Encode2NXM(uint8_t* data, const int32_t n_data, const int32_t n_alleles, const bool permute) override;
 
     // Encode data using htslib.
     int Encode2N(bcf1_t* bcf, const bcf_hdr_t* hdr) override { return(-1); }
@@ -579,7 +579,7 @@ public:
     inline void SetPermutePbwt(const bool yes) { this->instance->SetPermutePbwt(yes); }
 
     inline int Encode(bcf1_t* bcf, const bcf_hdr_t* hdr) { return this->instance->Encode(bcf, hdr); }
-    inline int Encode(uint8_t* data, const int32_t n_data, const int n_ploidy, const int n_alleles) { return this->instance->Encode(data, n_data, n_ploidy, n_alleles); }
+    inline int Encode(uint8_t* data, const int32_t n_data, const int n_ploidy, const int n_alleles, const bool permute) { return this->instance->Encode(data, n_data, n_ploidy, n_alleles, permute); }
     inline int Compress(djinn_block_t*& block) { return this->instance->Compress(block); }
 
 public:
