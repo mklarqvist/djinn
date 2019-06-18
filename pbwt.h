@@ -25,30 +25,52 @@
 #include <memory>//pointers
 #include <vector>//vector
 
+#include "djinn.h"
 #include "frequency_model.h"
 
 #include <iostream>//temp
 
 namespace djinn {
 
-// Map missing to 2, 1->0, 2->1, and EOV -> 3.
-const uint8_t TWK_BCF_GT_UNPACK[65] = {2,0,1,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,3};
-const uint8_t TWK_BCF_GT_PACK[3]   = {1, 2, 0};
-// const uint8_t TWK_BCF_GT_UNPACK_GENERAL[16] = {15, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14};
-
-// MISSING -> 14, EOV -> 15, other values as normal
-const uint8_t TWK_BCF_GT_UNPACK_GENERAL[131] = 
-{14,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,15,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98,99,100,101,102,103,104,105,106,107,108,109,110,111,112,113,114,115,116,117,118,119,120,121,122,123,124,125,126,127,128,129};
-
-const uint8_t TWK_BCF_GT_UNPACK_GENERAL_REV[131] = 
-{0,1,2,3,4,5,6,7,8,9,10,11,12,13,0,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,15,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98,99,100,101,102,103,104,105,106,107,108,109,110,111,112,113,114,115,116,117,118,119,120,121,122,123,124,125,126,127,128,129};
-
-
-#define BCF_UNPACK_GENOTYPE(A) TWK_BCF_GT_UNPACK[(A) >> 1]
-#define BCF_UNPACK_GENOTYPE_GENERAL(A) TWK_BCF_GT_UNPACK_GENERAL[(A) >> 1]
-
 /*======   PBWT   ======*/
 
+/*
+ *--------------------------------------------------------------------------
+ * Basic implementation of the positional Burrow-Wheeler transform (PBWT)
+ * as described in:
+ * 
+ * Richard Durbin, Efficient haplotype matching and storage using the positional 
+ * Burrows–Wheeler transform (PBWT), Bioinformatics, Volume 30, Issue 9, 
+ * 1 May 2014, Pages 1266–1272, https://doi.org/10.1093/bioinformatics/btu014
+ *
+ * Permutes an input vector of alleles such that haplotypes up to the current
+ * position is sorted according to their reverse prefix. It should be noted
+ * that the output is the input vector of alleles reverse-prefix sorted up
+ * to the previous position.
+ * 
+ * This implementation handles arbitrarily large alphabets.
+ *
+ *--------------------------------------------------------------------------
+ * Usage instructions
+ * 
+ * Basic usage for diploid biallelic:
+ * PBWT pbwt;
+ * pbwt.Initiate(5008, 2); // Initiate class with 2504 samples and alphabet size of 2
+ * pbwt.UpdateBcf(data); // data is an array of Bcf-encoded values
+ * 
+ * pbwt.ppa[0-5007] now stores the permuted order.
+ *  
+ * Advanced usage for diploid biallelic data storing haplotypes separately:
+ * PBWT pbwt1, pbwt2;
+ * pbwt1.Initiate(2504, 2); // Initiate class with 2504 samples and alphabet size of 2
+ * pbwt2.Initiate(2504, 2);
+ * pbwt1.Update(&data[0], 2); // Update PBWT with a stride size of 2 starting at offset 0 
+ * pbwt2.Update(&data[1], 2); // Starting at offset 1
+ * 
+ * pbwt1.ppa[0-2503] now stores the permuted order for haplotype 1.
+ * pbwt2.ppa[0-2503] now stores the permuted order for haplotype 2.
+ *--------------------------------------------------------------------------
+ */
 class PBWT {
 public:
     PBWT();
@@ -67,6 +89,7 @@ public:
     int Update(const uint8_t* arr, uint32_t stride = 1);
     int UpdateBcf(const uint8_t* arr, uint32_t stride = 1);
     int UpdateBcfGeneral(const uint8_t* arr, uint32_t stride = 1);
+    
     // Encode WAH in 63-bits and return data.
     int UpdateBcfWah(const uint8_t* arr, uint8_t* out, uint32_t stride = 1);
     // Encode WAH in 64-bits with archetype data.
@@ -86,48 +109,6 @@ public:
     uint32_t*  n_queue; // number of elements in each positional queue
     uint32_t** queue; // the positional queues themselves
     uint64_t*  prev_bitmap; // bitmap version
-};
-
-/*======   Context model container   ======*/
-
-class GeneralModel {
-public:
-    GeneralModel() noexcept;
-    GeneralModel(int n_symbols, int model_size);
-    GeneralModel(int n_symbols, int model_size, std::shared_ptr<RangeCoder> rc);
-    GeneralModel(int n_symbols, int model_size, int shift, int step);
-    GeneralModel(int n_symbols, int model_size, int shift, int step, std::shared_ptr<RangeCoder> rc);
-    ~GeneralModel();
-
-    int Initiate(int n_symbols, int model_size);
-    int Initiate(int n_symbols, int model_size, std::shared_ptr<RangeCoder> rc);
-    int Initiate(int n_symbols, int model_size, int shift, int step);
-    int Initiate(int n_symbols, int model_size, int shift, int step, std::shared_ptr<RangeCoder> rc);
-
-    int FinishEncoding();
-    int FinishDecoding();
-    void StartEncoding();
-    void StartDecoding(uint8_t* data);
-
-    void EncodeSymbol(const uint16_t symbol);
-    void EncodeSymbolNoUpdate(const uint16_t symbol);
-    
-    uint16_t DecodeSymbol();
-    uint16_t DecodeSymbolNoUpdate();
-
-    void ResetModels();
-    void ResetContext();
-    void Reset();
-
-public:
-    int max_model_symbols;
-    int model_context_shift;
-    uint32_t model_context, model_ctx_mask;
-    std::shared_ptr<RangeCoder> range_coder;
-    std::vector < std::shared_ptr<FrequencyModel> > models;
-    size_t n_additions; // number of updates performed
-    size_t n_buffer; // buffer size
-    uint8_t* buffer; // buffer. todo: fixme
 };
 
 }

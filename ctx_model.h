@@ -30,6 +30,48 @@ uint32_t round_log2(uint32_t x) {
 	return r;
 }
 
+/*======   Context model container   ======*/
+
+class GeneralModel {
+public:
+    GeneralModel() noexcept;
+    GeneralModel(int n_symbols, int model_size);
+    GeneralModel(int n_symbols, int model_size, std::shared_ptr<RangeCoder> rc);
+    GeneralModel(int n_symbols, int model_size, int shift, int step);
+    GeneralModel(int n_symbols, int model_size, int shift, int step, std::shared_ptr<RangeCoder> rc);
+    ~GeneralModel();
+
+    int Initiate(int n_symbols, int model_size);
+    int Initiate(int n_symbols, int model_size, std::shared_ptr<RangeCoder> rc);
+    int Initiate(int n_symbols, int model_size, int shift, int step);
+    int Initiate(int n_symbols, int model_size, int shift, int step, std::shared_ptr<RangeCoder> rc);
+
+    int FinishEncoding();
+    int FinishDecoding();
+    void StartEncoding();
+    void StartDecoding(uint8_t* data);
+
+    void EncodeSymbol(const uint16_t symbol);
+    void EncodeSymbolNoUpdate(const uint16_t symbol);
+    
+    uint16_t DecodeSymbol();
+    uint16_t DecodeSymbolNoUpdate();
+
+    void ResetModels();
+    void ResetContext();
+    void Reset();
+
+public:
+    int max_model_symbols;
+    int model_context_shift;
+    uint32_t model_context, model_ctx_mask;
+    std::shared_ptr<RangeCoder> range_coder;
+    std::vector < std::shared_ptr<FrequencyModel> > models;
+    size_t n_additions; // number of updates performed
+    size_t n_buffer; // buffer size
+    uint8_t* buffer; // buffer. todo: fixme
+};
+
 /*
 Desired interface: 
 
@@ -46,6 +88,7 @@ StopDecoding() // does nothing
 
 /*======   GT context variant   ======*/
 
+// Todo
 struct djn_ctx_variant_t {
     uint8_t* types;
     uint64_t* data;
@@ -60,83 +103,145 @@ struct djinn_ctx_model_t {
 public:
     djinn_ctx_model_t();
     ~djinn_ctx_model_t();
+
+    // Initiate this model as accepting either biallelic complete
+    // input data (Initiate2mc) or any other (InitiateNm). Running
+    // either of these functions are REQUIRED before starting encoding
+    // or decoding.
     void Initiate2mc();
     void InitiateNm();
 
-    void reset();
     int StartEncoding(bool use_pbwt, bool reset = false);
     size_t FinishEncoding();
     int StartDecoding(uint8_t* data, bool reset = false);
+    size_t FinishDecoding() { return 0; } // no effect
+    
+    void reset();
 
 public:
     uint8_t use_pbwt: 1, init: 1, unused: 6;
     PBWT pbwt;
     std::shared_ptr<RangeCoder> range_coder; // shared range coder
-    std::shared_ptr<GeneralModel> mref, mlog_rle, mrle, mrle2_1, mrle2_2, mrle4_1, mrle4_2, mrle4_3, mrle4_4; // rle models
-    std::shared_ptr<GeneralModel> dirty_wah; // dirty word model
-    std::shared_ptr<GeneralModel> mtype; // mtype model
+    std::shared_ptr<GeneralModel> mref; // reference symbol for RLE encoding
+    std::shared_ptr<GeneralModel> mlog_rle;  // log2(run length)
+    std::shared_ptr<GeneralModel> mrle, mrle2_1, mrle2_2, mrle4_1, mrle4_2, mrle4_3, mrle4_4; // rle models for 1-byte, 2-byte, or 4-byte run lengths
+    std::shared_ptr<GeneralModel> dirty_wah; // Dirty bitmap words
+    std::shared_ptr<GeneralModel> mtype; // Archetype encoding: either bitmap or RLE
     uint8_t *p;     // data
     uint32_t p_len; // data length
-    uint32_t p_cap:31, p_free:1;
-    uint32_t n_variants;
+    uint32_t p_cap:31, p_free:1; // capacity (memory allocated), flag for data ownership
+    uint32_t n_variants; // number of variants encoded
 };
 
-/*======   GT context model   ======*/
+/*======   Haplotype base model   ======*/
 
-class djinn_ctx_model {
+#pragma pack(push, 1)
+struct djinn_ewah_t {
+    djinn_ewah_t() : ref(0), clean(0), dirty(0){}
+    void reset() { ref = clean = dirty = 0; }
+
+    uint64_t ref: 4, clean: 30, dirty: 30;
+};
+#pragma pack(pop)
+
+class djinn_model {
+public:
+    djinn_model() : n_samples(0), n_variants(0) {}
+    djinn_model(uint64_t n_s) : n_samples(n_s), n_variants(0) {}
+    ~djinn_model() {}
+
+    virtual void SetSamples(int64_t n_s) { n_samples = n_s; }
+
+    // virtual int Encode(uint8_t* data, uint8_t alt_alleles, const bool permute = true) =0; // todo
+    virtual int EncodeBcf(uint8_t* data, uint8_t alt_alleles, const bool permute = true) =0;
+
+    virtual void StartEncoding(bool use_pbwt, bool reset = false) =0;
+    virtual size_t FinishEncoding() =0;
+    virtual int StartDecoding(djinn_block_t* block, bool reset = false) =0;
+
+    //
+    virtual int DecodeNext(uint8_t* data, size_t& len) =0;
+    
+    // Retrieval.
+    virtual int GetBlockReference(djinn_block_t*& block) =0;
+    
+    // Todo
+    // virtual int GetBlock(djinn_block_t*& block) =0;
+
+public:
+    int64_t n_samples; // number of samples or haplotypes
+    uint32_t n_variants; // number of encoded variants
+    // Supportive array for computing allele counts to determine the presence
+    // of missing values and/or end-of-vector symbols (in Bcf-encodings).
+    uint32_t hist_alts[256];
+};
+
+/*======   Haplotype context model   ======*/
+
+class djinn_ctx_model : public djinn_model {
 private:
-    static constexpr uint64_t ref_bits[16] = 
-        {0,                     72340172838076672ULL,  144680345676153344ULL,  217020518514230016ULL, 
-         289360691352306688ULL, 361700864190383360ULL, 434041037028460032ULL,  506381209866536704ULL, 
-         578721382704613376ULL, 651061555542690048ULL, 723401728380766720ULL,  795741901218843392ULL, 
-         868082074056920064ULL, 940422246894996736ULL, 1012762419733073408ULL, 1085102592571150080ULL};
+    // 00000000,00000001,00000010,00000011
+    // 00000100,00000101,00000110,00000111
+    // etc.
+    static constexpr uint32_t ref_bits[16] = 
+        {0,         16843009,  33686018,  50529027, 
+         67372036,  84215045,  101058054, 117901063, 
+         134744072, 151587081, 168430090, 185273099, 
+         202116108, 218959117, 235802126, 252645135};
 
 public:
     djinn_ctx_model();
     djinn_ctx_model(uint64_t n_s);
     ~djinn_ctx_model();
 
-    void SetSamples(int64_t n_s);
+    void SetSamples(int64_t n_s) override;
 
-    int EncodeBcf(uint8_t* data, uint8_t alt_alleles, const bool permute = true);
+    // int Encode(uint8_t* data, uint8_t alt_alleles, const bool permute = true) override; // todo
+    int EncodeBcf(uint8_t* data, uint8_t alt_alleles, const bool permute = true) override;
 
-    void StartEncoding(bool use_pbwt, bool reset = false);
-    size_t FinishEncoding();
-    int StartDecoding(djinn_block_t* block, bool reset = false);
-    int GetBlockReference(djinn_block_t*& block);
+    void StartEncoding(bool use_pbwt, bool reset = false) override;
+    size_t FinishEncoding() override;
+    int StartDecoding(djinn_block_t* block, bool reset = false) override;
+    
+    // Retrieval.
+    int GetBlockReference(djinn_block_t*& block) override;
+    
     // Todo
-    int GetBlock(djinn_block_t*& block);
+    // int GetBlock(djinn_block_t*& block) override;
     
 // Internal functions
 public:
     int Encode2mc(uint8_t* data, uint32_t len);
     int EncodeNm(uint8_t* data, uint32_t len);
-    int EncodeWah(uint64_t* wah, uint32_t len);
-    int EncodeWahNm(uint64_t* wah, uint32_t len);
-    int EncodeWahRLE(uint64_t ref, uint32_t len, djinn_ctx_model_t* model);
-    int EncodeWahRLE_nm(uint64_t ref, uint32_t len, djinn_ctx_model_t* model);
+    int EncodeWah(uint32_t* wah, uint32_t len);
+    int EncodeWahNm(uint32_t* wah, uint32_t len);
+    int EncodeWahRLE(uint32_t ref, uint32_t len, djinn_ctx_model_t* model);
+    int EncodeWahRLE_nm(uint32_t ref, uint32_t len, djinn_ctx_model_t* model);
 
-    int DecodeNext(uint8_t* data, size_t& len);
+public:
+    int DecodeNext(uint8_t* data, size_t& len) override; // Fix: currently calls DecodeRaw()
     // int DecodeNextRaw(uint8_t* data);
     int DecodeRaw(uint8_t* data, size_t& len);
     int DecodeRaw_nm(uint8_t* data, size_t& len);
-    int DecodeWahRLE(uint64_t& ref, uint32_t& len, djinn_ctx_model_t* model);
-    int DecodeWahRLE_nm(uint64_t& ref, uint32_t& len, djinn_ctx_model_t* model);
+    int DecodeWahRLE(uint32_t& ref, uint32_t& len, djinn_ctx_model_t* model);
+    int DecodeWahRLE_nm(uint32_t& ref, uint32_t& len, djinn_ctx_model_t* model);
 
 public:
-    int64_t n_samples;
-    
-    uint64_t n_wah;
-    int64_t n_samples_wah;
-    uint64_t* wah_bitmaps;
+    // Fields for constructing EWAH encodings from input data.
+    uint64_t n_wah; // Number of allocated 32-bit bitmaps
+    int64_t n_samples_wah; // Number of samples rounded up to closes 32-bit boundary
+    uint32_t* wah_bitmaps; // Bitmaps
 
     uint8_t *p;     // data
     uint32_t p_len; // data length
-    uint32_t p_cap:31, p_free:1;
-    uint32_t n_variants;
+    uint32_t p_cap:31, p_free:1; // allocated data length, ownership of data flag
 
-    uint32_t hist_alts[256];    
+    // Shared range coder: All context models share this range coder and emit
+    // encodings to a shared buffer.
     std::shared_ptr<RangeCoder> range_coder;
+    // Context model encoding the model archetype: either zero (0) for 2MC
+    // or one (1) for 2M, or two (2) for everything else.
+    // This information is required to differentiate
     std::shared_ptr<GeneralModel> marchetype; // 0 for 2MC, 1 for 2M, 2 else
     djinn_ctx_model_t model_2mc;
     djinn_ctx_model_t model_2m;

@@ -45,17 +45,19 @@ int GenotypeCompressor::Encode(bcf1_t* bcf, const bcf_hdr_t* hdr) {
     bytes_in += fmt->p_len;
     bytes_in_vcf += fmt->p_len * 2 - 1; // (char)(sep)(char)(tab)
 
+    // This is not used: results in worse compression performance across
+    // the board.
     bool permute = true;
     if (bcf->n_allele > 2) {
 
     } else {
         if (strlen(bcf->d.allele[0]) != 1) {
             // std::cerr << "not snv: " << bcf->d.allele[0] << std::endl;
-            permute = false;
+            // permute = false;
         }
         if (strlen(bcf->d.allele[1]) != 1) {
             // std::cerr << "not snv: " << bcf->d.allele[1] << std::endl;
-            permute = false;
+            // permute = false;
         }
     }
 
@@ -156,7 +158,7 @@ int GenotypeCompressorModelling::Encode2N(bcf1_t* bcf, const bcf_hdr_t* hdr) {
 
         int replaced = RemapGenotypeEOV(fmt->p, fmt->p_len);
         if (replaced) {
-            // std::cerr << "replaced: skipping " << replaced << std::endl;
+            std::cerr << "replaced: skipping " << replaced << std::endl;
             return Encode2N2MM(fmt->p, fmt->p_len, true); // 2N2MM supports missing+EOV in RLE-bitmap mode.
         }
     }
@@ -434,15 +436,34 @@ int GenotypeCompressorModelling::Compress(djinn_block_t*& block) {
     
     // djinn_block_t* blk = nullptr;
     djn_ctx.GetBlockReference(block); // return me
-    // djn_ctx_decode.StartDecoding(block, false);
+    djn_ctx_decode.StartDecoding(block, false);
     
     // Start manual decoding
-    // djinn_ctx_t* dat_out = (djinn_ctx_t*)block->data;
-    // uint8_t* t = new uint8_t[64];
+    djinn_ctx_t* dat_out = (djinn_ctx_t*)block->data;
+    uint8_t* t = new uint8_t[65536];
+    size_t offset = 0;
 
-    // for (int i = 0; i < djn_ctx_decode.n_variants; ++i) {
-    //     djn_ctx_decode.DecodeNext(t);
-    // }
+    for (int i = 0; i < djn_ctx_decode.n_variants; ++i) {
+        // std::cerr << "decoing next" << std::endl;
+        int objs = djn_ctx_decode.DecodeNext(t, offset);
+        // std::cerr << i << "/" << djn_ctx_decode.n_variants << ": " << offset << " with obs=" << objs << std::endl;
+        uint32_t local_offset = 0;
+        uint32_t vals = 0;
+        for (int j = 0; j < objs; ++j) {
+            djinn_ewah_t* ewah = (djinn_ewah_t*)&t[local_offset];
+            // std::cerr << "ewah=" << ewah->ref << "," << ewah->clean << "," << ewah->dirty << std::endl;
+            local_offset += sizeof(djinn_ewah_t);
+            local_offset += ewah->dirty * sizeof(uint32_t);
+            vals += ewah->dirty + ewah->clean;
+
+            // std::cerr << "local=" << local_offset << "/" << offset << std::endl;
+            assert(local_offset <= offset);
+        }
+        assert(vals*32 == djn_ctx_decode.n_samples_wah);
+        assert(local_offset == offset);
+        offset = 0;
+    }
+    delete[] t;
 
     /*
     if (dat_out->ctx_models[1].n_v) {
@@ -630,7 +651,7 @@ int GenotypeCompressorRLEBitmap::Encode2N2M(uint8_t* data, const int32_t n_data,
     // Todo: assert genotypes are set for this variant.
     int replaced = RemapGenotypeEOV(data, n_data);
     if (replaced) {
-        // std::cerr << "replaced: skipping " << replaced << std::endl;
+        std::cerr << "replaced: skipping " << replaced << std::endl;
         return Encode2N2MM(data, n_data, permute); // 2N2MM supports missing+EOV in RLE-bitmap mode.
     }
 

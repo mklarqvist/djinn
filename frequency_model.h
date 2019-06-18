@@ -87,7 +87,6 @@ public:
 		range = Mask32;
 	}
 
-    // uint32_t cumFreq, uint32_t freq, uint32_t totFreq
 	void Encode(uint32_t cumFreq, uint32_t symFreq, uint32_t totalFreqSum) {
         assert(range > totalFreqSum);
 		range /= totalFreqSum;
@@ -136,7 +135,6 @@ public:
 		return (uint32_t) (buffer / (range /= totalFreq));
 	}
 
-    // uint32_t cumFreq, uint32_t freq, uint32_t totFreq
 	void Decode(uint32_t lowEnd, uint32_t symFreq, uint32_t /*totalFreq_*/) {
 		uint32_t r = lowEnd * range;
 		buffer -= r;
