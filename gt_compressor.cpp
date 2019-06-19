@@ -459,6 +459,7 @@ int GenotypeCompressorModelling::Compress(djinn_block_t*& block) {
             // std::cerr << "local=" << local_offset << "/" << offset << std::endl;
             assert(local_offset <= offset);
         }
+        std::cerr << "vals=" << vals*32 << "/" << djn_ctx_decode.n_samples_wah << std::endl;
         assert(vals*32 == djn_ctx_decode.n_samples_wah);
         assert(local_offset == offset);
         offset = 0;

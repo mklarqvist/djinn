@@ -221,19 +221,61 @@ int PBWT::ReverseUpdate(const uint8_t* arr) {
     return 1;
 }
 
-int PBWT::ReverseUpdateBitmap(const uint8_t* arr) {
-    // memset(prev, 0, n_samples); // O(n)
-    if (prev_bitmap == nullptr) prev_bitmap = new uint64_t[(int)ceil((float)n_samples/64)];
-    memset(prev_bitmap, 0, (int)ceil((float)n_samples/64) * sizeof(uint64_t));
+int PBWT::ReverseUpdateEWAH(const uint8_t* arr, const uint32_t len) {
+    assert(n_samples > 0);
+    assert(n_symbols > 0);
+
+    memset(prev, 0, n_samples); // O(n)
     memset(n_queue, 0, sizeof(uint32_t)*n_symbols);
+
+    uint32_t local_offset = 0;
+    uint64_t n_s_obs = 0;
+    while (local_offset < len) {
+        djinn_ewah_t* ewah = (djinn_ewah_t*)&arr[local_offset];
+        local_offset += sizeof(djinn_ewah_t);
+
+        std::cerr << "ewah=" << ewah->ref << "," << ewah->clean << "," << ewah->dirty << std::endl;
+        
+        // Clean
+        uint64_t to = n_s_obs + ewah->clean * 32 > n_samples ? n_samples : n_s_obs + ewah->clean * 32;
+        std::cerr << "clean=" << n_s_obs << "->" << to << std::endl; 
+        for (int i = n_s_obs; i < to; ++i) {
+            queue[ewah->ref][n_queue[ewah->ref]++] = ppa[i];
+        }
+        n_s_obs = to;
+
+        // Loop over dirty bitmaps.
+        std::cerr << "dirty=" << ewah->dirty << std::endl;
+        for (int i = 0; i < ewah->dirty; ++i) {
+            to = n_s_obs + 32 > n_samples ? n_samples - n_s_obs : 32;
+            std::cerr << "dirty steps=" << to << " -> " << n_s_obs << "-" << n_s_obs+to << std::endl;
+            uint32_t dirty = *((uint32_t*)(&arr[local_offset]));
+            for (int j = 0; j < to; ++j) {
+                queue[dirty & 1][n_queue[dirty & 1]++] = ppa[n_s_obs];
+                prev[ppa[n_s_obs]] = arr[n_s_obs]; // update prev when non-zero
+                dirty >>= 1;
+                ++n_s_obs;
+            }
+            local_offset += sizeof(uint32_t);
+            n_s_obs += to;
+        }
+        // local_offset += ewah->dirty * sizeof(uint32_t);
+        std::cerr << "pbwt offset=" << local_offset << "/" << len << std::endl;
+        assert(local_offset <= len);
+    }
+    std::cerr << "obs" << n_s_obs << "/" << n_samples << std::endl;
+    assert(n_s_obs == n_samples);
 
     // Restore + update PPA
     // uint32_t n_skips = 0;
-    for (int i = 0; i < n_samples; ++i) { // Worst case O(n), average case O(n) with a smallish constant.
-        queue[arr[i]][n_queue[arr[i]]++] = ppa[i];
-        prev_bitmap[ppa[i]/64] |= arr[i] << (ppa[i] % 64);
-        // prev[ppa[i]] = arr[i]; // Unpermute data.
-    }
+    // for (int i = 0; i < n_samples; ++i) { // Worst case O(n), average case O(n) with a smallish constant.
+    //     queue[arr[i]][n_queue[arr[i]]++] = ppa[i];
+    //     if (arr[i] == 0) {
+    //         // ++n_skips;
+    //         continue;
+    //     }
+    //     prev[ppa[i]] = arr[i]; // Unpermute data.
+    // }
 
     // Merge PPA queues.
     uint32_t of = 0;
@@ -244,8 +286,11 @@ int PBWT::ReverseUpdateBitmap(const uint8_t* arr) {
         // }
         of += n_queue[j];
     }
+    std::cerr << "of=" << of << "/" << n_samples << std::endl;
     assert(of == n_samples);
     ++n_steps;
+
+    // std::cerr << "nskips=" << n_skips << std::endl;
 
     return 1;
 }

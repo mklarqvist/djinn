@@ -96,8 +96,15 @@ public:
     int UpdateBcfWah2(const uint8_t* arr, uint8_t* data, uint32_t* archetype, uint32_t stride = 1);
 
     int ReverseUpdate(const uint8_t* arr);
-    int ReverseUpdateBitmap(const uint8_t* arr);
 
+    // Reverse update the PBWT with EWAH-encoded data as provided
+    // by Djinn. This function is generally faster and require less
+    // memory compared to first expanding out EWAH-encoded data into
+    // an vector of allelic symbols. Therefore this approach is the
+    // preferred method.
+    int ReverseUpdateEWAH(const uint8_t* ewah, const uint32_t len);
+
+    // Debug function for printing out the current state of the PBWT.
     std::string ToPrettyString() const;
 
 public:

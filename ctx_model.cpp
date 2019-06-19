@@ -468,6 +468,31 @@ int djinn_ctx_model::DecodeNext(uint8_t* data, size_t& len) {
     if (data == nullptr) return -1;
     uint8_t type = marchetype->DecodeSymbol();
     
+    // Todo:
+    // Step 1: DecodeRaw
+    // Step 2: if PBWT -> unpermute
+    // Step 3: inflate (either raw, bcf-style, or bitmap encodings)
+
+    int objs = 0;
+    switch(type) {
+    case 0: objs = DecodeRaw(data, len); break;
+    case 1: objs = DecodeRaw_nm(data, len); break;
+    default: std::cerr << "decoding error: " << type << std::endl; return -1;
+    }
+
+    if (objs <= 0) return -1;
+    switch(type) {
+        case 0: model_2mc.pbwt.ReverseUpdateEWAH(data, len); break;
+        case 1: model_nm.pbwt.ReverseUpdateEWAH(data, len); break;
+    }
+
+    return objs;
+}
+
+int djinn_ctx_model::DecodeNextRaw(uint8_t* data, size_t& len) {
+    if (data == nullptr) return -1;
+    uint8_t type = marchetype->DecodeSymbol();
+    
     switch(type) {
     case 0: return DecodeRaw(data, len);
     case 1: return DecodeRaw_nm(data, len);
@@ -1016,6 +1041,23 @@ int djinn_ctx_model::StartDecoding(djinn_block_t* block, bool reset) {
     model_2mc.n_variants = data_out->ctx_models[1].n_v;
     model_nm.StartDecoding(data_out->ctx_models[3].vptr, reset);
     model_nm.n_variants = data_out->ctx_models[3].n_v;
+
+    bool use_pbwt = true; // fix this
+    if (use_pbwt) {
+        if (model_2mc.pbwt.n_symbols == 0) {
+            if (n_samples == 0) {
+                std::cerr << "illegal: no sample number set!" << std::endl;
+            }
+            model_2mc.pbwt.Initiate(n_samples, 2);
+        }
+
+        if (model_nm.pbwt.n_symbols == 0) {
+            if (n_samples == 0) {
+                std::cerr << "illegal: no sample number set!" << std::endl;
+            }
+            model_nm.pbwt.Initiate(n_samples, 16);
+        }
+    }
 
     return 1;
 }

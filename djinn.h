@@ -61,6 +61,16 @@ const uint8_t TWK_BCF_GT_UNPACK_GENERAL_REV[131] =
 #define BCF_UNPACK_GENOTYPE(A) TWK_BCF_GT_UNPACK[(A) >> 1]
 #define BCF_UNPACK_GENOTYPE_GENERAL(A) TWK_BCF_GT_UNPACK_GENERAL[(A) >> 1]
 
+// EWAH structure
+#pragma pack(push, 1)
+struct djinn_ewah_t {
+    djinn_ewah_t() : ref(0), clean(0), dirty(0){}
+    void reset() { ref = clean = dirty = 0; }
+
+    uint64_t ref: 4, clean: 30, dirty: 30;
+};
+#pragma pack(pop)
+
 // Header structure
 struct djinn_hdr_t {
     uint8_t version[3];

@@ -135,15 +135,6 @@ public:
 
 /*======   Haplotype base model   ======*/
 
-#pragma pack(push, 1)
-struct djinn_ewah_t {
-    djinn_ewah_t() : ref(0), clean(0), dirty(0){}
-    void reset() { ref = clean = dirty = 0; }
-
-    uint64_t ref: 4, clean: 30, dirty: 30;
-};
-#pragma pack(pop)
-
 class djinn_model {
 public:
     djinn_model() : n_samples(0), n_variants(0) {}
@@ -161,6 +152,7 @@ public:
 
     //
     virtual int DecodeNext(uint8_t* data, size_t& len) =0;
+    virtual int DecodeNextRaw(uint8_t* data, size_t& len) =0;
     
     // Retrieval.
     virtual int GetBlockReference(djinn_block_t*& block) =0;
@@ -220,6 +212,8 @@ public:
 
 public:
     int DecodeNext(uint8_t* data, size_t& len) override; // Fix: currently calls DecodeRaw()
+    int DecodeNextRaw(uint8_t* data, size_t& len) override;
+
     // int DecodeNextRaw(uint8_t* data);
     int DecodeRaw(uint8_t* data, size_t& len);
     int DecodeRaw_nm(uint8_t* data, size_t& len);
