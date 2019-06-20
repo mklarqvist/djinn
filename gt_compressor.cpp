@@ -138,6 +138,9 @@ GenotypeCompressorModelling::GenotypeCompressorModelling(int64_t n_s) : Genotype
     djn_ctx.SetSamples(2*n_samples);
     djn_ctx.StartEncoding(true, false);
     djn_ctx_decode.SetSamples(2*n_samples);
+
+    debug_buffer = new uint8_t[10000000];
+    len_debug = 0;
 }
 
 GenotypeCompressorModelling::~GenotypeCompressorModelling() { }
@@ -448,35 +451,52 @@ int GenotypeCompressorModelling::Compress(djinn_block_t*& block) {
     for (int i = 0; i < djn_ctx_decode.n_variants; ++i) {
         // std::cerr << "decoing next" << std::endl;
         int objs = djn_ctx_decode.DecodeNext(ewah_buf, offset, ret_vec, len_ret_vec);
+        // std::cerr << "objs=" << objs << std::endl;
         assert(objs > 0);
         uint32_t ref_alt[2] = {0};
 
+        // debug_buffer[len_debug++] = ret_vec[j+0];
+        // if (len_debug > 5000000) {
+        //     std::cout.write((char*)debug_buffer, len_debug);
+        //     len_debug = 0;
+        // }
+        
+
         // std::cout << (int)ret_vec[0] << "|" << (int)ret_vec[1];
         for (int j = 0; j < 2*n_samples; j += 2) {
-            std::cout << (int)ret_vec[j+0] << "|" << (int)ret_vec[j+1] << "\t";
+            debug_buffer[len_debug++] = ret_vec[j+0] + '0';
+            debug_buffer[len_debug++] = '|';
+            debug_buffer[len_debug++] = ret_vec[j+1] + '0';
+            debug_buffer[len_debug++] = '\t';
+            
+            // std::cout << (int)ret_vec[j+0] << "|" << (int)ret_vec[j+1] << "\t";
             // ++ref_alt[ret_vec[j+0]];
             // ++ref_alt[ret_vec[j+1]];
         }
-        std::cout << std::endl;
+        debug_buffer[len_debug++] = '\n';
+        std::cout.write((char*)debug_buffer, len_debug);
+        len_debug = 0;
+        // std::cout << std::endl;
         // std::cerr << "RefAlt=" << ref_alt[0] << "," << ref_alt[1] << std::endl;
 
         // std::cerr << i << "/" << djn_ctx_decode.n_variants << ": " << offset << " with obs=" << objs << std::endl;
-        uint32_t local_offset = 0;
-        uint32_t vals = 0;
-        for (int j = 0; j < objs; ++j) {
-            djinn_ewah_t* ewah = (djinn_ewah_t*)&ewah_buf[local_offset];
-            // std::cerr << "ewah=" << ewah->ref << "," << ewah->clean << "," << ewah->dirty << std::endl;
-            local_offset += sizeof(djinn_ewah_t);
-            local_offset += ewah->dirty * sizeof(uint32_t);
-            vals += ewah->dirty + ewah->clean;
+        // uint32_t local_offset = 0;
+        // uint32_t vals = 0;
+        // for (int j = 0; j < objs; ++j) {
+        //     djinn_ewah_t* ewah = (djinn_ewah_t*)&ewah_buf[local_offset];
+        //     // std::cerr << "ewah=" << ewah->ref << "," << ewah->clean << "," << ewah->dirty << std::endl;
+        //     local_offset += sizeof(djinn_ewah_t);
+        //     local_offset += ewah->dirty * sizeof(uint32_t);
+        //     vals += ewah->dirty + ewah->clean;
 
-            // std::cerr << "local=" << local_offset << "/" << offset << std::endl;
-            assert(local_offset <= offset);
-        }
-        // std::cerr << "vals=" << vals*32 << "/" << djn_ctx_decode.n_samples_wah << " for objs=" << objs << std::endl;
-        assert(vals*32 == djn_ctx_decode.n_samples_wah);
-        assert(local_offset == offset);
+        //     // std::cerr << "local=" << local_offset << "/" << offset << std::endl;
+        //     assert(local_offset <= offset);
+        // }
+        // // std::cerr << "vals=" << vals*32 << "/" << djn_ctx_decode.n_samples_wah << " for objs=" << objs << std::endl;
+        // assert(vals*32 == djn_ctx_decode.n_samples_wah);
+        // assert(local_offset == offset);
         offset = 0;
+        len_ret_vec = 0;
     }
     delete[] ret_vec;
     delete[] ewah_buf;
@@ -513,11 +533,7 @@ int GenotypeCompressorModelling::Compress(djinn_block_t*& block) {
     // djinn_ctx_block_t* bb = (djinn_ctx_block_t*)block;
     // std::cerr << "Outsize=" << bb->size() << std::endl;
 
-
     djn_ctx.StartEncoding(true, false);
-    // delete[] t;
-    // delete blk;
-
     processed_lines_local = 0;
 
     // return oblock->size();

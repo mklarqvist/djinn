@@ -505,6 +505,7 @@ int djinn_ctx_model::DecodeNext(uint8_t* ewah_data, size_t& ret_ewah, uint8_t* r
     // Decode stream archetype.
     uint8_t type = marchetype->DecodeSymbol();
 
+    size_t ret_ewah_init = ret_ewah;
     int objs = 0;
     switch(type) {
     case 0: objs = DecodeRaw(ewah_data, ret_ewah); break;
@@ -514,7 +515,7 @@ int djinn_ctx_model::DecodeNext(uint8_t* ewah_data, size_t& ret_ewah, uint8_t* r
 
     if (objs <= 0) return -1;
 
-    std::cerr << "alts=" << hist_alts[0] << "," << hist_alts[1] << std::endl;
+    // std::cerr << "alts=" << hist_alts[0] << "," << hist_alts[1] << std::endl;
 
     if (hist_alts[1] >= 10) {
         switch(type) {
@@ -523,16 +524,18 @@ int djinn_ctx_model::DecodeNext(uint8_t* ewah_data, size_t& ret_ewah, uint8_t* r
         }
     } else {
         // Todo: finish me
-        // Unpack EWAH into literals
-        uint32_t local_offset = 0;
+        // Unpack EWAH into literals according to current PPA
+        uint32_t local_offset = ret_ewah_init;
         uint32_t ret_pos = 0;
         for (int j = 0; j < objs; ++j) {
             djinn_ewah_t* ewah = (djinn_ewah_t*)&ewah_data[local_offset];
             local_offset += sizeof(djinn_ewah_t);
             // std::cerr << "ewah=" << ewah->ref << "," << ewah->clean << "," << ewah->dirty << std::endl;
+            
+            // Clean words.
             uint32_t to = ret_pos + ewah->clean*32 > n_samples ? n_samples : ret_pos + ewah->clean*32;
             for (int i = ret_pos; i < to; ++i) {
-                ret_buffer[i] = (ewah->ref & 1);
+                ret_buffer[model_2mc.pbwt.ppa[i]] = (ewah->ref & 1);
             }
             ret_pos = to;
 
@@ -541,21 +544,22 @@ int djinn_ctx_model::DecodeNext(uint8_t* ewah_data, size_t& ret_ewah, uint8_t* r
                 
                 uint32_t dirty = *((uint32_t*)(&ewah_data[local_offset])); // copy
                 for (int j = ret_pos; j < to; ++j) {
-                    ret_buffer[j] = (dirty & 1);
+                    ret_buffer[model_2mc.pbwt.ppa[j]] = (dirty & 1);
                     dirty >>= 1;
                 }
-                ++local_offset;
+                local_offset += sizeof(uint32_t);
                 ret_pos = to;
             }
 
             // local_offset += ewah->dirty * sizeof(uint32_t);
             // vals += ewah->dirty + ewah->clean;
 
-            // std::cerr << "local=" << local_offset << "/" << offset << std::endl;
-            // assert(local_offset <= offset);
+            // std::cerr << "local=" << local_offset << "/" << ret_ewah << std::endl;
+            assert(ret_pos <= n_samples);
+            assert(local_offset <= ret_ewah);
         }
         assert(ret_pos == n_samples);
-        
+        // return n_samples; // todo: should return n_samples
     }
 
     return objs;

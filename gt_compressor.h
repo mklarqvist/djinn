@@ -273,7 +273,8 @@ private:
 public:
    
     uint64_t bytes_out2, bytes_out3, bytes_out4;
-
+    uint8_t* debug_buffer;
+    uint32_t len_debug;
     djinn_ctx_model djn_ctx, djn_ctx_decode;
 };
 
