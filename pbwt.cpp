@@ -234,38 +234,38 @@ int PBWT::ReverseUpdateEWAH(const uint8_t* arr, const uint32_t len) {
         djinn_ewah_t* ewah = (djinn_ewah_t*)&arr[local_offset];
         local_offset += sizeof(djinn_ewah_t);
 
-        std::cerr << "ewah=" << ewah->ref << "," << ewah->clean << "," << ewah->dirty << std::endl;
+        // std::cerr << "ewah=" << ewah->ref << "," << ewah->clean << "," << ewah->dirty << std::endl;
         
         // Clean
         uint64_t to = n_s_obs + ewah->clean * 32 > n_samples ? n_samples : n_s_obs + ewah->clean * 32;
-        std::cerr << "clean=" << n_s_obs << "->" << to << std::endl; 
+        // std::cerr << "clean=" << n_s_obs << "->" << to << std::endl; 
         for (int i = n_s_obs; i < to; ++i) {
-            queue[ewah->ref][n_queue[ewah->ref]++] = ppa[i];
+            queue[ewah->ref & 1][n_queue[ewah->ref & 1]++] = ppa[i];
         }
         n_s_obs = to;
 
         // Loop over dirty bitmaps.
-        std::cerr << "dirty=" << ewah->dirty << std::endl;
+        // std::cerr << "dirty=" << ewah->dirty << std::endl;
         for (int i = 0; i < ewah->dirty; ++i) {
             to = n_s_obs + 32 > n_samples ? n_samples - n_s_obs : 32;
-            std::cerr << "dirty steps=" << to << " -> " << n_s_obs << "-" << n_s_obs+to << "/" << n_samples << std::endl;
+            // std::cerr << "dirty steps=" << to << " -> " << n_s_obs << "-" << n_s_obs+to << "/" << n_samples << std::endl;
             assert(n_s_obs < n_samples);
             
             uint32_t dirty = *((uint32_t*)(&arr[local_offset]));
             for (int j = 0; j < to; ++j) {
                 queue[dirty & 1][n_queue[dirty & 1]++] = ppa[n_s_obs];
-                prev[ppa[n_s_obs]] = arr[n_s_obs]; // update prev when non-zero
+                prev[ppa[n_s_obs]] = (dirty & 1); // update prev when non-zero
                 dirty >>= 1;
                 ++n_s_obs;
             }
             local_offset += sizeof(uint32_t);
-            n_s_obs += to;
+            // n_s_obs += to;
         }
         // local_offset += ewah->dirty * sizeof(uint32_t);
-        std::cerr << "pbwt offset=" << local_offset << "/" << len << std::endl;
+        // std::cerr << "pbwt offset=" << local_offset << "/" << len << " with=" << n_s_obs << "/" << n_samples << std::endl;
         assert(local_offset <= len);
     }
-    std::cerr << "obs" << n_s_obs << "/" << n_samples << std::endl;
+    // std::cerr << "obs" << n_s_obs << "/" << n_samples << std::endl;
     assert(n_s_obs == n_samples);
 
     // Restore + update PPA
@@ -282,13 +282,94 @@ int PBWT::ReverseUpdateEWAH(const uint8_t* arr, const uint32_t len) {
     // Merge PPA queues.
     uint32_t of = 0;
     for (int j = 0; j < n_symbols; ++j) { // O(n)
+        // std::cerr << "queue=" << j << ": " << n_queue[j] << std::endl;
         memcpy(&ppa[of], queue[j], sizeof(uint32_t)*n_queue[j]);
         // for (int i = 0; i < n_queue[j]; ++i, ++of) {
         //     ppa[of] = queue[j][i];
         // }
         of += n_queue[j];
     }
-    std::cerr << "of=" << of << "/" << n_samples << std::endl;
+    // std::cerr << "of=" << of << "/" << n_samples << std::endl;
+    assert(of == n_samples);
+    ++n_steps;
+
+    // std::cerr << "nskips=" << n_skips << std::endl;
+
+    return 1;
+}
+
+int PBWT::ReverseUpdateEWAH(const uint8_t* arr, const uint32_t len, uint8_t* ret) {
+    assert(n_samples > 0);
+    assert(n_symbols > 0);
+
+    memset(ret, 0, n_samples); // O(n)
+    memset(n_queue, 0, sizeof(uint32_t)*n_symbols);
+
+    uint32_t local_offset = 0;
+    uint64_t n_s_obs = 0;
+    while (local_offset < len) {
+        djinn_ewah_t* ewah = (djinn_ewah_t*)&arr[local_offset];
+        local_offset += sizeof(djinn_ewah_t);
+
+        // std::cerr << "ewah=" << ewah->ref << "," << ewah->clean << "," << ewah->dirty << std::endl;
+        
+        // Clean words.
+        uint64_t to = n_s_obs + ewah->clean * 32 > n_samples ? n_samples : n_s_obs + ewah->clean * 32;
+        // std::cerr << "clean=" << n_s_obs << "->" << to << std::endl; 
+        for (int i = n_s_obs; i < to; ++i) {
+            queue[ewah->ref & 1][n_queue[ewah->ref & 1]++] = ppa[i];
+            ret[ppa[i]] = (ewah->ref & 1); // update prev when non-zero
+        }
+        n_s_obs = to;
+
+        // Loop over dirty bitmaps.
+        // std::cerr << "dirty=" << ewah->dirty << std::endl;
+        for (int i = 0; i < ewah->dirty; ++i) {
+            // to = n_s_obs + 32 > n_samples ? n_samples - n_s_obs : 32;
+            to = n_s_obs + 32 > n_samples ? n_samples : n_s_obs + 32;
+            // std::cerr << "dirty steps=" << n_s_obs << "->" << to << ": " << to-n_s_obs << std::endl;
+            assert(n_s_obs < n_samples);
+            assert(to <= n_samples);
+            
+            uint32_t dirty = *((uint32_t*)(&arr[local_offset])); // copy
+            for (int j = n_s_obs; j < to; ++j) {
+                queue[dirty & 1][n_queue[dirty & 1]++] = ppa[j];
+                ret[ppa[j]] = (dirty & 1); // update prev when non-zero
+                dirty >>= 1;
+                // ++n_s_obs;
+            }
+            local_offset += sizeof(uint32_t);
+            n_s_obs = to;
+        }
+        // local_offset += ewah->dirty * sizeof(uint32_t);
+        // std::cerr << "pbwt offset=" << local_offset << "/" << len << " with=" << n_s_obs << "/" << n_samples << std::endl;
+        assert(local_offset <= len);
+    }
+    // std::cerr << "obs" << n_s_obs << "/" << n_samples << std::endl;
+    assert(n_s_obs == n_samples);
+
+    // Restore + update PPA
+    // uint32_t n_skips = 0;
+    // for (int i = 0; i < n_samples; ++i) { // Worst case O(n), average case O(n) with a smallish constant.
+    //     queue[arr[i]][n_queue[arr[i]]++] = ppa[i];
+    //     if (arr[i] == 0) {
+    //         // ++n_skips;
+    //         continue;
+    //     }
+    //     prev[ppa[i]] = arr[i]; // Unpermute data.
+    // }
+
+    // Merge PPA queues.
+    uint32_t of = 0;
+    for (int j = 0; j < n_symbols; ++j) { // O(n)
+        // std::cerr << "queue=" << j << ": " << n_queue[j] << std::endl;
+        memcpy(&ppa[of], queue[j], sizeof(uint32_t)*n_queue[j]);
+        // for (int i = 0; i < n_queue[j]; ++i, ++of) {
+        //     ppa[of] = queue[j][i];
+        // }
+        of += n_queue[j];
+    }
+    // std::cerr << "of=" << of << "/" << n_samples << std::endl;
     assert(of == n_samples);
     ++n_steps;
 

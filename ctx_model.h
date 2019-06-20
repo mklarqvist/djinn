@@ -150,8 +150,11 @@ public:
     virtual size_t FinishEncoding() =0;
     virtual int StartDecoding(djinn_block_t* block, bool reset = false) =0;
 
-    //
+    // Decoding requires:
+    // One buffer for decoding into EWAH values.
+    // One buffer of size no smaller than ploidy*samples for storing the return vector of alleles.
     virtual int DecodeNext(uint8_t* data, size_t& len) =0;
+    virtual int DecodeNext(uint8_t* ewah_data, size_t& ret_ewah, uint8_t* ret_buffer, size_t& ret_len) =0;
     virtual int DecodeNextRaw(uint8_t* data, size_t& len) =0;
     
     // Retrieval.
@@ -211,7 +214,8 @@ public:
     int EncodeWahRLE_nm(uint32_t ref, uint32_t len, djinn_ctx_model_t* model);
 
 public:
-    int DecodeNext(uint8_t* data, size_t& len) override; // Fix: currently calls DecodeRaw()
+    int DecodeNext(uint8_t* data, size_t& len) override;
+    int DecodeNext(uint8_t* ewah_data, size_t& ret_ewah, uint8_t* ret_buffer, size_t& ret_len) override;
     int DecodeNextRaw(uint8_t* data, size_t& len) override;
 
     // int DecodeNextRaw(uint8_t* data);

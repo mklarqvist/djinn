@@ -1,3 +1,4 @@
+#include <cstring> //memcpy
 #include "ctx_model.h"
 
 namespace djinn {
@@ -397,6 +398,8 @@ int djinn_ctx_model::EncodeBcf(uint8_t* data, uint8_t alt_alleles, const bool pe
     if (alt_alleles <= 2 && hist_alts[14] == 0 && hist_alts[15] == 0) {
         marchetype->EncodeSymbol(0); // add archtype as 2mc
 
+        // TODO: we need to remember what the minumum alt cutoff was for the unpermuting
+        // process!
         if (hist_alts[2] < 10 || permute == false) { // dont update if < 10 alts
             for (int i = 0; i < n_samples; ++i) {
                 model_2mc.pbwt.prev[i] = BCF_UNPACK_GENOTYPE(data[model_2mc.pbwt.ppa[i]]);
@@ -432,13 +435,16 @@ int djinn_ctx_model::Encode2mc(uint8_t* data, uint32_t len) {
     
     memset(wah_bitmaps, 0, n_wah*sizeof(uint32_t));
 
+    // uint32_t alts = 0;
     for (int i = 0; i < n_samples; ++i) {
         if (data[i]) {
             wah_bitmaps[i / 32] |= 1L << (i % 32);
+            // ++alts;
         }
     }
+    // std::cerr << "encoding alts=" << alts << std::endl;
 
-    return EncodeWah(wah_bitmaps, n_wah/4);
+    return EncodeWah(wah_bitmaps, n_wah/4); // 4 bytes in a 32-bit word
 }
 
 int djinn_ctx_model::EncodeNm(uint8_t* data, uint32_t len) {
@@ -480,10 +486,76 @@ int djinn_ctx_model::DecodeNext(uint8_t* data, size_t& len) {
     default: std::cerr << "decoding error: " << type << std::endl; return -1;
     }
 
+    // Compute alts
+
+
     if (objs <= 0) return -1;
     switch(type) {
         case 0: model_2mc.pbwt.ReverseUpdateEWAH(data, len); break;
         case 1: model_nm.pbwt.ReverseUpdateEWAH(data, len); break;
+    }
+
+    return objs;
+}
+
+int djinn_ctx_model::DecodeNext(uint8_t* ewah_data, size_t& ret_ewah, uint8_t* ret_buffer, size_t& ret_len) {
+    if (ewah_data == nullptr) return -1;
+    if (ret_buffer == nullptr) return -1;
+
+    // Decode stream archetype.
+    uint8_t type = marchetype->DecodeSymbol();
+
+    int objs = 0;
+    switch(type) {
+    case 0: objs = DecodeRaw(ewah_data, ret_ewah); break;
+    case 1: objs = DecodeRaw_nm(ewah_data, ret_ewah); break;
+    default: std::cerr << "decoding error: " << type << std::endl; return -1;
+    }
+
+    if (objs <= 0) return -1;
+
+    std::cerr << "alts=" << hist_alts[0] << "," << hist_alts[1] << std::endl;
+
+    if (hist_alts[1] >= 10) {
+        switch(type) {
+            case 0: model_2mc.pbwt.ReverseUpdateEWAH(ewah_data, ret_ewah, ret_buffer); break;
+            case 1: model_nm.pbwt.ReverseUpdateEWAH(ewah_data, ret_ewah, ret_buffer); break;
+        }
+    } else {
+        // Todo: finish me
+        // Unpack EWAH into literals
+        uint32_t local_offset = 0;
+        uint32_t ret_pos = 0;
+        for (int j = 0; j < objs; ++j) {
+            djinn_ewah_t* ewah = (djinn_ewah_t*)&ewah_data[local_offset];
+            local_offset += sizeof(djinn_ewah_t);
+            // std::cerr << "ewah=" << ewah->ref << "," << ewah->clean << "," << ewah->dirty << std::endl;
+            uint32_t to = ret_pos + ewah->clean*32 > n_samples ? n_samples : ret_pos + ewah->clean*32;
+            for (int i = ret_pos; i < to; ++i) {
+                ret_buffer[i] = (ewah->ref & 1);
+            }
+            ret_pos = to;
+
+            for (int i = 0; i < ewah->dirty; ++i) {
+                to = ret_pos + 32 > n_samples ? n_samples : ret_pos + 32;
+                
+                uint32_t dirty = *((uint32_t*)(&ewah_data[local_offset])); // copy
+                for (int j = ret_pos; j < to; ++j) {
+                    ret_buffer[j] = (dirty & 1);
+                    dirty >>= 1;
+                }
+                ++local_offset;
+                ret_pos = to;
+            }
+
+            // local_offset += ewah->dirty * sizeof(uint32_t);
+            // vals += ewah->dirty + ewah->clean;
+
+            // std::cerr << "local=" << local_offset << "/" << offset << std::endl;
+            // assert(local_offset <= offset);
+        }
+        assert(ret_pos == n_samples);
+        
     }
 
     return objs;
@@ -515,6 +587,11 @@ int djinn_ctx_model::DecodeRaw(uint8_t* data, size_t& len) {
     ewah->reset();
     len += sizeof(djinn_ewah_t);
 
+    // uint32_t ref_alt[2] = {0};
+
+    // Compute als
+    memset(hist_alts, 0, 256*sizeof(uint32_t));
+
     while(true) {
         uint8_t type = model_2mc.mtype->DecodeSymbol();
 
@@ -525,7 +602,9 @@ int djinn_ctx_model::DecodeRaw(uint8_t* data, size_t& len) {
             // std::cerr << "Bitmap=";
             // std::cerr << "bitmap" << std::endl;
             for (int i = 0; i < 4; ++i) {
-                data[len++] = model_2mc.dirty_wah->DecodeSymbol();
+                data[len] = model_2mc.dirty_wah->DecodeSymbol();
+                hist_alts[1] += __builtin_popcount(data[len]);
+                ++len;
                 // wah |= model_2mc.dirty_wah->DecodeSymbol();
                 // std::cerr << std::bitset<8>(wah&255);
                 // wah <<= 8;
@@ -549,6 +628,9 @@ int djinn_ctx_model::DecodeRaw(uint8_t* data, size_t& len) {
             ewah->ref = ref & 1;
             ewah->clean = len;
 
+            // ref_alt[ewah->ref&1] += ewah->clean*32;
+            hist_alts[ewah->ref] += ewah->clean * 32;
+
             n_samples_obs += len*32;
         }
 
@@ -565,7 +647,13 @@ int djinn_ctx_model::DecodeRaw(uint8_t* data, size_t& len) {
     if (ewah->clean > 0 || ewah->dirty > 0) {
         ++objects;
         // std::cerr << "final=" << std::bitset<64>(*ewah) << " ref=" << ewah_ref << ",run=" << ewah_run << ",dirty=" << ewah_dirty << std::endl;
+        // ref_alt[ewah->ref&1] += ewah->clean*32;
+        hist_alts[ewah->ref] += ewah->clean * 32;
+        // ++len;
+        // Todo: dirty
     }
+
+    // std::cerr << "ewah decode ref_alt=" << ref_alt[0] << "," << ref_alt[1] << std::endl;
 
     return objects;
 }
@@ -643,41 +731,53 @@ int djinn_ctx_model::EncodeWah(uint32_t* wah, uint32_t len) { // input WAH-encod
     uint32_t wah_ref = wah[0];
     uint32_t wah_run = 1;
 
+    // uint32_t ref_alt[2] = {0};
+    // uint32_t wah_ref_pos = 0;
+
     for (int i = 1; i < len; ++i) {
         if ((wah_ref != 0 && wah_ref != std::numeric_limits<uint32_t>::max()) || (wah_ref != wah[i])) {
             if ((wah_ref != 0 && wah_ref != std::numeric_limits<uint32_t>::max()) || wah_run == 1) {
                 model_2mc.mtype->EncodeSymbol(0);
                 
-                // std::cerr << "Bitmap=" << std::bitset<32>(wah_ref) << ": " << __builtin_popcount(wah_ref) << std::endl;
+                // std::cerr << "Bitmap=" << std::bitset<32>(wah_ref) << ": " << __builtin_popcount(wah_ref) << " at pos=" << wah_ref_pos << std::endl;
                 for (int i = 0; i < 4; ++i) {
                     model_2mc.dirty_wah->EncodeSymbol(wah_ref & 255);
-                    wah_ref >>= 4;
+                    // std::cerr << "bitmap-" << i << " " << std::bitset<32>(wah_ref * 255)
+                    // ref_alt[1] += __builtin_popcount(wah_ref & 255);
+                    wah_ref >>= 8;
                 }
             } else {
                 model_2mc.mtype->EncodeSymbol(1);
+                // ref_alt[wah_ref & 1] += wah_run * 32;
                 EncodeWahRLE(wah_ref, wah_run, &model_2mc);
             }
             wah_run = 0;
             wah_ref = wah[i];
+            // wah_ref_pos = i;
         }
         ++wah_run;
     }
 
     if (wah_run) {
+        // std::cerr << "wah run left=" << wah_run << std::endl;
         if ((wah_ref != 0 && wah_ref != std::numeric_limits<uint32_t>::max()) || wah_run == 1) {
             model_2mc.mtype->EncodeSymbol(0);
             
-            // std::cerr << "Bitmap=" << std::bitset<32>(wah_ref) << ": " << __builtin_popcount(wah_ref) << std::endl;
+            // std::cerr << "Bitmap=" << std::bitset<32>(wah_ref) << ": " << __builtin_popcount(wah_ref) << " at pos=" << wah_ref_pos << std::endl;
             for (int i = 0; i < 4; ++i) {
                 model_2mc.dirty_wah->EncodeSymbol(wah_ref & 255);
+                // ref_alt[1] += __builtin_popcount(wah_ref & 255);
                 wah_ref >>= 8;
             }
             
         } else {
             model_2mc.mtype->EncodeSymbol(1);
+            // ref_alt[wah_ref & 1] += wah_run * 32;
             EncodeWahRLE(wah_ref, wah_run, &model_2mc);
         }
     }
+
+    // std::cerr << "encoding wah ref_alt=" << ref_alt[0] << "," << ref_alt[1] << std::endl;
 
     ++n_variants;
     return 1;
