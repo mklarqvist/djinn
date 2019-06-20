@@ -248,7 +248,9 @@ int PBWT::ReverseUpdateEWAH(const uint8_t* arr, const uint32_t len) {
         std::cerr << "dirty=" << ewah->dirty << std::endl;
         for (int i = 0; i < ewah->dirty; ++i) {
             to = n_s_obs + 32 > n_samples ? n_samples - n_s_obs : 32;
-            std::cerr << "dirty steps=" << to << " -> " << n_s_obs << "-" << n_s_obs+to << std::endl;
+            std::cerr << "dirty steps=" << to << " -> " << n_s_obs << "-" << n_s_obs+to << "/" << n_samples << std::endl;
+            assert(n_s_obs < n_samples);
+            
             uint32_t dirty = *((uint32_t*)(&arr[local_offset]));
             for (int j = 0; j < to; ++j) {
                 queue[dirty & 1][n_queue[dirty & 1]++] = ppa[n_s_obs];
