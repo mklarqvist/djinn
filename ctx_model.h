@@ -15,8 +15,8 @@
 * specific language governing permissions and limitations
 * under the License.
 */
-
-#include <limits>
+#include <unordered_map>//std::unordered_map
+#include <limits>//std::numeric_limit
 
 #include "djinn.h"
 #include "pbwt.h"
@@ -143,12 +143,11 @@ public:
 
     virtual void SetSamples(int64_t n_s) { n_samples = n_s; }
 
-    // virtual int Encode(uint8_t* data, uint8_t alt_alleles, const bool permute = true) =0; // todo
-    virtual int EncodeBcf(uint8_t* data, uint8_t alt_alleles, const bool permute = true) =0;
+    virtual int EncodeBcf(uint8_t* data, size_t len_data, int ploidy, uint8_t alt_alleles, const bool permute) =0;
 
     virtual void StartEncoding(bool use_pbwt, bool reset = false) =0;
     virtual size_t FinishEncoding() =0;
-    virtual int StartDecoding(djinn_block_t* block, bool reset = false) =0;
+    virtual int StartDecoding(djinn_block_t* block) =0;
 
     // Decoding requires:
     // One buffer for decoding into EWAH values.
@@ -173,12 +172,68 @@ public:
 
 /*======   Haplotype context model   ======*/
 
+// Container for haplotype context models
+struct djinn_ctx_model_container_t {
+public:
+    djinn_ctx_model_container_t(int64_t n_s, int pl, bool use_pbwt) : 
+        ploidy(pl), n_samples(n_s),
+        n_wah(std::ceil((float)n_samples / 32) * 4), 
+        n_samples_wah((n_wah * 32) / 4), 
+        wah_bitmaps(new uint32_t[n_wah]), 
+        p(new uint8_t[1000000]), p_len(0), p_cap(1000000), p_free(true),
+        range_coder(std::make_shared<RangeCoder>()), 
+        marchetype(std::make_shared<GeneralModel>(2, 1024, range_coder)),
+        model_2mc(std::make_shared<djinn_ctx_model_t>()),
+        model_2m(std::make_shared<djinn_ctx_model_t>()),
+        model_nm(std::make_shared<djinn_ctx_model_t>())
+    {
+        assert(n_s % pl == 0); // #samples/#ploidy must be divisible
+        model_2mc->Initiate2mc();
+        model_nm->InitiateNm();
+        if (use_pbwt) {
+            model_2mc->pbwt.Initiate(2, n_s);
+            model_nm->pbwt.Initiate(16, n_s);
+        }
+    }
+
+    ~djinn_ctx_model_container_t() {
+        if (p_free) {
+            delete[] p;
+        }
+        delete[] wah_bitmaps;
+    }
+
+public:
+    int ploidy;
+    int64_t n_samples; // number of "samples" = haplotypes
+
+    // Fields for constructing EWAH encodings from input data.
+    uint64_t n_wah; // Number of allocated 32-bit bitmaps
+    int64_t n_samples_wah; // Number of samples rounded up to closes 32-bit boundary
+    uint32_t* wah_bitmaps; // Bitmaps
+
+    uint8_t *p;     // data
+    uint32_t p_len; // data length
+    uint32_t p_cap:31, p_free:1; // allocated data length, ownership of data flag
+
+    // Shared range coder: All context models share this range coder and emit
+    // encodings to a shared buffer.
+    std::shared_ptr<RangeCoder> range_coder;
+    // Context model encoding the model archetype: either zero (0) for 2MC
+    // or one (1) for 2M, or two (2) for everything else.
+    // This information is required to differentiate
+    std::shared_ptr<GeneralModel> marchetype; // 0 for 2MC, 1 for 2M, 2 else
+    std::shared_ptr<djinn_ctx_model_t> model_2mc;
+    std::shared_ptr<djinn_ctx_model_t> model_2m;
+    std::shared_ptr<djinn_ctx_model_t> model_nm;
+};
+
 class djinn_ctx_model : public djinn_model {
 private:
     // 00000000,00000001,00000010,00000011
     // 00000100,00000101,00000110,00000111
     // etc.
-    static constexpr uint32_t ref_bits[16] = 
+    static constexpr const uint32_t ref_bits[16] = 
         {0,         16843009,  33686018,  50529027, 
          67372036,  84215045,  101058054, 117901063, 
          134744072, 151587081, 168430090, 185273099, 
@@ -189,14 +244,38 @@ public:
     djinn_ctx_model(uint64_t n_s);
     ~djinn_ctx_model();
 
+    // Todo: delete this
     void SetSamples(int64_t n_s) override;
 
-    // int Encode(uint8_t* data, uint8_t alt_alleles, const bool permute = true) override; // todo
-    int EncodeBcf(uint8_t* data, uint8_t alt_alleles, const bool permute = true) override;
+    /**
+     * Compress and encode data provided as a Bcf-encoded input vector of bytes.
+     * The length of the data must be divisible by the ploidy to ascertain
+     * correctness. Ploidy number is equal to the stride size in the Bcf-format.
+     * PBWT-permutation is enabled by default. Override the "permute" parameter
+     * by setting it to false.
+     * 
+     * If the provided (data length, ploidy)-tuple has not been observed before
+     * then we will treat this as a new compression group. Using this tuple instead
+     * of data length alone allows for us to distinguish between data lengths with
+     * different ploidy, e.g. (120, 4) and (120, 2) and (120, 1). Although this
+     * behaviour is illegal in Vcf/Bcf (different sample numbers per site) it is 
+     * perfectly legal in Djinn. There is currently no provided subroutines for
+     * maintaining this sample-site relationships so this needs to be implemented by
+     * the end-user, if desired.
+     * 
+     * @param data 
+     * @param len_data 
+     * @param ploidy 
+     * @param alt_alleles 
+     * @param permute 
+     * @return int 
+     */
+    int EncodeBcf(uint8_t* data, size_t len_data, int ploidy, uint8_t alt_alleles, const bool permute = true) override;
 
     void StartEncoding(bool use_pbwt, bool reset = false) override;
     size_t FinishEncoding() override;
-    int StartDecoding(djinn_block_t* block, bool reset = false) override;
+    // Implement me
+    int StartDecoding(djinn_block_t* block) override;
     
     // Retrieval.
     int GetBlockReference(djinn_block_t*& block) override;
@@ -210,8 +289,8 @@ public:
     int EncodeNm(uint8_t* data, uint32_t len);
     int EncodeWah(uint32_t* wah, uint32_t len);
     int EncodeWahNm(uint32_t* wah, uint32_t len);
-    int EncodeWahRLE(uint32_t ref, uint32_t len, djinn_ctx_model_t* model);
-    int EncodeWahRLE_nm(uint32_t ref, uint32_t len, djinn_ctx_model_t* model);
+    int EncodeWahRLE(uint32_t ref, uint32_t len, std::shared_ptr<djinn_ctx_model_t> model);
+    int EncodeWahRLE_nm(uint32_t ref, uint32_t len, std::shared_ptr<djinn_ctx_model_t> model);
 
 public:
     int DecodeNext(uint8_t* data, size_t& len) override;
@@ -221,8 +300,8 @@ public:
     // int DecodeNextRaw(uint8_t* data);
     int DecodeRaw(uint8_t* data, size_t& len);
     int DecodeRaw_nm(uint8_t* data, size_t& len);
-    int DecodeWahRLE(uint32_t& ref, uint32_t& len, djinn_ctx_model_t* model);
-    int DecodeWahRLE_nm(uint32_t& ref, uint32_t& len, djinn_ctx_model_t* model);
+    int DecodeWahRLE(uint32_t& ref, uint32_t& len, std::shared_ptr<djinn_ctx_model_t> model);
+    int DecodeWahRLE_nm(uint32_t& ref, uint32_t& len, std::shared_ptr<djinn_ctx_model_t> model);
 
 public:
     // Fields for constructing EWAH encodings from input data.
@@ -241,9 +320,16 @@ public:
     // or one (1) for 2M, or two (2) for everything else.
     // This information is required to differentiate
     std::shared_ptr<GeneralModel> marchetype; // 0 for 2MC, 1 for 2M, 2 else
-    djinn_ctx_model_t model_2mc;
-    djinn_ctx_model_t model_2m;
-    djinn_ctx_model_t model_nm;
+    std::shared_ptr<djinn_ctx_model_t> model_2mc;
+    std::shared_ptr<djinn_ctx_model_t> model_2m;
+    std::shared_ptr<djinn_ctx_model_t> model_nm;
+
+    // Todo: these objects should be placed in a container
+    // to serve arbitrary N-ploidy
+    // Todo: map from offset to ploidy (ploidy here is interpreted as number of haplotypes)
+    std::shared_ptr<GeneralModel> ploidy_dict; // 0 for first dict encoding, 1 for second etc.
+    std::unordered_map<uint64_t, uint32_t> ploidy_map; // maps (data length, ploidy) packed into a 64-bit word to model offsets
+    std::vector< std::shared_ptr<djinn_ctx_model_container_t> > ploidy_models;
 };
 
 }

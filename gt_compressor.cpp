@@ -139,7 +139,7 @@ GenotypeCompressorModelling::GenotypeCompressorModelling(int64_t n_s) : Genotype
     djn_ctx.StartEncoding(true, false);
     djn_ctx_decode.SetSamples(2*n_samples);
 
-    debug_buffer = new uint8_t[10000000];
+    debug_buffer = new char[10000000];
     len_debug = 0;
 }
 
@@ -227,7 +227,7 @@ int GenotypeCompressorModelling::Encode2N2MC(uint8_t* data, const int32_t n_data
     assert(debug_pbwt[1].UpdateDigestStride(&data[1], n_data, 2));
 #endif
 
-    djn_ctx.EncodeBcf(data, 2, permute);
+    djn_ctx.EncodeBcf(data, 2*n_samples, 2, 2, permute);
 
     ++processed_lines_local;
     ++processed_lines;
@@ -242,7 +242,7 @@ int GenotypeCompressorModelling::Encode2N2MM(uint8_t* data, const int32_t n_data
     assert(debug_pbwt[3].UpdateDigestStride(&data[1], n_data, 2));
 #endif
 
-    djn_ctx.EncodeBcf(data, 15, permute);
+    djn_ctx.EncodeBcf(data, 2*n_samples, 2, 15, permute);
 
     // std::cerr << "After Encode2N2MM: " << 15 << std::endl;
 
@@ -259,7 +259,7 @@ int GenotypeCompressorModelling::Encode2NXM(uint8_t* data, const int32_t n_data,
     assert(debug_pbwt[5].UpdateDigestStride(&data[1], n_data, 2));
 #endif
 
-    djn_ctx.EncodeBcf(data, n_alleles, permute);
+    djn_ctx.EncodeBcf(data, 2*n_samples, 2, n_alleles, permute);
 
     // std::cerr << "After Ecndoe2nXM: " << n_alleles << std::endl;
 
@@ -439,7 +439,7 @@ int GenotypeCompressorModelling::Compress(djinn_block_t*& block) {
     
     // djinn_block_t* blk = nullptr;
     djn_ctx.GetBlockReference(block); // return me
-    djn_ctx_decode.StartDecoding(block, false);
+    djn_ctx_decode.StartDecoding(block);
     
     // Start manual decoding
     djinn_ctx_t* dat_out = (djinn_ctx_t*)block->data;
@@ -448,95 +448,37 @@ int GenotypeCompressorModelling::Compress(djinn_block_t*& block) {
     uint8_t* ret_vec = new uint8_t[2*n_samples];
     size_t len_ret_vec = 0;
 
+    clockdef t1 = std::chrono::high_resolution_clock::now();
     for (int i = 0; i < djn_ctx_decode.n_variants; ++i) {
-        // std::cerr << "decoing next" << std::endl;
         int objs = djn_ctx_decode.DecodeNext(ewah_buf, offset, ret_vec, len_ret_vec);
-        // std::cerr << "objs=" << objs << std::endl;
-        assert(objs > 0);
-        uint32_t ref_alt[2] = {0};
-
-        // debug_buffer[len_debug++] = ret_vec[j+0];
-        // if (len_debug > 5000000) {
-        //     std::cout.write((char*)debug_buffer, len_debug);
-        //     len_debug = 0;
-        // }
-        
-
-        // std::cout << (int)ret_vec[0] << "|" << (int)ret_vec[1];
         for (int j = 0; j < 2*n_samples; j += 2) {
-            debug_buffer[len_debug++] = ret_vec[j+0] + '0';
+            // int ret = sprintf((char*)&debug_buffer[len_debug], "%d", ret_vec[j+0]);
+            // len_debug += ret;
+            debug_buffer[len_debug++] = (char)ret_vec[j+0] + '0';
             debug_buffer[len_debug++] = '|';
-            debug_buffer[len_debug++] = ret_vec[j+1] + '0';
+            debug_buffer[len_debug++] = (char)ret_vec[j+1] + '0';
+            // ret = sprintf((char*)&debug_buffer[len_debug], "%d", ret_vec[j+1]);
+            // len_debug += ret;
             debug_buffer[len_debug++] = '\t';
-            
-            // std::cout << (int)ret_vec[j+0] << "|" << (int)ret_vec[j+1] << "\t";
-            // ++ref_alt[ret_vec[j+0]];
-            // ++ref_alt[ret_vec[j+1]];
         }
         debug_buffer[len_debug++] = '\n';
         std::cout.write((char*)debug_buffer, len_debug);
+        
+        // Reset
         len_debug = 0;
-        // std::cout << std::endl;
-        // std::cerr << "RefAlt=" << ref_alt[0] << "," << ref_alt[1] << std::endl;
-
-        // std::cerr << i << "/" << djn_ctx_decode.n_variants << ": " << offset << " with obs=" << objs << std::endl;
-        // uint32_t local_offset = 0;
-        // uint32_t vals = 0;
-        // for (int j = 0; j < objs; ++j) {
-        //     djinn_ewah_t* ewah = (djinn_ewah_t*)&ewah_buf[local_offset];
-        //     // std::cerr << "ewah=" << ewah->ref << "," << ewah->clean << "," << ewah->dirty << std::endl;
-        //     local_offset += sizeof(djinn_ewah_t);
-        //     local_offset += ewah->dirty * sizeof(uint32_t);
-        //     vals += ewah->dirty + ewah->clean;
-
-        //     // std::cerr << "local=" << local_offset << "/" << offset << std::endl;
-        //     assert(local_offset <= offset);
-        // }
-        // // std::cerr << "vals=" << vals*32 << "/" << djn_ctx_decode.n_samples_wah << " for objs=" << objs << std::endl;
-        // assert(vals*32 == djn_ctx_decode.n_samples_wah);
-        // assert(local_offset == offset);
         offset = 0;
         len_ret_vec = 0;
     }
+    clockdef t2 = std::chrono::high_resolution_clock::now();
+    auto time_span = std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1);
+    std::cerr << "Decoded " << processed_lines_local << " records in " << time_span.count() << "us (" << time_span.count()/processed_lines_local << "us/record)" << std::endl;
+    
     delete[] ret_vec;
     delete[] ewah_buf;
-
-    /*
-    if (dat_out->ctx_models[1].n_v) {
-        std::cerr << "model1: " << dat_out->ctx_models[1].vptr_len << " and " << dat_out->ctx_models[1].n_v << std::endl;
-        for (int i = 0; i < dat_out->ctx_models[1].n_v; ++i) {
-            djn_ctx_decode.DecodeRaw(t);
-        }
-    }
-
-    if (dat_out->ctx_models[3].n_v) {
-        std::cerr << "model2: " << dat_out->ctx_models[3].vptr_len << " and " << dat_out->ctx_models[3].n_v << std::endl;
-        for (int i = 0; i < dat_out->ctx_models[3].n_v; ++i) {
-            djn_ctx_decode.DecodeRaw_nm(t);
-        }
-    }
-    */
-
-    // for (int i = 0; i < djn_ctx.model_2mc.dirty_wah->models.size(); ++i) {
-    //     const int inner = djn_ctx.model_2mc.dirty_wah->models[i]->n_symbols;
-    //     uint32_t obs = 0;
-    //     std::cerr << "Model " << i << ": ";
-    //     for (int j = 0; j < inner; ++j) {
-    //         if (djn_ctx.model_2mc.dirty_wah->models[i]->F[j].Freq > 1) { 
-    //             std::cerr << djn_ctx.model_2mc.dirty_wah->models[i]->F[j].Symbol << ":" << djn_ctx.model_2mc.dirty_wah->models[i]->F[j].Freq << ", ";
-    //         ++obs;
-    //         }
-    //     }
-    //     std::cerr << std::endl;
-    // }
-
-    // djinn_ctx_block_t* bb = (djinn_ctx_block_t*)block;
-    // std::cerr << "Outsize=" << bb->size() << std::endl;
 
     djn_ctx.StartEncoding(true, false);
     processed_lines_local = 0;
 
-    // return oblock->size();
     return 0;
 }
 

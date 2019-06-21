@@ -28,6 +28,7 @@
 // temp
 #include <bitset>
 #include <chrono>
+typedef std::chrono::high_resolution_clock::time_point clockdef;
 
 #include "gt_decompressor.h"
 
@@ -273,7 +274,7 @@ private:
 public:
    
     uint64_t bytes_out2, bytes_out3, bytes_out4;
-    uint8_t* debug_buffer;
+    char* debug_buffer;
     uint32_t len_debug;
     djinn_ctx_model djn_ctx, djn_ctx_decode;
 };
