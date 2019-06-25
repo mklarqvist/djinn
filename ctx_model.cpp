@@ -62,7 +62,6 @@ void djn_ctx_model_t::reset() {
     if (mref.get() != nullptr) mref->Reset();
     pbwt.Reset();
     n_variants = 0; p_len = 0;
-    p_len = 0;
 }
 
 int djn_ctx_model_t::StartEncoding(bool use_pbwt, bool reset) {
@@ -85,18 +84,14 @@ int djn_ctx_model_t::StartEncoding(bool use_pbwt, bool reset) {
 size_t djn_ctx_model_t::FinishEncoding() {
     if (range_coder.get() == nullptr) return -1;
     range_coder->FinishEncode();
-    p_len = range_coder->FinishEncode();
+    p_len = range_coder->OutSize();
     return range_coder->OutSize();
 }
 
-int djn_ctx_model_t::StartDecoding(uint8_t* data, bool reset) {
-    // If resetting the model_2mc->
+int djn_ctx_model_t::StartDecoding(bool use_pbwt, bool reset) {
     if (range_coder.get() == nullptr) return -1;
     if (reset) this->reset();
-    if (data == nullptr) return 0; // or result in corruption as range coder immediately loads data
-
-    if (p_free) delete[] p;
-    p = data; p_free = false;
+    if (p == nullptr) return -2; // or result in corruption as range coder immediately loads data
 
     range_coder->SetInput(p);
     range_coder->StartDecode();
@@ -181,13 +176,17 @@ int djinn_ctx_model::EncodeBcf(uint8_t* data, size_t len_data, int ploidy, uint8
             tgt_container->model_2mc->pbwt.UpdateBcf(data, 1);
         }
 
-        return (tgt_container->Encode2mc(tgt_container->model_2mc->pbwt.prev, len_data));
+        int ret = (tgt_container->Encode2mc(tgt_container->model_2mc->pbwt.prev, len_data));
+        if (ret > 0) ++n_variants;
+        return ret;
         // return Encode2mc(tgt_container->model_2mc->pbwt.prev, n_samples);
     } else {
         tgt_container->marchetype->EncodeSymbol(1);
         tgt_container->model_nm->pbwt.UpdateBcfGeneral(data, 1); // otherwise
 
-        return (tgt_container->EncodeNm(tgt_container->model_nm->pbwt.prev, len_data));
+        int ret = (tgt_container->EncodeNm(tgt_container->model_nm->pbwt.prev, len_data));
+        if (ret > 0) ++n_variants;
+        return ret;
         // return EncodeNm(tgt_container->model_nm->pbwt.prev, n_samples);
     }
 }
@@ -206,6 +205,7 @@ int djinn_ctx_model::DecodeNext(uint8_t* ewah_data, size_t& ret_ewah, uint8_t* r
 
     // Decode stream archetype.
     uint8_t type = ploidy_dict->DecodeSymbol();
+    // std::cerr << "[Decode model] Stream=" << (int)type << std::endl;
     std::shared_ptr<djn_ctx_model_container_t> tgt_container = ploidy_models[type];
 
     return(tgt_container->DecodeNext(ewah_data,ret_ewah,ret_buffer,ret_len));
@@ -255,11 +255,12 @@ size_t djinn_ctx_model::FinishEncoding() {
     size_t s_models = 0;
     for (int i = 0; i < ploidy_models.size(); ++i) {
         s_models += ploidy_models[i]->FinishEncoding();
+        std::cerr << "Model-" << i << ": " << ploidy_models[i]->range_coder->OutSize() << std::endl;
     }
 
     size_t s_rc  = range_coder->OutSize();
 
-    std::cerr << s_rc << " and models=" << s_models << std::endl;
+    std::cerr << "Model sizes=" << s_rc << " and models=" << s_models << std::endl;
     
     return s_rc + s_models;
 }
@@ -302,8 +303,42 @@ int djinn_ctx_model::StartDecoding(djinn_block_t* block) {
         }
     }
     */
+   return 1;
+}
 
-    return 1;
+int djinn_ctx_model::StartDecoding() {
+    assert(p != nullptr);
+    assert(ploidy_models.size() != 0);
+
+    for (int i = 0; i <ploidy_models.size(); ++i) {
+        ploidy_models[i]->StartDecoding(use_pbwt, init);
+    }
+
+    range_coder->SetInput(p);
+    range_coder->StartDecode();
+    /*
+    model_2mc->StartDecoding(data_out->ctx_models[1].vptr, reset);
+    model_2mc->n_variants = data_out->ctx_models[1].n_v;
+    model_nm->StartDecoding(data_out->ctx_models[3].vptr, reset);
+    model_nm->n_variants = data_out->ctx_models[3].n_v;
+
+    if (use_pbwt) {
+        if (model_2mc->pbwt.n_symbols == 0) {
+            if (n_samples == 0) {
+                std::cerr << "illegal: no sample number set!" << std::endl;
+            }
+            model_2mc->pbwt.Initiate(n_samples, 2);
+        }
+
+        if (model_nm->pbwt.n_symbols == 0) {
+            if (n_samples == 0) {
+                std::cerr << "illegal: no sample number set!" << std::endl;
+            }
+            model_nm->pbwt.Initiate(n_samples, 16);
+        }
+    }
+    */
+   return 1;
 }
 
 /*======   Container   ======*/
@@ -324,10 +359,24 @@ djn_ctx_model_container_t::djn_ctx_model_container_t(int64_t n_s, int pl, bool u
     model_nm->InitiateNm();
 }
 
+djn_ctx_model_container_t::djn_ctx_model_container_t(int64_t n_s, int pl, bool use_pbwt, uint8_t* src, uint32_t src_len) : 
+    ploidy(pl), n_samples(n_s), n_variants(0),
+    n_wah(std::ceil((float)n_samples / 32) * 4), 
+    n_samples_wah((n_wah * 32) / 4), 
+    wah_bitmaps(new uint32_t[n_wah]), 
+    p(src), p_len(src_len), p_cap(0), p_free(false),
+    range_coder(std::make_shared<RangeCoder>()), 
+    marchetype(std::make_shared<GeneralModel>(2, 1024, range_coder)),
+    model_2mc(std::make_shared<djn_ctx_model_t>()),
+    model_nm(std::make_shared<djn_ctx_model_t>())
+{
+    assert(n_s % pl == 0); // #samples/#ploidy must be divisible
+    model_2mc->Initiate2mc();
+    model_nm->InitiateNm();
+}
+
 djn_ctx_model_container_t::~djn_ctx_model_container_t() {
-    if (p_free) {
-        delete[] p;
-    }
+    if (p_free) delete[] p;
     delete[] wah_bitmaps;
 }
 
@@ -351,7 +400,6 @@ void djn_ctx_model_container_t::StartEncoding(bool use_pbwt, bool reset) {
         }
     }
 
-    // If resetting the model_2mc->
     if (reset) {
         std::cerr << "resetting" << std::endl;
         model_2mc->reset();
@@ -380,11 +428,50 @@ size_t djn_ctx_model_container_t::FinishEncoding() {
     model_nm->FinishEncoding();
 
     size_t s_rc  = range_coder->OutSize();
-    size_t s_2mc  = model_2mc->range_coder->OutSize();
+    size_t s_2mc = model_2mc->range_coder->OutSize();
     size_t s_nm  = model_nm->range_coder->OutSize();
     std::cerr << "container finish=" << s_rc << " and " << s_2mc << " and " << s_nm << std::endl; 
     
     return s_rc + s_2mc + s_nm;
+}
+
+void djn_ctx_model_container_t::StartDecoding(bool use_pbwt, bool reset) {
+    std::cerr << "in start decoding: " << model_2mc->pbwt.n_symbols << std::endl; 
+    if (use_pbwt) {
+        if (model_2mc->pbwt.n_symbols == 0) {
+            std::cerr << "init pbwt: " << n_samples << "," << 2 << std::endl;
+            if (n_samples == 0) {
+                std::cerr << "illegal: no sample number set!" << std::endl;
+            }
+            model_2mc->pbwt.Initiate(n_samples, 2);
+        }
+
+        if (model_nm->pbwt.n_symbols == 0) {
+            std::cerr << "init pbwt: " << n_samples << "," << 16 << std::endl;
+            if (n_samples == 0) {
+                std::cerr << "illegal: no sample number set!" << std::endl;
+            }
+            model_nm->pbwt.Initiate(n_samples, 16);
+        }
+    }
+
+    if (reset) {
+        std::cerr << "resetting" << std::endl;
+        model_2mc->reset();
+        model_nm->reset();
+    } else {
+        model_2mc->n_variants = 0;
+        model_nm->n_variants = 0;
+    }
+
+    // Local range coder
+    if (range_coder.get() == nullptr)
+        range_coder = std::make_shared<RangeCoder>();
+    range_coder->SetInput(p);
+    range_coder->StartDecode();
+
+    model_2mc->StartDecoding(use_pbwt, reset);
+    model_nm->StartDecoding(use_pbwt, reset);
 }
 
 int djn_ctx_model_container_t::Encode2mc(uint8_t* data, uint32_t len) {
@@ -884,6 +971,7 @@ int djn_ctx_model_container_t::DecodeNext(uint8_t* ewah_data, size_t& ret_ewah, 
 
     // Decode stream archetype.
     uint8_t type = marchetype->DecodeSymbol();
+    // std::cerr << "[Decode container] Type=" << (int)type << std::endl;
 
     size_t ret_ewah_init = ret_ewah;
     int objs = 0;

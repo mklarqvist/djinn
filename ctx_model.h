@@ -132,19 +132,50 @@ public:
 
     int StartEncoding(bool use_pbwt, bool reset = false);
     size_t FinishEncoding();
-    int StartDecoding(uint8_t* data, bool reset = false);
+    int StartDecoding(bool use_pbwt, bool reset = false);
     size_t FinishDecoding() { return 0; } // no effect
     
     void reset();
 
     // Read/write
     int Serialize(uint8_t* dst) const {
+        // Serialize as (uint32_t,uint32_t,uint8_t*):
+        // p_len, n_variants, p
         uint32_t offset = 0;
-        memcpy(dst, p, p_len);
+        *((uint32_t*)&dst[offset]) = p_len; // data length
+        offset += sizeof(uint32_t);
+        *((uint32_t*)&dst[offset]) = n_variants; // number of variants
+        offset += sizeof(uint32_t);
+        memcpy(&dst[offset], p, p_len); // data
+        offset += p_len;
+
+        // assert(range_coder->OutSize() == p_len);
+        return offset;
     }
 
     int Serialize(std::ostream& stream) const;
-    int Deserialize(uint8_t* dst);
+    
+    int Deserialize(uint8_t* dst) {
+        uint32_t offset = 0;
+        p_len = *((uint32_t*)&dst[offset]);
+        offset += sizeof(uint32_t);
+        n_variants = *((uint32_t*)&dst[offset]);
+        offset += sizeof(uint32_t);
+
+        // initiate a buffer if there is none or it's too small
+        if (p_cap == 0 || p == nullptr || p_len < p_cap) {
+            if (p_free) delete[] p;
+            p = new uint8_t[10000000];
+            p_cap = 10000000;
+            p_free = true;
+        }
+
+        memcpy(p, &dst[offset], p_len); // data
+        offset += p_len;
+        
+        return offset;
+    }
+
     int Deserialize(std::istream& stream);
     int SetDataCopy(uint8_t* data, uint32_t len);
     int SetDataReference(uint8_t* data, uint32_t len);
@@ -179,10 +210,12 @@ private:
 
 public:
     djn_ctx_model_container_t(int64_t n_s, int pl, bool use_pbwt);
+    djn_ctx_model_container_t(int64_t n_s, int pl, bool use_pbwt, uint8_t* src, uint32_t src_len);
     ~djn_ctx_model_container_t();
 
     void StartEncoding(bool use_pbwt, bool reset = false);
     size_t FinishEncoding();
+    void StartDecoding(bool use_pbwt, bool reset = false);
 
     inline void ResetBitmaps() { memset(wah_bitmaps, 0, n_wah*sizeof(uint32_t)); }
 
@@ -191,9 +224,49 @@ public:
     int DecodeNextRaw(uint8_t* data, size_t& len);
 
     // Read/write
-    int Serialize(uint8_t* dst) const;
+    int Serialize(uint8_t* dst) const {
+        // Serialize as (int,uint32_t,uint32_t,uint8_t*,ctx1,ctx2):
+        // ploidy,n_samples,n_variants,p_len,p,model_2mc,model_nm
+        uint32_t offset = 0;
+        *((int*)&dst[offset]) = ploidy; // ploidy
+        offset += sizeof(int);
+        *((uint32_t*)&dst[offset]) = n_samples; // number of samples
+        offset += sizeof(uint32_t);
+        *((uint32_t*)&dst[offset]) = n_variants; // number of variants
+        offset += sizeof(uint32_t);
+        *((uint32_t*)&dst[offset]) = p_len; // data length
+        offset += sizeof(uint32_t);
+        memcpy(&dst[offset], p, p_len); // data
+        offset += p_len;
+        offset += model_2mc->Serialize(&dst[offset]);
+        offset += model_nm->Serialize(&dst[offset]);
+        return offset;
+    }
+
     int Serialize(std::ostream& stream) const;
-    int Deserialize(uint8_t* dst);
+    
+    int Deserialize(uint8_t* dst) {
+        uint32_t offset = 0;
+        int pl = *((int*)&dst[offset]);
+        std::cerr << "pl=" << pl << " ploidy=" << ploidy << std::endl;
+        assert(pl == ploidy);
+        offset += sizeof(int);
+        uint32_t n_s = *((uint32_t*)&dst[offset]);
+        assert(n_s == n_samples);
+        offset += sizeof(uint32_t);
+        n_variants = *((uint32_t*)&dst[offset]);
+        offset += sizeof(uint32_t);
+        p_len = *((uint32_t*)&dst[offset]);
+        offset += sizeof(uint32_t);
+        memcpy(p, &dst[offset], p_len); // data
+        offset += p_len;
+        // Todo objects
+        offset += model_2mc->Deserialize(&dst[offset]);
+        offset += model_nm->Deserialize(&dst[offset]);
+
+        return(offset);
+    }
+
     int Deserialize(std::istream& stream);
     int SetDataCopy(uint8_t* data, uint32_t len);
     int SetDataReference(uint8_t* data, uint32_t len);
@@ -283,11 +356,106 @@ public:
     
     // Implement me
     int StartDecoding(djinn_block_t* block) override;
+    int StartDecoding();
 
     // Read/write
-    int Serialize(uint8_t* dst) const;
+    int Serialize(uint8_t* dst) const {
+        // Serialize as (int,uint32_t,uint32_t,uint8_t*,ctx1,ctx2):
+        // #models,p_len,p,[models...]
+        uint32_t offset = 0;
+
+        // Reserve space for offset
+        offset += sizeof(uint32_t);
+
+        // Add
+        *((int*)&dst[offset]) = (int)ploidy_models.size(); // number of models
+        offset += sizeof(int);
+        *((uint32_t*)&dst[offset]) = n_variants; // number of variants
+        offset += sizeof(uint32_t);
+
+        // Serialize bit-packed controller.
+        uint8_t pack = (use_pbwt << 7) | (init << 6) | (unused << 0);
+        dst[offset] = pack;
+        offset += sizeof(uint8_t);
+
+        *((uint32_t*)&dst[offset]) = p_len; // data length
+        offset += sizeof(uint32_t);
+        // Store model selection data.
+        memcpy(&dst[offset], p, p_len); // data
+        offset += p_len;
+
+        // std::cerr << "[Serialize] Offset here=" << offset << std::endl;
+
+        // Serialize each model.
+        for (int i = 0; i < ploidy_models.size(); ++i) {
+            offset += ploidy_models[i]->Serialize(&dst[offset]);    
+        }
+        
+        *((uint32_t*)&dst[0]) = offset;
+        return offset;
+    }
+
     int Serialize(std::ostream& stream) const;
-    int Deserialize(uint8_t* dst);
+    // Deserialize data from an external buffer.
+    int Deserialize(uint8_t* src) {
+        // Reset.
+        // Todo: fix
+        ploidy_map.clear();
+        ploidy_models.clear();
+        p_len = 0;
+
+        uint32_t offset = 0;
+
+        uint32_t tot_offset = *((uint32_t*)&src[offset]);
+        offset += sizeof(uint32_t);
+
+        int n_models = *((int*)&src[offset]);
+        offset += sizeof(int);
+        n_variants = *((uint32_t*)&src[offset]);
+        offset += sizeof(uint32_t);
+        uint8_t pack = src[offset];
+        use_pbwt = (pack >> 7) & 1;
+        init = (pack >> 6) & 1;
+        unused = 0;
+        offset += sizeof(uint8_t);
+
+        p_len = *((uint32_t*)&src[offset]);
+        offset += sizeof(uint32_t);
+        // Store model selection data.
+        memcpy(p, &src[offset], p_len);
+        offset += p_len;
+        // Deserialize each model.
+        std::cerr << "[Deserialize] Offset here=" << offset << " #models=" << n_models << std::endl;
+        
+        for (int i = 0; i < n_models; ++i) {
+            // First peek at their content to invoke correct constructor as it
+            // requires #samples, #ploidy, use_pbwt
+            // djn_ctx_model_container_t(int64_t n_s, int pl, bool use_pbwt);
+            int pl = *((int*)&src[offset]);
+            uint32_t n_s = *((uint32_t*)&src[offset+sizeof(int)]);
+            std::cerr << "[Deserialize] #pl=" << pl << ", #n_s=" << n_s << std::endl;
+            
+            // Update ploidy map and insert data in the correct position relative
+            // the encoding order.
+            const uint64_t tuple = ((uint64_t)n_s << 32) | pl;
+            auto search = ploidy_map.find(tuple);
+            if (search != ploidy_map.end()) {
+                std::cerr << "Illegal! Cannot exist! Corruption..." << std::endl;
+                exit(1);
+            } else {
+                std::cerr << "Adding map [" << tuple << "] for [" << n_s << "," << pl << "]" << std::endl; 
+                ploidy_map[tuple] = ploidy_models.size();
+                ploidy_models.push_back(std::make_shared<djinn::djn_ctx_model_container_t>(n_s, pl, (bool)use_pbwt));
+                offset += ploidy_models.back()->Deserialize(&src[offset]);
+            }
+        }
+        assert(offset == tot_offset);
+        return offset;
+    }
+
+    // Deserialize data from a IO stream. This approach is more efficient
+    // as data does NOT have to be copied and the current model can be
+    // reused.
     int Deserialize(std::istream& stream);
     int SetDataCopy(uint8_t* data, uint32_t len);
     int SetDataReference(uint8_t* data, uint32_t len);

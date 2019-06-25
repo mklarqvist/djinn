@@ -325,7 +325,6 @@ int PBWT::ReverseUpdateEWAH(const uint8_t* arr, const uint32_t len, uint8_t* ret
         // Loop over dirty bitmaps.
         // std::cerr << "dirty=" << ewah->dirty << std::endl;
         for (int i = 0; i < ewah->dirty; ++i) {
-            // to = n_s_obs + 32 > n_samples ? n_samples - n_s_obs : 32;
             to = n_s_obs + 32 > n_samples ? n_samples : n_s_obs + 32;
             // std::cerr << "dirty steps=" << n_s_obs << "->" << to << ": " << to-n_s_obs << std::endl;
             assert(n_s_obs < n_samples);

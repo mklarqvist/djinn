@@ -436,6 +436,50 @@ int GenotypeCompressorModelling::Compress(djinn_block_t*& block) {
 #if DEBUG_SIZE
     std::cerr << "[PROGRESS] Variants=" << processed_lines << "," << processed_lines_local << ": " << bytes_in << "->" << bytes_out4 << " (" << (double)bytes_in/bytes_out4 << "-fold ubcf, " << (double)bytes_in_vcf/bytes_out4 << "-fold vcf)" << std::endl;
 #endif
+
+    uint8_t* decode_buf = new uint8_t[5000000];
+    int decode_ret = djn_ctx.Serialize(decode_buf);
+    std::cerr << "Serialized model to: " << decode_ret << "b" << std::endl;
+    int decode_ctx_ret = djn_ctx_decode.Deserialize(decode_buf);
+    std::cerr << "Decode_ctx_ret=" << decode_ctx_ret << std::endl;
+    djn_ctx_decode.StartDecoding();
+    std::cerr << "[Decode] " << djn_ctx_decode.n_variants << " variants" << std::endl;
+
+    // Start manual decoding
+    uint8_t* ewah_buf = new uint8_t[65536];
+    size_t offset = 0;
+    uint8_t* ret_vec = new uint8_t[2*n_samples];
+    size_t len_ret_vec = 0;
+
+    clockdef t1 = std::chrono::high_resolution_clock::now();
+    for (int i = 0; i < djn_ctx_decode.n_variants; ++i) {
+        // std::cerr << "Decoding " << i << "/" << djn_ctx_decode.n_variants << std::endl;
+        int objs = djn_ctx_decode.DecodeNext(ewah_buf, offset, ret_vec, len_ret_vec);
+
+        for (int j = 0; j < 2*n_samples; j += 2) {
+            // int ret = sprintf((char*)&debug_buffer[len_debug], "%d", ret_vec[j+0]);
+            // len_debug += ret;
+            debug_buffer[len_debug++] = (char)ret_vec[j+0] + '0';
+            debug_buffer[len_debug++] = '|';
+            debug_buffer[len_debug++] = (char)ret_vec[j+1] + '0';
+            // ret = sprintf((char*)&debug_buffer[len_debug], "%d", ret_vec[j+1]);
+            // len_debug += ret;
+            debug_buffer[len_debug++] = '\t';
+        }
+        debug_buffer[len_debug++] = '\n';
+        std::cout.write((char*)debug_buffer, len_debug);
+        len_debug = 0;
+
+        offset = 0;
+        len_ret_vec = 0;
+    }
+    clockdef t2 = std::chrono::high_resolution_clock::now();
+    auto time_span = std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1);
+    std::cerr << "[Decode] Decoded " << processed_lines_local << " records in " << time_span.count() << "us (" << time_span.count()/processed_lines_local << "us/record)" << std::endl;
+    
+    delete[] ewah_buf;
+    delete[] ret_vec;
+    delete[] decode_buf;
     
     // djinn_block_t* blk = nullptr;
     // djn_ctx.GetBlockReference(block); // return me
