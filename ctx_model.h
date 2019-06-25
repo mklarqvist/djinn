@@ -15,94 +15,113 @@
 * specific language governing permissions and limitations
 * under the License.
 */
-#include <unordered_map>//std::unordered_map
-#include <limits>//std::numeric_limit
+#include <unordered_map> //std::unordered_map
+#include <limits> //std::numeric_limit
 
-#include "djinn.h"
-#include "pbwt.h"
+#include "djinn.h" // core components
+#include "frequency_model.h" // RangeCoder and FrequencyModel
+#include "pbwt.h" // PBWT algorithms
 
 namespace djinn {
 
-static 
-uint32_t round_log2(uint32_t x) {
+/**
+ * Supportive function for converting an input variable 
+ * x to floor(log2(x)).
+ * 
+ * @param x 
+ * @return uint32_t 
+ */
+static uint32_t round_log2(uint32_t x) {
 	uint32_t r = 0;
 	for (/**/; x; ++r) x >>= 1;
 	return r;
 }
 
-/*======   Context model container   ======*/
+/*======   Base interface for Djinn   ======*/
 
-class GeneralModel {
+class djinn_model {
 public:
-    GeneralModel() noexcept;
-    GeneralModel(int n_symbols, int model_size);
-    GeneralModel(int n_symbols, int model_size, std::shared_ptr<RangeCoder> rc);
-    GeneralModel(int n_symbols, int model_size, int shift, int step);
-    GeneralModel(int n_symbols, int model_size, int shift, int step, std::shared_ptr<RangeCoder> rc);
-    ~GeneralModel();
+    djinn_model() : use_pbwt(true), init(true), unused(0), n_samples(0), n_variants(0) {}
+    djinn_model(uint64_t n_s) : use_pbwt(true), init(true), unused(0), n_samples(n_s), n_variants(0) {}
+    virtual ~djinn_model() {}
 
-    int Initiate(int n_symbols, int model_size);
-    int Initiate(int n_symbols, int model_size, std::shared_ptr<RangeCoder> rc);
-    int Initiate(int n_symbols, int model_size, int shift, int step);
-    int Initiate(int n_symbols, int model_size, int shift, int step, std::shared_ptr<RangeCoder> rc);
+    virtual void SetSamples(int64_t n_s) { n_samples = n_s; }
 
-    int FinishEncoding();
-    int FinishDecoding();
-    void StartEncoding();
-    void StartDecoding(uint8_t* data);
+    virtual int EncodeBcf(uint8_t* data, size_t len_data, int ploidy, uint8_t alt_alleles) =0;
 
-    void EncodeSymbol(const uint16_t symbol);
-    void EncodeSymbolNoUpdate(const uint16_t symbol);
-    
-    uint16_t DecodeSymbol();
-    uint16_t DecodeSymbolNoUpdate();
+    virtual void StartEncoding(bool use_pbwt, bool reset = false) =0;
+    virtual size_t FinishEncoding() =0;
+    virtual int StartDecoding(djinn_block_t* block) =0;
 
-    void ResetModels();
-    void ResetContext();
-    void Reset();
+    // Decoding requires:
+    // One buffer for decoding into EWAH values.
+    // One buffer of size no smaller than ploidy*samples for storing the return vector of alleles.
+    virtual int DecodeNext(uint8_t* data, size_t& len) =0;
+    virtual int DecodeNext(uint8_t* ewah_data, size_t& ret_ewah, uint8_t* ret_buffer, size_t& ret_len) =0;
+    virtual int DecodeNextRaw(uint8_t* data, size_t& len) =0;
 
 public:
-    int max_model_symbols;
-    int model_context_shift;
-    uint32_t model_context, model_ctx_mask;
-    std::shared_ptr<RangeCoder> range_coder;
-    std::vector < std::shared_ptr<FrequencyModel> > models;
-    size_t n_additions; // number of updates performed
-    size_t n_buffer; // buffer size
-    uint8_t* buffer; // buffer. todo: fixme
+    uint8_t use_pbwt: 1, 
+            init: 1, 
+            unused: 6;
+    int64_t n_samples; // number of samples or haplotypes
+    uint32_t n_variants; // number of encoded variants
+
+    // Supportive array for computing allele counts to determine the presence
+    // of missing values and/or end-of-vector symbols (in Bcf-encodings).
+    uint32_t hist_alts[256];
 };
 
-/*
-Desired interface: 
+/*======   Read/write structs for context models   ======*/
 
-EncodeBcf(); // input data formatted according to bcf spec
-Encode() // any input data properly formatted
-Decode() // get a proper variant back
-DecodeRaw() // get uncompressed but encoded and unpermuted data back
+struct djn_block_t {
+public:
+    djn_block_t() : store_type(0), n_u(0), n_c(0), n_v(0), data(nullptr), data_off(0), data_free(false){}
+    djn_block_t(uint8_t type, uint32_t alloc) : store_type(type), n_u(0), n_c(0), n_v(0), data(new uint8_t[alloc]), data_off(alloc), data_free(true){}
+    djn_block_t(uint8_t type, uint8_t* in, uint32_t len) : store_type(type), n_u(0), n_c(len), n_v(0), data(in), data_off(0), data_free(false){}
+    ~djn_block_t() {
+        if (data_free) delete[] data;
+    }
 
-StartEncoding()
-StopEncoding()
-StartDecoding()
-StopDecoding() // does nothing
-*/
+public:
+    int Serialize(uint8_t* dst) const;
+    int Serialize(std::ostream& stream) const;
+    int Deserialize(uint8_t* dst);
+    int Deserialize(std::istream& stream);
+    int SetDataCopy(uint8_t* data, uint32_t len);
+    int SetDataReference(uint8_t* data, uint32_t len);
 
-/*======   GT context variant   ======*/
-
-// Todo
-struct djn_ctx_variant_t {
-    uint8_t* types;
-    uint64_t* data;
-    uint32_t n_types, n_data;
-    uint32_t m_types: 31, m_types_free: 1; 
-    uint32_t m_data: 31, m_data_free: 1;
+public:
+    int store_type;      // storage type (currently EWAH or CTX): used when decoding from a buffer
+    int n_u, n_c, n_v;   // n: size of uncompressed data, n_c: size of compressed data, 
+                         //    n_v: number of variants
+    int n_models;        // n_models: number of models stored in the data buffer
+    uint8_t* data;       // data array with allocated with data_off bytes
+    uint32_t data_off:31,// bytes allocated for data
+             data_free:1;// indicates that data must be freed
 };
 
 /*======   GT context model type   ======*/
 
-struct djinn_ctx_model_t {
+/**
+ * Naming convention: djinn_* structures/classes are considered front-end
+ * and djn_*_t* are considered back-end.
+ * 
+ * GeneralModel
+ * djinn_model               base model for context modelling and EWAH
+ * 
+ * djn_block_t
+ * djn_ctx_store_t
+ * djn_ctx_store_tt          st
+ * djn_ctx_model_t           context models for storing haplotypes: models for 2MC and NM
+ * djn_ctx_model_container_t model container for each (#samples,ploidy)-tuple context model
+ * djinn_ctx_model           root interface extending djinn_model
+ */
+
+struct djn_ctx_model_t {
 public:
-    djinn_ctx_model_t();
-    ~djinn_ctx_model_t();
+    djn_ctx_model_t();
+    ~djn_ctx_model_t();
 
     // Initiate this model as accepting either biallelic complete
     // input data (Initiate2mc) or any other (InitiateNm). Running
@@ -118,8 +137,19 @@ public:
     
     void reset();
 
+    // Read/write
+    int Serialize(uint8_t* dst) const {
+        uint32_t offset = 0;
+        memcpy(dst, p, p_len);
+    }
+
+    int Serialize(std::ostream& stream) const;
+    int Deserialize(uint8_t* dst);
+    int Deserialize(std::istream& stream);
+    int SetDataCopy(uint8_t* data, uint32_t len);
+    int SetDataReference(uint8_t* data, uint32_t len);
+
 public:
-    uint8_t use_pbwt: 1, init: 1, unused: 6;
     PBWT pbwt;
     std::shared_ptr<RangeCoder> range_coder; // shared range coder
     std::shared_ptr<GeneralModel> mref; // reference symbol for RLE encoding
@@ -133,102 +163,10 @@ public:
     uint32_t n_variants; // number of variants encoded
 };
 
-/*======   Haplotype base model   ======*/
-
-class djinn_model {
-public:
-    djinn_model() : n_samples(0), n_variants(0) {}
-    djinn_model(uint64_t n_s) : n_samples(n_s), n_variants(0) {}
-    ~djinn_model() {}
-
-    virtual void SetSamples(int64_t n_s) { n_samples = n_s; }
-
-    virtual int EncodeBcf(uint8_t* data, size_t len_data, int ploidy, uint8_t alt_alleles, const bool permute) =0;
-
-    virtual void StartEncoding(bool use_pbwt, bool reset = false) =0;
-    virtual size_t FinishEncoding() =0;
-    virtual int StartDecoding(djinn_block_t* block) =0;
-
-    // Decoding requires:
-    // One buffer for decoding into EWAH values.
-    // One buffer of size no smaller than ploidy*samples for storing the return vector of alleles.
-    virtual int DecodeNext(uint8_t* data, size_t& len) =0;
-    virtual int DecodeNext(uint8_t* ewah_data, size_t& ret_ewah, uint8_t* ret_buffer, size_t& ret_len) =0;
-    virtual int DecodeNextRaw(uint8_t* data, size_t& len) =0;
-    
-    // Retrieval.
-    virtual int GetBlockReference(djinn_block_t*& block) =0;
-    
-    // Todo
-    // virtual int GetBlock(djinn_block_t*& block) =0;
-
-public:
-    int64_t n_samples; // number of samples or haplotypes
-    uint32_t n_variants; // number of encoded variants
-    // Supportive array for computing allele counts to determine the presence
-    // of missing values and/or end-of-vector symbols (in Bcf-encodings).
-    uint32_t hist_alts[256];
-};
-
 /*======   Haplotype context model   ======*/
 
 // Container for haplotype context models
-struct djinn_ctx_model_container_t {
-public:
-    djinn_ctx_model_container_t(int64_t n_s, int pl, bool use_pbwt) : 
-        ploidy(pl), n_samples(n_s),
-        n_wah(std::ceil((float)n_samples / 32) * 4), 
-        n_samples_wah((n_wah * 32) / 4), 
-        wah_bitmaps(new uint32_t[n_wah]), 
-        p(new uint8_t[1000000]), p_len(0), p_cap(1000000), p_free(true),
-        range_coder(std::make_shared<RangeCoder>()), 
-        marchetype(std::make_shared<GeneralModel>(2, 1024, range_coder)),
-        model_2mc(std::make_shared<djinn_ctx_model_t>()),
-        model_2m(std::make_shared<djinn_ctx_model_t>()),
-        model_nm(std::make_shared<djinn_ctx_model_t>())
-    {
-        assert(n_s % pl == 0); // #samples/#ploidy must be divisible
-        model_2mc->Initiate2mc();
-        model_nm->InitiateNm();
-        if (use_pbwt) {
-            model_2mc->pbwt.Initiate(2, n_s);
-            model_nm->pbwt.Initiate(16, n_s);
-        }
-    }
-
-    ~djinn_ctx_model_container_t() {
-        if (p_free) {
-            delete[] p;
-        }
-        delete[] wah_bitmaps;
-    }
-
-public:
-    int ploidy;
-    int64_t n_samples; // number of "samples" = haplotypes
-
-    // Fields for constructing EWAH encodings from input data.
-    uint64_t n_wah; // Number of allocated 32-bit bitmaps
-    int64_t n_samples_wah; // Number of samples rounded up to closes 32-bit boundary
-    uint32_t* wah_bitmaps; // Bitmaps
-
-    uint8_t *p;     // data
-    uint32_t p_len; // data length
-    uint32_t p_cap:31, p_free:1; // allocated data length, ownership of data flag
-
-    // Shared range coder: All context models share this range coder and emit
-    // encodings to a shared buffer.
-    std::shared_ptr<RangeCoder> range_coder;
-    // Context model encoding the model archetype: either zero (0) for 2MC
-    // or one (1) for 2M, or two (2) for everything else.
-    // This information is required to differentiate
-    std::shared_ptr<GeneralModel> marchetype; // 0 for 2MC, 1 for 2M, 2 else
-    std::shared_ptr<djinn_ctx_model_t> model_2mc;
-    std::shared_ptr<djinn_ctx_model_t> model_2m;
-    std::shared_ptr<djinn_ctx_model_t> model_nm;
-};
-
-class djinn_ctx_model : public djinn_model {
+struct djn_ctx_model_container_t {
 private:
     // 00000000,00000001,00000010,00000011
     // 00000100,00000101,00000110,00000111
@@ -240,19 +178,80 @@ private:
          202116108, 218959117, 235802126, 252645135};
 
 public:
+    djn_ctx_model_container_t(int64_t n_s, int pl, bool use_pbwt);
+    ~djn_ctx_model_container_t();
+
+    void StartEncoding(bool use_pbwt, bool reset = false);
+    size_t FinishEncoding();
+
+    inline void ResetBitmaps() { memset(wah_bitmaps, 0, n_wah*sizeof(uint32_t)); }
+
+    int DecodeNext(uint8_t* data, size_t& len);
+    int DecodeNext(uint8_t* ewah_data, size_t& ret_ewah, uint8_t* ret_buffer, size_t& ret_len);
+    int DecodeNextRaw(uint8_t* data, size_t& len);
+
+    // Read/write
+    int Serialize(uint8_t* dst) const;
+    int Serialize(std::ostream& stream) const;
+    int Deserialize(uint8_t* dst);
+    int Deserialize(std::istream& stream);
+    int SetDataCopy(uint8_t* data, uint32_t len);
+    int SetDataReference(uint8_t* data, uint32_t len);
+
+public:
+    int Encode2mc(uint8_t* data, uint32_t len);
+    int EncodeNm(uint8_t* data, uint32_t len);
+    int EncodeWah(uint32_t* wah, uint32_t len);
+    int EncodeWahNm(uint32_t* wah, uint32_t len);
+    int EncodeWahRLE(uint32_t ref, uint32_t len, std::shared_ptr<djn_ctx_model_t> model);
+    int EncodeWahRLE_nm(uint32_t ref, uint32_t len, std::shared_ptr<djn_ctx_model_t> model);
+
+public:
+    int DecodeRaw(uint8_t* data, size_t& len);
+    int DecodeRaw_nm(uint8_t* data, size_t& len);
+    int DecodeWahRLE(uint32_t& ref, uint32_t& len, std::shared_ptr<djn_ctx_model_t> model);
+    int DecodeWahRLE_nm(uint32_t& ref, uint32_t& len, std::shared_ptr<djn_ctx_model_t> model);
+
+public:
+    int ploidy;
+    int64_t n_samples; // number of "samples" = haplotypes
+    int64_t n_variants;
+
+    // Fields for constructing EWAH encodings from input data.
+    uint64_t n_wah; // Number of allocated 32-bit bitmaps
+    int64_t n_samples_wah; // Number of samples rounded up to closes 32-bit boundary
+    uint32_t* wah_bitmaps; // Bitmaps
+
+    uint8_t* p;     // data
+    uint32_t p_len; // data length
+    uint32_t p_cap:31, p_free:1; // allocated data length, ownership of data flag
+
+    // Shared range coder: All context models share this range coder and emit
+    // encodings to a shared buffer.
+    std::shared_ptr<RangeCoder> range_coder;
+    // Context model encoding the model archetype: either zero (0) for 2MC
+    // or one (1) for 2M, or two (2) for everything else.
+    // This information is required to differentiate
+    std::shared_ptr<GeneralModel> marchetype; // 0 for 2MC, 2 else
+    std::shared_ptr<djn_ctx_model_t> model_2mc;
+    std::shared_ptr<djn_ctx_model_t> model_nm;
+
+    // Supportive array for computing allele counts to determine the presence
+    // of missing values and/or end-of-vector symbols (in Bcf-encodings).
+    uint32_t hist_alts[256];
+};
+
+class djinn_ctx_model : public djinn_model {
+public:
     djinn_ctx_model();
     djinn_ctx_model(uint64_t n_s);
     ~djinn_ctx_model();
-
-    // Todo: delete this
-    void SetSamples(int64_t n_s) override;
 
     /**
      * Compress and encode data provided as a Bcf-encoded input vector of bytes.
      * The length of the data must be divisible by the ploidy to ascertain
      * correctness. Ploidy number is equal to the stride size in the Bcf-format.
-     * PBWT-permutation is enabled by default. Override the "permute" parameter
-     * by setting it to false.
+     * PBWT-permutation is enabled by default.
      * 
      * If the provided (data length, ploidy)-tuple has not been observed before
      * then we will treat this as a new compression group. Using this tuple instead
@@ -267,48 +266,38 @@ public:
      * @param len_data 
      * @param ploidy 
      * @param alt_alleles 
-     * @param permute 
      * @return int 
      */
-    int EncodeBcf(uint8_t* data, size_t len_data, int ploidy, uint8_t alt_alleles, const bool permute = true) override;
+    int EncodeBcf(uint8_t* data, size_t len_data, int ploidy, uint8_t alt_alleles) override;
 
+    /**
+     * Builds all the neccessary objects before passing data for encoding. 
+     * Calling this function is REQUIRED prior to calling EncodeBcf or Encode
+     * on your target data.
+     * 
+     * @param use_pbwt 
+     * @param reset 
+     */
     void StartEncoding(bool use_pbwt, bool reset = false) override;
     size_t FinishEncoding() override;
+    
     // Implement me
     int StartDecoding(djinn_block_t* block) override;
-    
-    // Retrieval.
-    int GetBlockReference(djinn_block_t*& block) override;
-    
-    // Todo
-    // int GetBlock(djinn_block_t*& block) override;
-    
-// Internal functions
-public:
-    int Encode2mc(uint8_t* data, uint32_t len);
-    int EncodeNm(uint8_t* data, uint32_t len);
-    int EncodeWah(uint32_t* wah, uint32_t len);
-    int EncodeWahNm(uint32_t* wah, uint32_t len);
-    int EncodeWahRLE(uint32_t ref, uint32_t len, std::shared_ptr<djinn_ctx_model_t> model);
-    int EncodeWahRLE_nm(uint32_t ref, uint32_t len, std::shared_ptr<djinn_ctx_model_t> model);
+
+    // Read/write
+    int Serialize(uint8_t* dst) const;
+    int Serialize(std::ostream& stream) const;
+    int Deserialize(uint8_t* dst);
+    int Deserialize(std::istream& stream);
+    int SetDataCopy(uint8_t* data, uint32_t len);
+    int SetDataReference(uint8_t* data, uint32_t len);
 
 public:
     int DecodeNext(uint8_t* data, size_t& len) override;
     int DecodeNext(uint8_t* ewah_data, size_t& ret_ewah, uint8_t* ret_buffer, size_t& ret_len) override;
     int DecodeNextRaw(uint8_t* data, size_t& len) override;
 
-    // int DecodeNextRaw(uint8_t* data);
-    int DecodeRaw(uint8_t* data, size_t& len);
-    int DecodeRaw_nm(uint8_t* data, size_t& len);
-    int DecodeWahRLE(uint32_t& ref, uint32_t& len, std::shared_ptr<djinn_ctx_model_t> model);
-    int DecodeWahRLE_nm(uint32_t& ref, uint32_t& len, std::shared_ptr<djinn_ctx_model_t> model);
-
 public:
-    // Fields for constructing EWAH encodings from input data.
-    uint64_t n_wah; // Number of allocated 32-bit bitmaps
-    int64_t n_samples_wah; // Number of samples rounded up to closes 32-bit boundary
-    uint32_t* wah_bitmaps; // Bitmaps
-
     uint8_t *p;     // data
     uint32_t p_len; // data length
     uint32_t p_cap:31, p_free:1; // allocated data length, ownership of data flag
@@ -316,20 +305,13 @@ public:
     // Shared range coder: All context models share this range coder and emit
     // encodings to a shared buffer.
     std::shared_ptr<RangeCoder> range_coder;
-    // Context model encoding the model archetype: either zero (0) for 2MC
-    // or one (1) for 2M, or two (2) for everything else.
-    // This information is required to differentiate
-    std::shared_ptr<GeneralModel> marchetype; // 0 for 2MC, 1 for 2M, 2 else
-    std::shared_ptr<djinn_ctx_model_t> model_2mc;
-    std::shared_ptr<djinn_ctx_model_t> model_2m;
-    std::shared_ptr<djinn_ctx_model_t> model_nm;
 
     // Todo: these objects should be placed in a container
     // to serve arbitrary N-ploidy
     // Todo: map from offset to ploidy (ploidy here is interpreted as number of haplotypes)
     std::shared_ptr<GeneralModel> ploidy_dict; // 0 for first dict encoding, 1 for second etc.
     std::unordered_map<uint64_t, uint32_t> ploidy_map; // maps (data length, ploidy) packed into a 64-bit word to model offsets
-    std::vector< std::shared_ptr<djinn_ctx_model_container_t> > ploidy_models;
+    std::vector< std::shared_ptr<djn_ctx_model_container_t> > ploidy_models;
 };
 
 }

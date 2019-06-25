@@ -135,9 +135,9 @@ GenotypeCompressorModelling::GenotypeCompressorModelling(int64_t n_s) : Genotype
 
     // model
     bytes_out4 = 0;
-    djn_ctx.SetSamples(2*n_samples);
+    // djn_ctx.SetSamples(2*n_samples);
     djn_ctx.StartEncoding(true, false);
-    djn_ctx_decode.SetSamples(2*n_samples);
+    // djn_ctx_decode.SetSamples(2*n_samples);
 
     debug_buffer = new char[10000000];
     len_debug = 0;
@@ -227,7 +227,7 @@ int GenotypeCompressorModelling::Encode2N2MC(uint8_t* data, const int32_t n_data
     assert(debug_pbwt[1].UpdateDigestStride(&data[1], n_data, 2));
 #endif
 
-    djn_ctx.EncodeBcf(data, 2*n_samples, 2, 2, permute);
+    djn_ctx.EncodeBcf(data, 2*n_samples, 2, 2);
 
     ++processed_lines_local;
     ++processed_lines;
@@ -242,7 +242,7 @@ int GenotypeCompressorModelling::Encode2N2MM(uint8_t* data, const int32_t n_data
     assert(debug_pbwt[3].UpdateDigestStride(&data[1], n_data, 2));
 #endif
 
-    djn_ctx.EncodeBcf(data, 2*n_samples, 2, 15, permute);
+    djn_ctx.EncodeBcf(data, 2*n_samples, 2, 15);
 
     // std::cerr << "After Encode2N2MM: " << 15 << std::endl;
 
@@ -259,7 +259,7 @@ int GenotypeCompressorModelling::Encode2NXM(uint8_t* data, const int32_t n_data,
     assert(debug_pbwt[5].UpdateDigestStride(&data[1], n_data, 2));
 #endif
 
-    djn_ctx.EncodeBcf(data, 2*n_samples, 2, n_alleles, permute);
+    djn_ctx.EncodeBcf(data, 2*n_samples, 2, n_alleles);
 
     // std::cerr << "After Ecndoe2nXM: " << n_alleles << std::endl;
 
@@ -438,7 +438,8 @@ int GenotypeCompressorModelling::Compress(djinn_block_t*& block) {
 #endif
     
     // djinn_block_t* blk = nullptr;
-    djn_ctx.GetBlockReference(block); // return me
+    // djn_ctx.GetBlockReference(block); // return me
+    /*
     djn_ctx_decode.StartDecoding(block);
     
     // Start manual decoding
@@ -475,8 +476,8 @@ int GenotypeCompressorModelling::Compress(djinn_block_t*& block) {
     
     delete[] ret_vec;
     delete[] ewah_buf;
-
-    djn_ctx.StartEncoding(true, false);
+    */
+    djn_ctx.StartEncoding(true, true);
     processed_lines_local = 0;
 
     return 0;

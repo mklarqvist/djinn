@@ -61,8 +61,11 @@
 #define _mm_prefetch(a,b)
 #endif
 
-namespace djinn {
+#include <vector> // vector
+#include <memory> // shared_ptr
+#include <cmath> // log2
 
+namespace djinn {
 
 // Based on Subbotin Range Coder.
 class RangeCoder {
@@ -208,6 +211,48 @@ public:
     // Array of Symbols approximately sorted by Freq.
     SymFreqs sentinel;
     SymFreqs* F;
+};
+
+/*======   Context model container   ======*/
+
+class GeneralModel {
+public:
+    GeneralModel() noexcept;
+    GeneralModel(int n_symbols, int model_size);
+    GeneralModel(int n_symbols, int model_size, std::shared_ptr<RangeCoder> rc);
+    GeneralModel(int n_symbols, int model_size, int shift, int step);
+    GeneralModel(int n_symbols, int model_size, int shift, int step, std::shared_ptr<RangeCoder> rc);
+    ~GeneralModel();
+
+    int Initiate(int n_symbols, int model_size);
+    int Initiate(int n_symbols, int model_size, std::shared_ptr<RangeCoder> rc);
+    int Initiate(int n_symbols, int model_size, int shift, int step);
+    int Initiate(int n_symbols, int model_size, int shift, int step, std::shared_ptr<RangeCoder> rc);
+
+    int FinishEncoding();
+    int FinishDecoding();
+    void StartEncoding();
+    void StartDecoding(uint8_t* data);
+
+    void EncodeSymbol(const uint16_t symbol);
+    void EncodeSymbolNoUpdate(const uint16_t symbol);
+    
+    uint16_t DecodeSymbol();
+    uint16_t DecodeSymbolNoUpdate();
+
+    void ResetModels();
+    void ResetContext();
+    void Reset();
+
+public:
+    int max_model_symbols;
+    int model_context_shift;
+    uint32_t model_context, model_ctx_mask;
+    std::shared_ptr<RangeCoder> range_coder;
+    std::vector < std::shared_ptr<FrequencyModel> > models;
+    size_t n_additions; // number of updates performed
+    size_t n_buffer; // buffer size
+    uint8_t* buffer; // buffer. todo: fixme
 };
 
 }

@@ -3,249 +3,9 @@
 
 namespace djinn {
 
-/*======   Canonical representation   ======*/
-
-GeneralModel::GeneralModel() noexcept :
-    max_model_symbols(0),
-    model_context_shift(0),
-    model_context(0), model_ctx_mask(0),
-    n_buffer(10000000), buffer(new uint8_t[n_buffer]),
-    n_additions(0)
-{}
-
-GeneralModel::GeneralModel(int n_symbols, int model_size) :
-    max_model_symbols(n_symbols),
-    model_context_shift(ceil(log2(n_symbols))),
-    model_context(0), model_ctx_mask(model_size - 1),
-    range_coder(std::make_shared<RangeCoder>()),
-    n_buffer(10000000),
-    buffer(new uint8_t[n_buffer]),
-    n_additions(0)
-{
-    assert(n_symbols > 1);
-    models.resize(model_size);
-    for (int i = 0; i < model_size; ++i) models[i] = std::make_shared<FrequencyModel>();
-
-    Reset();
-}
-
-int GeneralModel::Initiate(int n_symbols, int model_size) {
-    max_model_symbols = n_symbols;
-    model_context_shift = ceil(log2(n_symbols));
-    model_context = 0; 
-    model_ctx_mask = model_size - 1;
-    range_coder = std::make_shared<RangeCoder>();
-    delete[] buffer;
-    n_buffer = 10000000;
-    buffer = new uint8_t[n_buffer];
-    n_additions = 0;
-    models.clear();
-
-    assert(n_symbols > 1);
-    models.resize(model_size);
-    for (int i = 0; i < model_size; ++i) models[i] = std::make_shared<FrequencyModel>();
-
-    Reset();
-    return 1;
-}
-
-
-GeneralModel::GeneralModel(int n_symbols, int model_size, std::shared_ptr<RangeCoder> rc) :
-    max_model_symbols(n_symbols),
-    model_context_shift(ceil(log2(n_symbols))),
-    model_context(0), model_ctx_mask(model_size - 1),
-    range_coder(rc),
-    n_buffer(0),
-    buffer(nullptr),
-    n_additions(0)
-{
-    assert(n_symbols > 1);
-    models.resize(model_size);
-    for (int i = 0; i < model_size; ++i) models[i] = std::make_shared<FrequencyModel>();
-
-    Reset();
-}
-
-int GeneralModel::Initiate(int n_symbols, int model_size, std::shared_ptr<RangeCoder> rc) {
-    max_model_symbols = n_symbols;
-    model_context_shift = ceil(log2(n_symbols));
-    model_context = 0; 
-    model_ctx_mask = model_size - 1;
-    range_coder = rc;
-    delete[] buffer;
-    n_buffer = 0;
-    buffer = nullptr;
-    n_additions = 0;
-    models.clear();
-
-    assert(n_symbols > 1);
-    models.resize(model_size);
-    for (int i = 0; i < model_size; ++i) models[i] = std::make_shared<FrequencyModel>();
-
-    Reset();
-    return 1;
-}
-
-GeneralModel::GeneralModel(int n_symbols, int model_size, int shift, int step) :
-    max_model_symbols(n_symbols),
-    model_context_shift(ceil(log2(n_symbols))),
-    model_context(0), model_ctx_mask(model_size - 1),
-    range_coder(std::make_shared<RangeCoder>()),
-    n_buffer(10000000),
-    buffer(new uint8_t[n_buffer]),
-    n_additions(0)
-{
-    assert(n_symbols > 1);
-    models.resize(model_size);
-    for (int i = 0; i < model_size; ++i) {
-        models[i] = std::make_shared<FrequencyModel>();
-        models[i]->max_total = (1 << shift) - step;
-        models[i]->step_size = step;
-    }
-
-    Reset();
-}
-
-int GeneralModel::Initiate(int n_symbols, int model_size, int shift, int step) {
-    max_model_symbols = n_symbols;
-    model_context_shift = ceil(log2(n_symbols));
-    model_context = 0; 
-    model_ctx_mask = model_size - 1;
-    range_coder = std::make_shared<RangeCoder>();
-    delete[] buffer;
-    n_buffer = 10000000;
-    buffer = new uint8_t[n_buffer];
-    n_additions = 0;
-    models.clear();
-
-    assert(n_symbols > 1);
-    models.resize(model_size);
-    for (int i = 0; i < model_size; ++i) {
-        models[i] = std::make_shared<FrequencyModel>();
-        models[i]->max_total = (1 << shift) - step;
-        models[i]->step_size = step;
-    }
-
-    Reset();
-    return 1;
-}
-
-GeneralModel::GeneralModel(int n_symbols, int model_size, int shift, int step, std::shared_ptr<RangeCoder> rc) :
-    max_model_symbols(n_symbols),
-    model_context_shift(ceil(log2(n_symbols))),
-    model_context(0), model_ctx_mask(model_size - 1),
-    range_coder(rc),
-    n_buffer(0),
-    buffer(nullptr),
-    n_additions(0)
-{
-    assert(n_symbols > 1);
-    models.resize(model_size);
-    for (int i = 0; i < model_size; ++i) {
-        models[i] = std::make_shared<FrequencyModel>();
-        models[i]->max_total = (1 << shift) - step;
-        models[i]->step_size = step;
-    }
-
-    Reset();
-}
-
-int GeneralModel::Initiate(int n_symbols, int model_size, int shift, int step, std::shared_ptr<RangeCoder> rc) {
-    max_model_symbols = n_symbols;
-    model_context_shift = ceil(log2(n_symbols));
-    model_context = 0; 
-    model_ctx_mask = model_size - 1;
-    range_coder = rc;
-    delete[] buffer;
-    n_buffer = 0;
-    buffer = nullptr;
-    n_additions = 0;
-    models.clear();
-
-    assert(n_symbols > 1);
-    models.resize(model_size);
-    for (int i = 0; i < model_size; ++i) {
-        models[i] = std::make_shared<FrequencyModel>();
-        models[i]->max_total = (1 << shift) - step;
-        models[i]->step_size = step;
-    }
-
-    Reset();
-    return 1;
-}
-
-GeneralModel::~GeneralModel() {
-    delete[] buffer;
-}
-
-void GeneralModel::Reset() {
-    n_additions = 0;
-    ResetModels();
-    ResetContext();
-}
-
-void GeneralModel::ResetModels() {
-    for (int i = 0; i < models.size(); ++i)
-        models[i]->Initiate(max_model_symbols, max_model_symbols);
-}
-
-void GeneralModel::ResetContext() { model_context = 0; }
-
-int GeneralModel::FinishEncoding() {
-    range_coder->FinishEncode();
-    int ret = range_coder->OutSize();
-    return(ret);
-}
-
-int GeneralModel::FinishDecoding() {
-    range_coder->FinishDecode();
-    return 1;
-}
-
-void GeneralModel::StartEncoding() {
-    range_coder->SetOutput(buffer);
-    range_coder->StartEncode();
-}
-
-void GeneralModel::StartDecoding(uint8_t* data) {
-    range_coder->SetInput(data);
-    range_coder->StartDecode();
-}
-
-void GeneralModel::EncodeSymbol(const uint16_t symbol) {
-    models[model_context]->EncodeSymbol(range_coder.get(), symbol);
-    model_context <<= model_context_shift;
-    model_context |= symbol;
-    model_context &= model_ctx_mask;
-    _mm_prefetch((const char *)(models[model_context].get()), _MM_HINT_T0);
-    ++n_additions;
-}
-
-void GeneralModel::EncodeSymbolNoUpdate(const uint16_t symbol) {
-    models[model_context]->EncodeSymbol(range_coder.get(), symbol);
-
-    ++n_additions;
-}
-
-uint16_t GeneralModel::DecodeSymbol() {
-    uint16_t symbol = models[model_context]->DecodeSymbol(range_coder.get());
-    model_context <<= model_context_shift;
-    model_context |= symbol;
-    model_context &= model_ctx_mask;
-    assert(model_context < models.size());
-    _mm_prefetch((const char *)(models[model_context].get()), _MM_HINT_T0);
-    return symbol;
-}
-
-uint16_t GeneralModel::DecodeSymbolNoUpdate() {
-    uint16_t symbol = models[model_context]->DecodeSymbol(range_coder.get());
-    return symbol;
-}
-
 /*======   Context container   ======*/
 
-djinn_ctx_model_t::djinn_ctx_model_t() :
-    use_pbwt(true), init(false), unused(0),
+djn_ctx_model_t::djn_ctx_model_t() :
     p(nullptr),
     p_len(0), p_cap(0), p_free(false),
     n_variants(0)
@@ -253,11 +13,11 @@ djinn_ctx_model_t::djinn_ctx_model_t() :
     
 }
 
-djinn_ctx_model_t::~djinn_ctx_model_t() {
+djn_ctx_model_t::~djn_ctx_model_t() {
     if (p_free) delete[] p;
 }
 
-void djinn_ctx_model_t::Initiate2mc() {
+void djn_ctx_model_t::Initiate2mc() {
     range_coder = std::make_shared<RangeCoder>();
     mref = std::make_shared<GeneralModel>(2, 512, 18, 32, range_coder);
     mlog_rle = std::make_shared<GeneralModel>(16, 32, 18, 16, range_coder);  // 2^32 max -> log2() = 5
@@ -272,7 +32,7 @@ void djinn_ctx_model_t::Initiate2mc() {
     mtype = std::make_shared<GeneralModel>(2, 512, 18, 1, range_coder);
 }
 
-void djinn_ctx_model_t::InitiateNm() {
+void djn_ctx_model_t::InitiateNm() {
     range_coder = std::make_shared<RangeCoder>();
     mref = std::make_shared<GeneralModel>(2, 512, 18, 32, range_coder);
     mlog_rle = std::make_shared<GeneralModel>(64, 32, 18, 16, range_coder);  // 4 bit ref, log2(32) = 5 bit -> 2^9 = 512
@@ -287,7 +47,7 @@ void djinn_ctx_model_t::InitiateNm() {
     mtype = std::make_shared<GeneralModel>(2, 512, 18, 1, range_coder);
 }
 
-void djinn_ctx_model_t::reset() {
+void djn_ctx_model_t::reset() {
     if (mref.get() != nullptr) mref->Reset();
     if (mlog_rle.get() != nullptr) mlog_rle->Reset();
     if (mrle.get() != nullptr) mrle->Reset();
@@ -302,10 +62,12 @@ void djinn_ctx_model_t::reset() {
     if (mref.get() != nullptr) mref->Reset();
     pbwt.Reset();
     n_variants = 0; p_len = 0;
+    p_len = 0;
 }
 
-int djinn_ctx_model_t::StartEncoding(bool use_pbwt, bool reset) {
+int djn_ctx_model_t::StartEncoding(bool use_pbwt, bool reset) {
     if (range_coder.get() == nullptr) return -1;
+
     if (p_cap == 0) { // initiate a buffer if there is none
         delete[] p;
         p = new uint8_t[10000000];
@@ -314,19 +76,20 @@ int djinn_ctx_model_t::StartEncoding(bool use_pbwt, bool reset) {
         p_free = true;
     }
     if (reset) this->reset();
-    this->use_pbwt = use_pbwt;
+
     range_coder->SetOutput(p);
     range_coder->StartEncode();
     return 1;
 }
 
-size_t djinn_ctx_model_t::FinishEncoding() {
+size_t djn_ctx_model_t::FinishEncoding() {
     if (range_coder.get() == nullptr) return -1;
     range_coder->FinishEncode();
+    p_len = range_coder->FinishEncode();
     return range_coder->OutSize();
 }
 
-int djinn_ctx_model_t::StartDecoding(uint8_t* data, bool reset) {
+int djn_ctx_model_t::StartDecoding(uint8_t* data, bool reset) {
     // If resetting the model_2mc->
     if (range_coder.get() == nullptr) return -1;
     if (reset) this->reset();
@@ -343,49 +106,33 @@ int djinn_ctx_model_t::StartDecoding(uint8_t* data, bool reset) {
 /*======   Varaint context model   ======*/
 
 djinn_ctx_model::djinn_ctx_model() : 
-    n_wah(0), n_samples_wah(0), wah_bitmaps(nullptr), 
     p(new uint8_t[1000000]), p_len(0), p_cap(1000000), p_free(true),
     range_coder(std::make_shared<RangeCoder>()), 
-    marchetype(std::make_shared<GeneralModel>(2, 1024, range_coder)),
-    model_2mc(std::make_shared<djinn_ctx_model_t>()),
-    model_2m(std::make_shared<djinn_ctx_model_t>()),
-    model_nm(std::make_shared<djinn_ctx_model_t>())
+    ploidy_dict(std::make_shared<GeneralModel>(256, 256, range_coder))
 {
-    model_2mc->Initiate2mc();
-    model_nm->InitiateNm();
+    
 }
 
 djinn_ctx_model::djinn_ctx_model(uint64_t n_s) : 
     djinn_model(n_s),
-    n_wah(std::ceil((float)n_samples*4 / 32)),
-    n_samples_wah((n_wah*32)/4), 
-    wah_bitmaps(new uint32_t[n_wah]), 
     p(new uint8_t[1000000]), p_len(0), p_cap(1000000), p_free(true),
     range_coder(std::make_shared<RangeCoder>()), 
-    marchetype(std::make_shared<GeneralModel>(2, 1024, range_coder)),
-    model_2mc(std::make_shared<djinn_ctx_model_t>()),
-    model_2m(std::make_shared<djinn_ctx_model_t>()),
-    model_nm(std::make_shared<djinn_ctx_model_t>())
+    ploidy_dict(std::make_shared<GeneralModel>(256, 256, range_coder))
 {
-    model_2mc->Initiate2mc();
-    model_nm->InitiateNm();
+    
 }
 
 djinn_ctx_model::~djinn_ctx_model() { 
-    delete[] wah_bitmaps;
     if (p_free) delete[] p;
 }
 
-void djinn_ctx_model::SetSamples(int64_t n_s) { 
-    n_samples = n_s;
-    n_wah = std::ceil((float)n_samples / 32) * 4;
-    n_samples_wah = (n_wah * 32) / 4;
-} 
-
-int djinn_ctx_model::EncodeBcf(uint8_t* data, size_t len_data, int ploidy, uint8_t alt_alleles, const bool permute) {
-    if (n_samples == 0) return -1;
+int djinn_ctx_model::EncodeBcf(uint8_t* data, size_t len_data, int ploidy, uint8_t alt_alleles) {
     if (data == nullptr) return -2;
     if (len_data % ploidy != 0) return -3;
+
+    // Todo: check that ploidy_dict model is initiated!
+
+    std::shared_ptr<djn_ctx_model_container_t> tgt_container;
 
     // Todo: check that input data is equal to length
     // otherwise if length/2 (haploid)
@@ -393,55 +140,254 @@ int djinn_ctx_model::EncodeBcf(uint8_t* data, size_t len_data, int ploidy, uint8
     const uint64_t tuple = ((uint64_t)len_data << 32) | ploidy;
     auto search = ploidy_map.find(tuple);
     if (search != ploidy_map.end()) {
-        // std::cerr << "Found " << search->first << " " << search->second << std::endl;
-        // Todo: retrieve correct model
+        tgt_container = ploidy_models[search->second];
+        ploidy_dict->EncodeSymbol(search->second);
     } else {
-        std::cerr << "Not found. Inserting: " << tuple << " as " << ploidy_models.size() << std::endl;
+        std::cerr << "Not found. Inserting: " << len_data << "," << ploidy << "(" << tuple << ") as " << ploidy_models.size() << std::endl;
         ploidy_map[tuple] = ploidy_models.size();
-        ploidy_models.push_back(std::make_shared<djinn::djinn_ctx_model_container_t>(len_data, ploidy, true));
+        ploidy_dict->EncodeSymbol(ploidy_models.size());
+        ploidy_models.push_back(std::make_shared<djinn::djn_ctx_model_container_t>(len_data, ploidy, true));
+        tgt_container = ploidy_models[ploidy_models.size() - 1];
+        tgt_container->StartEncoding(true, false); // Todo: fix me
         std::cerr << "done" <<std::endl;
     }
+    assert(tgt_container.get() != nullptr);
 
     memset(hist_alts, 0, 256*sizeof(uint32_t));
     for (int i = 0; i < len_data; ++i) {
         ++hist_alts[BCF_UNPACK_GENOTYPE_GENERAL(data[i])];
     }
 
+    // std::cerr << tgt_container->n_samples << "," << tgt_container->ploidy << std::endl;
+    assert(tgt_container->marchetype.get() != nullptr);
+
     // for (int i = 0; i < 256; ++i) {
     //     if (hist_alts[i]) std::cerr << i << ":" << hist_alts[i] << ",";
     // }
-    // std::cerr << " data2m=" << model_2mc->range_coder->OutSize() << " dataNm=" << model_nm->range_coder->OutSize() << " permute=" << permute << std::endl;
+    // std::cerr << " data2m=" << tgt_container->model_2mc->range_coder->OutSize() << " dataNm=" << tgt_container->model_nm->range_coder->OutSize() << " permute=" << permute << std::endl;
 
     // Biallelic, no missing, and no special EOV symbols.
     if (alt_alleles <= 2 && hist_alts[14] == 0 && hist_alts[15] == 0) {
-        marchetype->EncodeSymbol(0); // add archtype as 2mc
+        tgt_container->marchetype->EncodeSymbol(0); // add archtype as 2mc
+        // Encode archetype in the target container.
 
         // TODO: we need to remember what the minumum alt cutoff was for the unpermuting
         // process!
-        if (hist_alts[1] < 10 || permute == false) { // dont update if < 10 alts
-            for (int i = 0; i < n_samples; ++i) {
-                model_2mc->pbwt.prev[i] = BCF_UNPACK_GENOTYPE(data[model_2mc->pbwt.ppa[i]]);
+        if (hist_alts[1] < 10) { // dont update if < 10 alts
+            for (int i = 0; i < len_data; ++i) {
+                tgt_container->model_2mc->pbwt.prev[i] = BCF_UNPACK_GENOTYPE(data[tgt_container->model_2mc->pbwt.ppa[i]]);
             }
         } else {
-            model_2mc->pbwt.UpdateBcf(data, 1);
+            tgt_container->model_2mc->pbwt.UpdateBcf(data, 1);
         }
 
-        return Encode2mc(model_2mc->pbwt.prev, n_samples);
+        return (tgt_container->Encode2mc(tgt_container->model_2mc->pbwt.prev, len_data));
+        // return Encode2mc(tgt_container->model_2mc->pbwt.prev, n_samples);
     } else {
-        marchetype->EncodeSymbol(1);
-        
-        if (permute)
-            model_nm->pbwt.UpdateBcfGeneral(data, 1); // otherwise
-        else {
-            for (int i = 0; i < n_samples; ++i) {
-                model_nm->pbwt.prev[i] = BCF_UNPACK_GENOTYPE_GENERAL(data[model_nm->pbwt.ppa[i]]);
-            }
-        }
-        return EncodeNm(model_nm->pbwt.prev, n_samples);
+        tgt_container->marchetype->EncodeSymbol(1);
+        tgt_container->model_nm->pbwt.UpdateBcfGeneral(data, 1); // otherwise
+
+        return (tgt_container->EncodeNm(tgt_container->model_nm->pbwt.prev, len_data));
+        // return EncodeNm(tgt_container->model_nm->pbwt.prev, n_samples);
     }
 }
 
-int djinn_ctx_model::Encode2mc(uint8_t* data, uint32_t len) {
+int djinn_ctx_model::DecodeNext(uint8_t* data, size_t& len) {
+    if (data == nullptr) return -1;
+    uint8_t type = ploidy_dict->DecodeSymbol();
+    std::shared_ptr<djn_ctx_model_container_t> tgt_container = ploidy_models[type];
+    
+    return(tgt_container->DecodeNext(data, len));
+}
+
+int djinn_ctx_model::DecodeNext(uint8_t* ewah_data, size_t& ret_ewah, uint8_t* ret_buffer, size_t& ret_len) {
+    if (ewah_data == nullptr) return -1;
+    if (ret_buffer == nullptr) return -1;
+
+    // Decode stream archetype.
+    uint8_t type = ploidy_dict->DecodeSymbol();
+    std::shared_ptr<djn_ctx_model_container_t> tgt_container = ploidy_models[type];
+
+    return(tgt_container->DecodeNext(ewah_data,ret_ewah,ret_buffer,ret_len));
+}
+
+int djinn_ctx_model::DecodeNextRaw(uint8_t* data, size_t& len) {
+    if (data == nullptr) return -1;
+    uint8_t type = ploidy_dict->DecodeSymbol();
+
+    std::shared_ptr<djn_ctx_model_container_t> tgt_container = ploidy_models[type];
+    return(tgt_container->DecodeNextRaw(data, len));
+}
+
+void djinn_ctx_model::StartEncoding(bool use_pbwt, bool reset) {
+    // Store parameters for decoding.
+    this->use_pbwt = use_pbwt;
+    this->init = reset;
+    
+    // If resetting the model_2mc->
+    if (reset) {
+        for (int i = 0; i < ploidy_models.size(); ++i) {
+            ploidy_models[i]->model_2mc->reset();
+            ploidy_models[i]->model_nm->reset();
+        }
+    } else {
+        for (int i = 0; i < ploidy_models.size(); ++i) {
+            ploidy_models[i]->model_2mc->n_variants = 0;
+            ploidy_models[i]->model_nm->n_variants = 0;
+        }
+    }
+
+    n_variants = 0;
+
+    // Local range coder
+    range_coder->SetOutput(p);
+    range_coder->StartEncode();
+
+    for (int i = 0; i < ploidy_models.size(); ++i) {
+        ploidy_models[i]->StartEncoding(use_pbwt, reset);
+    }
+}
+
+size_t djinn_ctx_model::FinishEncoding() {
+    if (range_coder.get() == nullptr) return -1;
+    range_coder->FinishEncode();
+
+    size_t s_models = 0;
+    for (int i = 0; i < ploidy_models.size(); ++i) {
+        s_models += ploidy_models[i]->FinishEncoding();
+    }
+
+    size_t s_rc  = range_coder->OutSize();
+
+    std::cerr << s_rc << " and models=" << s_models << std::endl;
+    
+    return s_rc + s_models;
+}
+
+int djinn_ctx_model::StartDecoding(djinn_block_t* block) {
+    if (block == nullptr) return  -1;
+    if (block->type != djinn_block_t::BlockType::CONTEXT) return -2;
+    
+    djinn_ctx_t* data_out = (djinn_ctx_t*)block->data;
+
+    if (p_free) delete[] p; // if there is data and we own it then delete
+    p = data_out->ctx_models[0].vptr; p_free = false; // set data but no ownership
+    p_len = data_out->ctx_models[0].vptr_len; // set data length
+
+    bool reset = false; // fix me
+    bool use_pbwt = true; // fix this
+
+    n_variants = block->n_rcds;
+    range_coder->SetInput(p);
+    range_coder->StartDecode();
+    /*
+    model_2mc->StartDecoding(data_out->ctx_models[1].vptr, reset);
+    model_2mc->n_variants = data_out->ctx_models[1].n_v;
+    model_nm->StartDecoding(data_out->ctx_models[3].vptr, reset);
+    model_nm->n_variants = data_out->ctx_models[3].n_v;
+
+    if (use_pbwt) {
+        if (model_2mc->pbwt.n_symbols == 0) {
+            if (n_samples == 0) {
+                std::cerr << "illegal: no sample number set!" << std::endl;
+            }
+            model_2mc->pbwt.Initiate(n_samples, 2);
+        }
+
+        if (model_nm->pbwt.n_symbols == 0) {
+            if (n_samples == 0) {
+                std::cerr << "illegal: no sample number set!" << std::endl;
+            }
+            model_nm->pbwt.Initiate(n_samples, 16);
+        }
+    }
+    */
+
+    return 1;
+}
+
+/*======   Container   ======*/
+
+djn_ctx_model_container_t::djn_ctx_model_container_t(int64_t n_s, int pl, bool use_pbwt) : 
+    ploidy(pl), n_samples(n_s), n_variants(0),
+    n_wah(std::ceil((float)n_samples / 32) * 4), 
+    n_samples_wah((n_wah * 32) / 4), 
+    wah_bitmaps(new uint32_t[n_wah]), 
+    p(new uint8_t[1000000]), p_len(0), p_cap(1000000), p_free(true),
+    range_coder(std::make_shared<RangeCoder>()), 
+    marchetype(std::make_shared<GeneralModel>(2, 1024, range_coder)),
+    model_2mc(std::make_shared<djn_ctx_model_t>()),
+    model_nm(std::make_shared<djn_ctx_model_t>())
+{
+    assert(n_s % pl == 0); // #samples/#ploidy must be divisible
+    model_2mc->Initiate2mc();
+    model_nm->InitiateNm();
+}
+
+djn_ctx_model_container_t::~djn_ctx_model_container_t() {
+    if (p_free) {
+        delete[] p;
+    }
+    delete[] wah_bitmaps;
+}
+
+void djn_ctx_model_container_t::StartEncoding(bool use_pbwt, bool reset) {
+    std::cerr << "in start encoding: " << model_2mc->pbwt.n_symbols << std::endl; 
+    if (use_pbwt) {
+        if (model_2mc->pbwt.n_symbols == 0) {
+            std::cerr << "init pbwt: " << n_samples << "," << 2 << std::endl;
+            if (n_samples == 0) {
+                std::cerr << "illegal: no sample number set!" << std::endl;
+            }
+            model_2mc->pbwt.Initiate(n_samples, 2);
+        }
+
+        if (model_nm->pbwt.n_symbols == 0) {
+            std::cerr << "init pbwt: " << n_samples << "," << 16 << std::endl;
+            if (n_samples == 0) {
+                std::cerr << "illegal: no sample number set!" << std::endl;
+            }
+            model_nm->pbwt.Initiate(n_samples, 16);
+        }
+    }
+
+    // If resetting the model_2mc->
+    if (reset) {
+        std::cerr << "resetting" << std::endl;
+        model_2mc->reset();
+        model_nm->reset();
+    } else {
+        model_2mc->n_variants = 0;
+        model_nm->n_variants = 0;
+    }
+
+    n_variants = 0;
+
+    // Local range coder
+    if (range_coder.get() == nullptr)
+        range_coder = std::make_shared<RangeCoder>();
+    range_coder->SetOutput(p);
+    range_coder->StartEncode();
+
+    model_2mc->StartEncoding(use_pbwt, reset);
+    model_nm->StartEncoding(use_pbwt, reset);
+}
+
+size_t djn_ctx_model_container_t::FinishEncoding() {
+    if (range_coder.get() == nullptr) return -1;
+    range_coder->FinishEncode();
+    model_2mc->FinishEncoding();
+    model_nm->FinishEncoding();
+
+    size_t s_rc  = range_coder->OutSize();
+    size_t s_2mc  = model_2mc->range_coder->OutSize();
+    size_t s_nm  = model_nm->range_coder->OutSize();
+    std::cerr << "container finish=" << s_rc << " and " << s_2mc << " and " << s_nm << std::endl; 
+    
+    return s_rc + s_2mc + s_nm;
+}
+
+int djn_ctx_model_container_t::Encode2mc(uint8_t* data, uint32_t len) {
     if (data == nullptr) return -1;
     if (n_samples == 0) return -2;
     
@@ -460,12 +406,12 @@ int djinn_ctx_model::Encode2mc(uint8_t* data, uint32_t len) {
             // ++alts;
         }
     }
-    // std::cerr << "encoding alts=" << alts << std::endl;
+    // std::cerr << "encoding 2mc=" << n_wah/4 << "->" << n_wah/4*32 << std::endl;
 
     return EncodeWah(wah_bitmaps, n_wah/4); // 4 bytes in a 32-bit word
 }
 
-int djinn_ctx_model::EncodeNm(uint8_t* data, uint32_t len) {
+int djn_ctx_model_container_t::EncodeNm(uint8_t* data, uint32_t len) {
     if (data == nullptr) return -1;
     if (n_samples == 0) return -2;
     
@@ -475,6 +421,7 @@ int djinn_ctx_model::EncodeNm(uint8_t* data, uint32_t len) {
         wah_bitmaps = new uint32_t[n_wah];
     }
     
+    // Todo: move into ResetBitmaps() functions
     memset(wah_bitmaps, 0, n_wah*sizeof(uint32_t));
 
     for (int i = 0; i < n_samples; ++i) {
@@ -488,7 +435,422 @@ int djinn_ctx_model::EncodeNm(uint8_t* data, uint32_t len) {
     // return -1;
 }
 
-int djinn_ctx_model::DecodeNext(uint8_t* data, size_t& len) {
+int djn_ctx_model_container_t::DecodeRaw_nm(uint8_t* data, size_t& len) {
+    if (data == nullptr) return -1;
+
+    int64_t n_samples_obs = 0;
+    int objects = 0;
+
+    // Emit empty EWAH marker.
+    djinn_ewah_t* ewah = (djinn_ewah_t*)&data[len]; 
+    ewah->reset();
+    len += sizeof(djinn_ewah_t);
+
+    while(true) {
+        uint8_t type = model_nm->mtype->DecodeSymbol();
+        // data[len++] = type; // store archetype
+
+        // std::cerr << "Type=" << (int)type << std::endl;
+        if (type == 0) { // bitmaps
+            ++ewah->dirty;
+            // uint64_t wah = 0;
+            // std::cerr << "Bitmap=";
+            for (int i = 0; i < 4; ++i) {
+                data[len++] = model_nm->dirty_wah->DecodeSymbol();
+                // wah |= model_nm->dirty_wah->DecodeSymbol();
+                // std::cerr << std::bitset<8>(wah&255);
+                // wah <<= 8;
+            }
+            // std::cerr << std::endl;
+            n_samples_obs += 8;
+
+        } else { // is RLE
+            // Emit new EWAH marker
+            if (ewah->clean > 0 || ewah->dirty > 0) {
+                ewah = (djinn_ewah_t*)&data[len];
+                ewah->reset();
+                len += sizeof(djinn_ewah_t);
+                ++objects;
+            }
+
+            // Decode an RLE
+            uint32_t ref = 1; uint32_t len = 1;
+            DecodeWahRLE_nm(ref, len, model_nm);
+            // std::cerr << "decoded RLE=" << ref << " len=" << len << std::endl;
+            ewah->ref = ref & 1;
+            ewah->clean = len;
+
+            n_samples_obs += len*8;
+        }
+
+        if (n_samples_obs == n_samples_wah) {
+            // std::cerr << "obs=" << n_samples_obs << "/" << n_samples_wah << std::endl;
+            break;
+        }
+        if (n_samples_obs > n_samples_wah) {
+            std::cerr << "Decompression corruption: " << n_samples_obs << "/" << n_samples_wah  << std::endl;
+            exit(1);
+        }
+    }
+
+    if (ewah->clean > 0 || ewah->dirty > 0) {
+        ++objects;
+        // std::cerr << "final=" << std::bitset<64>(*ewah) << " ref=" << ewah_ref << ",run=" << ewah_run << ",dirty=" << ewah_dirty << std::endl;
+    }
+
+    return 1;
+}
+
+int djn_ctx_model_container_t::EncodeWah(uint32_t* wah, uint32_t len) { // input WAH-encoded data
+    if (wah == nullptr) return -1;
+    ++model_2mc->n_variants;
+
+    uint32_t wah_ref = wah[0];
+    uint32_t wah_run = 1;
+
+    // uint32_t ref_alt[2] = {0};
+    // uint32_t wah_ref_pos = 0;
+
+    for (int i = 1; i < len; ++i) {
+        if ((wah_ref != 0 && wah_ref != std::numeric_limits<uint32_t>::max()) || (wah_ref != wah[i])) {
+            if ((wah_ref != 0 && wah_ref != std::numeric_limits<uint32_t>::max()) || wah_run == 1) {
+                model_2mc->mtype->EncodeSymbol(0);
+                
+                // std::cerr << "Bitmap=" << std::bitset<32>(wah_ref) << ": " << __builtin_popcount(wah_ref) << " at pos=" << wah_ref_pos << std::endl;
+                for (int i = 0; i < 4; ++i) {
+                    model_2mc->dirty_wah->EncodeSymbol(wah_ref & 255);
+                    // std::cerr << "bitmap-" << i << " " << std::bitset<32>(wah_ref * 255)
+                    // ref_alt[1] += __builtin_popcount(wah_ref & 255);
+                    wah_ref >>= 8;
+                }
+            } else {
+                model_2mc->mtype->EncodeSymbol(1);
+                // ref_alt[wah_ref & 1] += wah_run * 32;
+                EncodeWahRLE(wah_ref, wah_run, model_2mc);
+            }
+            wah_run = 0;
+            wah_ref = wah[i];
+            // wah_ref_pos = i;
+        }
+        ++wah_run;
+    }
+
+    if (wah_run) {
+        // std::cerr << "wah run left=" << wah_run << std::endl;
+        if ((wah_ref != 0 && wah_ref != std::numeric_limits<uint32_t>::max()) || wah_run == 1) {
+            model_2mc->mtype->EncodeSymbol(0);
+            
+            // std::cerr << "Bitmap=" << std::bitset<32>(wah_ref) << ": " << __builtin_popcount(wah_ref) << " at pos=" << wah_ref_pos << std::endl;
+            for (int i = 0; i < 4; ++i) {
+                model_2mc->dirty_wah->EncodeSymbol(wah_ref & 255);
+                // ref_alt[1] += __builtin_popcount(wah_ref & 255);
+                wah_ref >>= 8;
+            }
+            
+        } else {
+            model_2mc->mtype->EncodeSymbol(1);
+            // ref_alt[wah_ref & 1] += wah_run * 32;
+            EncodeWahRLE(wah_ref, wah_run, model_2mc);
+        }
+    }
+
+    // std::cerr << "encoding wah ref_alt=" << ref_alt[0] << "," << ref_alt[1] << std::endl;
+
+    ++n_variants;
+    return 1;
+}
+
+int djn_ctx_model_container_t::EncodeWahNm(uint32_t* wah, uint32_t len) { // input WAH-encoded data
+    if (wah == nullptr) return -1;
+
+    ++model_nm->n_variants;
+
+    // std::cerr << "refnm=" << std::bitset<32>(wah[0]) << std::endl;
+
+    uint32_t wah_ref = wah[0];
+    uint64_t wah_run = 1;
+
+    for (int i = 1; i < len; ++i) {
+        if ((wah_ref != ref_bits[1] && wah_ref != ref_bits[2] && wah_ref != ref_bits[0]) || (wah_ref != wah[i])) {
+            if ((wah_ref != wah_bitmaps[i]) || wah_run == 1) {
+                // std::cerr << "Bitmap=" << std::bitset<64>(wah_ref) << " = " << wah_ref << std::endl;
+                model_nm->mtype->EncodeSymbol(0);
+                for (int i = 0; i < 4; ++i) {
+                    model_nm->dirty_wah->EncodeSymbol(wah_ref & 255);
+                    wah_ref >>= 8;
+                }
+            } else {
+                // std::cerr << "RLE=" << wah_ref << "(" << (wah_ref&15) << "):" << wah_run << std::endl;
+                model_nm->mtype->EncodeSymbol(1);
+                EncodeWahRLE_nm(wah_ref, wah_run, model_nm);
+            }
+            wah_run = 0;
+            wah_ref = wah[i];
+        }
+        ++wah_run;
+    }
+
+    if (wah_run) {
+        if ((wah_ref != ref_bits[1] && wah_ref != ref_bits[2] && wah_ref != ref_bits[0]) || wah_run == 1) {
+            // std::cerr << "Bitmap=" << std::bitset<64>(wah_ref) << " = " << wah_ref << std::endl;
+            model_nm->mtype->EncodeSymbol(0);
+            
+            for (int i = 0; i < 4; ++i) {
+                model_nm->dirty_wah->EncodeSymbol(wah_ref & 255);
+                wah_ref >>= 8;
+            }
+            
+        } else {
+            // std::cerr << "RLE=" << wah_ref << "(" << (wah_ref&15) << "):" << wah_run << std::endl;
+            model_nm->mtype->EncodeSymbol(1);
+            EncodeWahRLE_nm(wah_ref, wah_run, model_nm);
+        }
+    }
+
+    ++n_variants;
+    return 1;
+}
+
+int djn_ctx_model_container_t::EncodeWahRLE(uint32_t ref, uint32_t len, std::shared_ptr<djn_ctx_model_t> model) {
+    // Length cannot be 0 so remove 1
+    // len -= 1;
+
+    model->mref->EncodeSymbol(ref&1);
+    uint32_t log_length = round_log2(len);
+    model->mlog_rle->EncodeSymbol(log_length);
+
+    // std::cerr << "RLE=" << (ref&1) << ",len=" << len << ",log=" << log_length << std::endl;
+
+    if (log_length < 2) {
+        // std::cerr << "single=" << len << "," << (ref&1) << std::endl;
+    }
+    else if (log_length <= 8) {
+        assert(len < 256);
+        model->mrle->model_context <<= 1;
+        model->mrle->model_context |= (ref & 1);
+        model->mrle->model_context <<= 5;
+        model->mrle->model_context |= log_length;
+        model->mrle->model_context &= model->mrle->model_ctx_mask;
+        model->mrle->EncodeSymbolNoUpdate(len & 255);
+
+    } else if (log_length <= 16) {
+        assert(len < 65536);
+        model->mrle2_1->model_context <<= 1;
+        model->mrle2_1->model_context |= (ref & 1);
+        model->mrle2_1->model_context <<= 5;
+        model->mrle2_1->model_context |= log_length;
+        model->mrle2_1->model_context &= model->mrle2_1->model_ctx_mask;
+        model->mrle2_1->EncodeSymbolNoUpdate(len & 255);
+        len >>= 8;
+        model->mrle2_2->model_context <<= 1;
+        model->mrle2_2->model_context |= (ref & 1);
+        model->mrle2_2->model_context <<= 5;
+        model->mrle2_2->model_context |= log_length;
+        model->mrle2_2->model_context &= model->mrle2_2->model_ctx_mask;
+        model->mrle2_2->EncodeSymbolNoUpdate(len & 255);
+    } else {
+        model->mrle4_1->model_context <<= 1;
+        model->mrle4_1->model_context |= (ref & 1);
+        model->mrle4_1->model_context <<= 5;
+        model->mrle4_1->model_context |= log_length;
+        model->mrle4_1->model_context &= model->mrle4_1->model_ctx_mask;
+        model->mrle4_1->EncodeSymbolNoUpdate(len & 255);
+        len >>= 8;
+        model->mrle4_2->model_context <<= 1;
+        model->mrle4_2->model_context |= (ref & 1);
+        model->mrle4_2->model_context <<= 5;
+        model->mrle4_2->model_context |= log_length;
+        model->mrle4_2->model_context &= model->mrle4_2->model_ctx_mask;
+        model->mrle4_2->EncodeSymbolNoUpdate(len & 255);
+        len >>= 8;
+        model->mrle4_3->model_context <<= 1;
+        model->mrle4_3->model_context |= (ref & 1);
+        model->mrle4_3->model_context <<= 5;
+        model->mrle4_3->model_context |= log_length;
+        model->mrle4_3->model_context &= model->mrle4_3->model_ctx_mask;
+        model->mrle4_3->EncodeSymbolNoUpdate(len & 255);
+        len >>= 8;
+        model->mrle4_4->model_context <<= 1;
+        model->mrle4_4->model_context |= (ref & 1);
+        model->mrle4_4->model_context <<= 5;
+        model->mrle4_4->model_context |= log_length;
+        model->mrle4_4->model_context &= model->mrle4_4->model_ctx_mask;
+        model->mrle4_4->EncodeSymbolNoUpdate(len & 255);
+    }
+
+    return 1;
+}
+
+int djn_ctx_model_container_t::EncodeWahRLE_nm(uint32_t ref, uint32_t len, std::shared_ptr<djn_ctx_model_t> model) {
+    model->mref->EncodeSymbol(ref & 15);
+    uint32_t log_length = round_log2(len);
+    model->mlog_rle->EncodeSymbol(log_length);
+
+    // std::cerr << "nmRLE=" << (ref&15) << ",len=" << len << ",log=" << log_length << std::endl;
+
+    if (log_length < 2) {
+        std::cerr << "single=" << len << "," << (ref & 15) << std::endl;
+    }
+    else if (log_length <= 8) {
+        assert(len < 256);
+        model->mrle->model_context = (ref & 15);
+        model->mrle->model_context <<= 5;
+        model->mrle->model_context |= log_length;
+        model->mrle->model_context &= model->mrle->model_ctx_mask;
+        model->mrle->EncodeSymbolNoUpdate(len & 255);
+
+    } else if (log_length <= 16) {
+        assert(len < 65536);
+        model->mrle2_1->model_context = (ref & 15);
+        model->mrle2_1->model_context <<= 5;
+        model->mrle2_1->model_context |= log_length;
+        model->mrle2_1->model_context &= model->mrle2_1->model_ctx_mask;
+        model->mrle2_1->EncodeSymbolNoUpdate(len & 255);
+        len >>= 8;
+        model->mrle2_2->model_context = (ref & 15);
+        model->mrle2_2->model_context <<= 5;
+        model->mrle2_2->model_context |= log_length;
+        model->mrle2_2->model_context &= model->mrle2_2->model_ctx_mask;
+        model->mrle2_2->EncodeSymbolNoUpdate(len & 255);
+    } else {
+        model->mrle4_1->model_context = (ref & 15);
+        model->mrle4_1->model_context <<= 5;
+        model->mrle4_1->model_context |= log_length;
+        model->mrle4_1->model_context &= model->mrle4_1->model_ctx_mask;
+        model->mrle4_1->EncodeSymbolNoUpdate(len & 255);
+        len >>= 8;
+        model->mrle4_2->model_context = (ref & 15);
+        model->mrle4_2->model_context <<= 5;
+        model->mrle4_2->model_context |= log_length;
+        model->mrle4_2->model_context &= model->mrle4_2->model_ctx_mask;
+        model->mrle4_2->EncodeSymbolNoUpdate(len & 255);
+        len >>= 8;
+        model->mrle4_3->model_context = (ref & 15);
+        model->mrle4_3->model_context <<= 5;
+        model->mrle4_3->model_context |= log_length;
+        model->mrle4_3->model_context &= model->mrle4_3->model_ctx_mask;
+        model->mrle4_3->EncodeSymbolNoUpdate(len & 255);
+        len >>= 8;
+        model->mrle4_4->model_context = (ref & 15);
+        model->mrle4_4->model_context <<= 5;
+        model->mrle4_4->model_context |= log_length;
+        model->mrle4_4->model_context &= model->mrle4_4->model_ctx_mask;
+        model->mrle4_4->EncodeSymbolNoUpdate(len & 255);
+    }
+
+    return 1;
+}
+
+int djn_ctx_model_container_t::DecodeWahRLE(uint32_t& ref, uint32_t& len, std::shared_ptr<djn_ctx_model_t> model) {
+    ref = model->mref->DecodeSymbol();
+    uint32_t log_length = model->mlog_rle->DecodeSymbol();
+    // std::cerr << "ref=" << ref << " log=" << log_length << std::endl;
+
+    if (log_length < 2) {
+        std::cerr << "single=" << len << "," << (ref&1) << std::endl;
+    }
+    else if (log_length <= 8) {
+        model->mrle->model_context <<= 1;
+        model->mrle->model_context |= (ref & 1);
+        model->mrle->model_context <<= 5;
+        model->mrle->model_context |= log_length;
+        model->mrle->model_context &= model->mrle->model_ctx_mask;
+        len = model->mrle->DecodeSymbolNoUpdate();
+    } else if (log_length <= 16) {
+        model->mrle2_1->model_context <<= 1;
+        model->mrle2_1->model_context |= (ref & 1);
+        model->mrle2_1->model_context <<= 5;
+        model->mrle2_1->model_context |= log_length;
+        model->mrle2_1->model_context &= model->mrle2_1->model_ctx_mask;
+        len = model->mrle2_1->DecodeSymbolNoUpdate();
+        model->mrle2_2->model_context <<= 1;
+        model->mrle2_2->model_context |= (ref & 1);
+        model->mrle2_2->model_context <<= 5;
+        model->mrle2_2->model_context |= log_length;
+        model->mrle2_2->model_context &= model->mrle2_2->model_ctx_mask;
+        len |= (uint32_t)model->mrle2_2->DecodeSymbolNoUpdate() << 8;
+    } else {
+        model->mrle4_1->model_context <<= 1;
+        model->mrle4_1->model_context |= (ref & 1);
+        model->mrle4_1->model_context <<= 5;
+        model->mrle4_1->model_context |= log_length;
+        model->mrle4_1->model_context &= model->mrle4_1->model_ctx_mask;
+        len = model->mrle4_1->DecodeSymbolNoUpdate();
+        model->mrle4_2->model_context <<= 1;
+        model->mrle4_2->model_context |= (ref & 1);
+        model->mrle4_2->model_context <<= 5;
+        model->mrle4_2->model_context |= log_length;
+        model->mrle4_2->model_context &= model->mrle4_2->model_ctx_mask;
+        len |= (uint32_t)model->mrle4_2->DecodeSymbolNoUpdate() << 8;
+        model->mrle4_3->model_context <<= 1;
+        model->mrle4_3->model_context |= (ref & 1);
+        model->mrle4_3->model_context <<= 5;
+        model->mrle4_3->model_context |= log_length;
+        model->mrle4_3->model_context &= model->mrle4_3->model_ctx_mask;
+        len |= (uint32_t)model->mrle4_3->DecodeSymbolNoUpdate() << 16;
+        model->mrle4_4->model_context <<= 1;
+        model->mrle4_4->model_context |= (ref & 1);
+        model->mrle4_4->model_context <<= 5;
+        model->mrle4_4->model_context |= log_length;
+        model->mrle4_4->model_context &= model->mrle4_4->model_ctx_mask;
+        len |= (uint32_t)model->mrle4_4->DecodeSymbolNoUpdate() << 24;
+    }
+
+    return 1;
+}
+
+int djn_ctx_model_container_t::DecodeWahRLE_nm(uint32_t& ref, uint32_t& len, std::shared_ptr<djn_ctx_model_t> model) {
+    ref = model->mref->DecodeSymbol();
+    uint32_t log_length = model->mlog_rle->DecodeSymbol();
+    // std::cerr << "ref=" << ref << " log=" << log_length << std::endl;
+
+    if (log_length < 2) {
+        std::cerr << "single=" << len << "," << (ref&15) << std::endl;
+    }
+    else if (log_length <= 8) {
+        model->mrle->model_context = (ref & 15);
+        model->mrle->model_context <<= 5;
+        model->mrle->model_context |= log_length;
+        model->mrle->model_context &= model->mrle->model_ctx_mask;
+        len = model->mrle->DecodeSymbolNoUpdate();
+    } else if (log_length <= 16) {
+        model->mrle2_1->model_context = (ref & 15);
+        model->mrle2_1->model_context <<= 5;
+        model->mrle2_1->model_context |= log_length;
+        model->mrle2_1->model_context &= model->mrle2_1->model_ctx_mask;
+        len = model->mrle2_1->DecodeSymbolNoUpdate();
+        model->mrle2_2->model_context = (ref & 15);
+        model->mrle2_2->model_context <<= 5;
+        model->mrle2_2->model_context |= log_length;
+        model->mrle2_2->model_context &= model->mrle2_2->model_ctx_mask;
+        len |= (uint32_t)model->mrle2_2->DecodeSymbolNoUpdate() << 8;
+    } else {
+        model->mrle4_1->model_context = (ref & 15);
+        model->mrle4_1->model_context <<= 5;
+        model->mrle4_1->model_context |= log_length;
+        model->mrle4_1->model_context &= model->mrle4_1->model_ctx_mask;
+        len = model->mrle4_1->DecodeSymbolNoUpdate();
+        model->mrle4_2->model_context = (ref & 15);
+        model->mrle4_2->model_context <<= 5;
+        model->mrle4_2->model_context |= log_length;
+        model->mrle4_2->model_context &= model->mrle4_2->model_ctx_mask;
+        len |= (uint32_t)model->mrle4_2->DecodeSymbolNoUpdate() << 8;
+        model->mrle4_3->model_context = (ref & 15);
+        model->mrle4_3->model_context <<= 5;
+        model->mrle4_3->model_context |= log_length;
+        model->mrle4_3->model_context &= model->mrle4_3->model_ctx_mask;
+        len |= (uint32_t)model->mrle4_3->DecodeSymbolNoUpdate() << 16;
+        model->mrle4_4->model_context = (ref & 15);
+        model->mrle4_4->model_context <<= 5;
+        model->mrle4_4->model_context |= log_length;
+        model->mrle4_4->model_context &= model->mrle4_4->model_ctx_mask;
+        len |= (uint32_t)model->mrle4_4->DecodeSymbolNoUpdate() << 24;
+    }
+
+    return 1;
+}
+
+int djn_ctx_model_container_t::DecodeNext(uint8_t* data, size_t& len) {
     if (data == nullptr) return -1;
     uint8_t type = marchetype->DecodeSymbol();
     
@@ -496,7 +858,6 @@ int djinn_ctx_model::DecodeNext(uint8_t* data, size_t& len) {
     // Step 1: DecodeRaw
     // Step 2: if PBWT -> unpermute
     // Step 3: inflate (either raw, bcf-style, or bitmap encodings)
-
     int objs = 0;
     switch(type) {
     case 0: objs = DecodeRaw(data, len); break;
@@ -505,18 +866,19 @@ int djinn_ctx_model::DecodeNext(uint8_t* data, size_t& len) {
     }
 
     // Compute alts
+    // Todo: fixme
 
 
     if (objs <= 0) return -1;
     switch(type) {
-        case 0: model_2mc->pbwt.ReverseUpdateEWAH(data, len); break;
-        case 1: model_nm->pbwt.ReverseUpdateEWAH(data, len); break;
+    case 0: model_2mc->pbwt.ReverseUpdateEWAH(data, len); break;
+    case 1: model_nm->pbwt.ReverseUpdateEWAH(data, len); break;
     }
 
     return objs;
 }
 
-int djinn_ctx_model::DecodeNext(uint8_t* ewah_data, size_t& ret_ewah, uint8_t* ret_buffer, size_t& ret_len) {
+int djn_ctx_model_container_t::DecodeNext(uint8_t* ewah_data, size_t& ret_ewah, uint8_t* ret_buffer, size_t& ret_len) {
     if (ewah_data == nullptr) return -1;
     if (ret_buffer == nullptr) return -1;
 
@@ -537,8 +899,8 @@ int djinn_ctx_model::DecodeNext(uint8_t* ewah_data, size_t& ret_ewah, uint8_t* r
 
     if (hist_alts[1] >= 10) {
         switch(type) {
-            case 0: model_2mc->pbwt.ReverseUpdateEWAH(ewah_data, ret_ewah, ret_buffer); break;
-            case 1: model_nm->pbwt.ReverseUpdateEWAH(ewah_data, ret_ewah, ret_buffer); break;
+        case 0: model_2mc->pbwt.ReverseUpdateEWAH(ewah_data, ret_ewah, ret_buffer); break;
+        case 1: model_nm->pbwt.ReverseUpdateEWAH(ewah_data, ret_ewah, ret_buffer); break;
         }
     } else {
         // Todo: finish me
@@ -583,7 +945,7 @@ int djinn_ctx_model::DecodeNext(uint8_t* ewah_data, size_t& ret_ewah, uint8_t* r
     return objs;
 }
 
-int djinn_ctx_model::DecodeNextRaw(uint8_t* data, size_t& len) {
+int djn_ctx_model_container_t::DecodeNextRaw(uint8_t* data, size_t& len) {
     if (data == nullptr) return -1;
     uint8_t type = marchetype->DecodeSymbol();
     
@@ -598,7 +960,7 @@ int djinn_ctx_model::DecodeNextRaw(uint8_t* data, size_t& len) {
 }
 
 // Return raw, potentially permuted, EWAH encoding
-int djinn_ctx_model::DecodeRaw(uint8_t* data, size_t& len) {
+int djn_ctx_model_container_t::DecodeRaw(uint8_t* data, size_t& len) {
     if (data == nullptr) return -1;
 
     int64_t n_samples_obs = 0;
@@ -678,560 +1040,6 @@ int djinn_ctx_model::DecodeRaw(uint8_t* data, size_t& len) {
     // std::cerr << "ewah decode ref_alt=" << ref_alt[0] << "," << ref_alt[1] << std::endl;
 
     return objects;
-}
-
-int djinn_ctx_model::DecodeRaw_nm(uint8_t* data, size_t& len) {
-    if (data == nullptr) return -1;
-
-    int64_t n_samples_obs = 0;
-    int objects = 0;
-
-    // Emit empty EWAH marker.
-    djinn_ewah_t* ewah = (djinn_ewah_t*)&data[len]; 
-    ewah->reset();
-    len += sizeof(djinn_ewah_t);
-
-    while(true) {
-        uint8_t type = model_nm->mtype->DecodeSymbol();
-        // data[len++] = type; // store archetype
-
-        // std::cerr << "Type=" << (int)type << std::endl;
-        if (type == 0) { // bitmaps
-            ++ewah->dirty;
-            // uint64_t wah = 0;
-            // std::cerr << "Bitmap=";
-            for (int i = 0; i < 4; ++i) {
-                data[len++] = model_nm->dirty_wah->DecodeSymbol();
-                // wah |= model_nm->dirty_wah->DecodeSymbol();
-                // std::cerr << std::bitset<8>(wah&255);
-                // wah <<= 8;
-            }
-            // std::cerr << std::endl;
-            n_samples_obs += 8;
-
-        } else { // is RLE
-            // Emit new EWAH marker
-            if (ewah->clean > 0 || ewah->dirty > 0) {
-                ewah = (djinn_ewah_t*)&data[len];
-                ewah->reset();
-                len += sizeof(djinn_ewah_t);
-                ++objects;
-            }
-
-            // Decode an RLE
-            uint32_t ref = 1; uint32_t len = 1;
-            DecodeWahRLE_nm(ref, len, model_nm);
-            // std::cerr << "decoded RLE=" << ref << " len=" << len << std::endl;
-            ewah->ref = ref & 1;
-            ewah->clean = len;
-
-            n_samples_obs += len*8;
-        }
-
-        if (n_samples_obs == n_samples_wah) {
-            // std::cerr << "obs=" << n_samples_obs << "/" << n_samples_wah << std::endl;
-            break;
-        }
-        if (n_samples_obs > n_samples_wah) {
-            std::cerr << "Decompression corruption: " << n_samples_obs << "/" << n_samples_wah  << std::endl;
-            exit(1);
-        }
-    }
-
-    if (ewah->clean > 0 || ewah->dirty > 0) {
-        ++objects;
-        // std::cerr << "final=" << std::bitset<64>(*ewah) << " ref=" << ewah_ref << ",run=" << ewah_run << ",dirty=" << ewah_dirty << std::endl;
-    }
-
-    return 1;
-}
-
-int djinn_ctx_model::EncodeWah(uint32_t* wah, uint32_t len) { // input WAH-encoded data
-    if (wah == nullptr) return -1;
-    ++model_2mc->n_variants;
-
-    uint32_t wah_ref = wah[0];
-    uint32_t wah_run = 1;
-
-    // uint32_t ref_alt[2] = {0};
-    // uint32_t wah_ref_pos = 0;
-
-    for (int i = 1; i < len; ++i) {
-        if ((wah_ref != 0 && wah_ref != std::numeric_limits<uint32_t>::max()) || (wah_ref != wah[i])) {
-            if ((wah_ref != 0 && wah_ref != std::numeric_limits<uint32_t>::max()) || wah_run == 1) {
-                model_2mc->mtype->EncodeSymbol(0);
-                
-                // std::cerr << "Bitmap=" << std::bitset<32>(wah_ref) << ": " << __builtin_popcount(wah_ref) << " at pos=" << wah_ref_pos << std::endl;
-                for (int i = 0; i < 4; ++i) {
-                    model_2mc->dirty_wah->EncodeSymbol(wah_ref & 255);
-                    // std::cerr << "bitmap-" << i << " " << std::bitset<32>(wah_ref * 255)
-                    // ref_alt[1] += __builtin_popcount(wah_ref & 255);
-                    wah_ref >>= 8;
-                }
-            } else {
-                model_2mc->mtype->EncodeSymbol(1);
-                // ref_alt[wah_ref & 1] += wah_run * 32;
-                EncodeWahRLE(wah_ref, wah_run, model_2mc);
-            }
-            wah_run = 0;
-            wah_ref = wah[i];
-            // wah_ref_pos = i;
-        }
-        ++wah_run;
-    }
-
-    if (wah_run) {
-        // std::cerr << "wah run left=" << wah_run << std::endl;
-        if ((wah_ref != 0 && wah_ref != std::numeric_limits<uint32_t>::max()) || wah_run == 1) {
-            model_2mc->mtype->EncodeSymbol(0);
-            
-            // std::cerr << "Bitmap=" << std::bitset<32>(wah_ref) << ": " << __builtin_popcount(wah_ref) << " at pos=" << wah_ref_pos << std::endl;
-            for (int i = 0; i < 4; ++i) {
-                model_2mc->dirty_wah->EncodeSymbol(wah_ref & 255);
-                // ref_alt[1] += __builtin_popcount(wah_ref & 255);
-                wah_ref >>= 8;
-            }
-            
-        } else {
-            model_2mc->mtype->EncodeSymbol(1);
-            // ref_alt[wah_ref & 1] += wah_run * 32;
-            EncodeWahRLE(wah_ref, wah_run, model_2mc);
-        }
-    }
-
-    // std::cerr << "encoding wah ref_alt=" << ref_alt[0] << "," << ref_alt[1] << std::endl;
-
-    ++n_variants;
-    return 1;
-}
-
-int djinn_ctx_model::EncodeWahNm(uint32_t* wah, uint32_t len) { // input WAH-encoded data
-    if (wah == nullptr) return -1;
-
-    ++model_nm->n_variants;
-
-    // std::cerr << "refnm=" << std::bitset<32>(wah[0]) << std::endl;
-
-    uint32_t wah_ref = wah[0];
-    uint64_t wah_run = 1;
-
-    for (int i = 1; i < len; ++i) {
-        if ((wah_ref != ref_bits[1] && wah_ref != ref_bits[2] && wah_ref != ref_bits[0]) || (wah_ref != wah[i])) {
-            if ((wah_ref != wah_bitmaps[i]) || wah_run == 1) {
-                // std::cerr << "Bitmap=" << std::bitset<64>(wah_ref) << " = " << wah_ref << std::endl;
-                model_nm->mtype->EncodeSymbol(0);
-                for (int i = 0; i < 4; ++i) {
-                    model_nm->dirty_wah->EncodeSymbol(wah_ref & 255);
-                    wah_ref >>= 8;
-                }
-            } else {
-                // std::cerr << "RLE=" << wah_ref << "(" << (wah_ref&15) << "):" << wah_run << std::endl;
-                model_nm->mtype->EncodeSymbol(1);
-                EncodeWahRLE_nm(wah_ref, wah_run, model_nm);
-            }
-            wah_run = 0;
-            wah_ref = wah[i];
-        }
-        ++wah_run;
-    }
-
-    if (wah_run) {
-        if ((wah_ref != ref_bits[1] && wah_ref != ref_bits[2] && wah_ref != ref_bits[0]) || wah_run == 1) {
-            // std::cerr << "Bitmap=" << std::bitset<64>(wah_ref) << " = " << wah_ref << std::endl;
-            model_nm->mtype->EncodeSymbol(0);
-            
-            for (int i = 0; i < 4; ++i) {
-                model_nm->dirty_wah->EncodeSymbol(wah_ref & 255);
-                wah_ref >>= 8;
-            }
-            
-        } else {
-            // std::cerr << "RLE=" << wah_ref << "(" << (wah_ref&15) << "):" << wah_run << std::endl;
-            model_nm->mtype->EncodeSymbol(1);
-            EncodeWahRLE_nm(wah_ref, wah_run, model_nm);
-        }
-    }
-
-    ++n_variants;
-    return 1;
-}
-
-int djinn_ctx_model::EncodeWahRLE(uint32_t ref, uint32_t len, std::shared_ptr<djinn_ctx_model_t> model) {
-    // Length cannot be 0 so remove 1
-    // len -= 1;
-
-    model->mref->EncodeSymbol(ref&1);
-    uint32_t log_length = round_log2(len);
-    model->mlog_rle->EncodeSymbol(log_length);
-
-    // std::cerr << "RLE=" << (ref&1) << ",len=" << len << ",log=" << log_length << std::endl;
-
-    if (log_length < 2) {
-        // std::cerr << "single=" << len << "," << (ref&1) << std::endl;
-    }
-    else if (log_length <= 8) {
-        assert(len < 256);
-        model->mrle->model_context <<= 1;
-        model->mrle->model_context |= (ref & 1);
-        model->mrle->model_context <<= 5;
-        model->mrle->model_context |= log_length;
-        model->mrle->model_context &= model->mrle->model_ctx_mask;
-        model->mrle->EncodeSymbolNoUpdate(len & 255);
-
-    } else if (log_length <= 16) {
-        assert(len < 65536);
-        model->mrle2_1->model_context <<= 1;
-        model->mrle2_1->model_context |= (ref & 1);
-        model->mrle2_1->model_context <<= 5;
-        model->mrle2_1->model_context |= log_length;
-        model->mrle2_1->model_context &= model->mrle2_1->model_ctx_mask;
-        model->mrle2_1->EncodeSymbolNoUpdate(len & 255);
-        len >>= 8;
-        model->mrle2_2->model_context <<= 1;
-        model->mrle2_2->model_context |= (ref & 1);
-        model->mrle2_2->model_context <<= 5;
-        model->mrle2_2->model_context |= log_length;
-        model->mrle2_2->model_context &= model->mrle2_2->model_ctx_mask;
-        model->mrle2_2->EncodeSymbolNoUpdate(len & 255);
-    } else {
-        model->mrle4_1->model_context <<= 1;
-        model->mrle4_1->model_context |= (ref & 1);
-        model->mrle4_1->model_context <<= 5;
-        model->mrle4_1->model_context |= log_length;
-        model->mrle4_1->model_context &= model->mrle4_1->model_ctx_mask;
-        model->mrle4_1->EncodeSymbolNoUpdate(len & 255);
-        len >>= 8;
-        model->mrle4_2->model_context <<= 1;
-        model->mrle4_2->model_context |= (ref & 1);
-        model->mrle4_2->model_context <<= 5;
-        model->mrle4_2->model_context |= log_length;
-        model->mrle4_2->model_context &= model->mrle4_2->model_ctx_mask;
-        model->mrle4_2->EncodeSymbolNoUpdate(len & 255);
-        len >>= 8;
-        model->mrle4_3->model_context <<= 1;
-        model->mrle4_3->model_context |= (ref & 1);
-        model->mrle4_3->model_context <<= 5;
-        model->mrle4_3->model_context |= log_length;
-        model->mrle4_3->model_context &= model->mrle4_3->model_ctx_mask;
-        model->mrle4_3->EncodeSymbolNoUpdate(len & 255);
-        len >>= 8;
-        model->mrle4_4->model_context <<= 1;
-        model->mrle4_4->model_context |= (ref & 1);
-        model->mrle4_4->model_context <<= 5;
-        model->mrle4_4->model_context |= log_length;
-        model->mrle4_4->model_context &= model->mrle4_4->model_ctx_mask;
-        model->mrle4_4->EncodeSymbolNoUpdate(len & 255);
-    }
-
-    return 1;
-}
-
-int djinn_ctx_model::EncodeWahRLE_nm(uint32_t ref, uint32_t len, std::shared_ptr<djinn_ctx_model_t> model) {
-    model->mref->EncodeSymbol(ref & 15);
-    uint32_t log_length = round_log2(len);
-    model->mlog_rle->EncodeSymbol(log_length);
-
-    // std::cerr << "nmRLE=" << (ref&15) << ",len=" << len << ",log=" << log_length << std::endl;
-
-    if (log_length < 2) {
-        std::cerr << "single=" << len << "," << (ref & 15) << std::endl;
-    }
-    else if (log_length <= 8) {
-        assert(len < 256);
-        model->mrle->model_context = (ref & 15);
-        model->mrle->model_context <<= 5;
-        model->mrle->model_context |= log_length;
-        model->mrle->model_context &= model->mrle->model_ctx_mask;
-        model->mrle->EncodeSymbolNoUpdate(len & 255);
-
-    } else if (log_length <= 16) {
-        assert(len < 65536);
-        model->mrle2_1->model_context = (ref & 15);
-        model->mrle2_1->model_context <<= 5;
-        model->mrle2_1->model_context |= log_length;
-        model->mrle2_1->model_context &= model->mrle2_1->model_ctx_mask;
-        model->mrle2_1->EncodeSymbolNoUpdate(len & 255);
-        len >>= 8;
-        model->mrle2_2->model_context = (ref & 15);
-        model->mrle2_2->model_context <<= 5;
-        model->mrle2_2->model_context |= log_length;
-        model->mrle2_2->model_context &= model->mrle2_2->model_ctx_mask;
-        model->mrle2_2->EncodeSymbolNoUpdate(len & 255);
-    } else {
-        model->mrle4_1->model_context = (ref & 15);
-        model->mrle4_1->model_context <<= 5;
-        model->mrle4_1->model_context |= log_length;
-        model->mrle4_1->model_context &= model->mrle4_1->model_ctx_mask;
-        model->mrle4_1->EncodeSymbolNoUpdate(len & 255);
-        len >>= 8;
-        model->mrle4_2->model_context = (ref & 15);
-        model->mrle4_2->model_context <<= 5;
-        model->mrle4_2->model_context |= log_length;
-        model->mrle4_2->model_context &= model->mrle4_2->model_ctx_mask;
-        model->mrle4_2->EncodeSymbolNoUpdate(len & 255);
-        len >>= 8;
-        model->mrle4_3->model_context = (ref & 15);
-        model->mrle4_3->model_context <<= 5;
-        model->mrle4_3->model_context |= log_length;
-        model->mrle4_3->model_context &= model->mrle4_3->model_ctx_mask;
-        model->mrle4_3->EncodeSymbolNoUpdate(len & 255);
-        len >>= 8;
-        model->mrle4_4->model_context = (ref & 15);
-        model->mrle4_4->model_context <<= 5;
-        model->mrle4_4->model_context |= log_length;
-        model->mrle4_4->model_context &= model->mrle4_4->model_ctx_mask;
-        model->mrle4_4->EncodeSymbolNoUpdate(len & 255);
-    }
-
-    return 1;
-}
-
-int djinn_ctx_model::DecodeWahRLE(uint32_t& ref, uint32_t& len, std::shared_ptr<djinn_ctx_model_t> model) {
-    ref = model->mref->DecodeSymbol();
-    uint32_t log_length = model->mlog_rle->DecodeSymbol();
-    // std::cerr << "ref=" << ref << " log=" << log_length << std::endl;
-
-    if (log_length < 2) {
-        std::cerr << "single=" << len << "," << (ref&1) << std::endl;
-    }
-    else if (log_length <= 8) {
-        model->mrle->model_context <<= 1;
-        model->mrle->model_context |= (ref & 1);
-        model->mrle->model_context <<= 5;
-        model->mrle->model_context |= log_length;
-        model->mrle->model_context &= model->mrle->model_ctx_mask;
-        len = model->mrle->DecodeSymbolNoUpdate();
-    } else if (log_length <= 16) {
-        model->mrle2_1->model_context <<= 1;
-        model->mrle2_1->model_context |= (ref & 1);
-        model->mrle2_1->model_context <<= 5;
-        model->mrle2_1->model_context |= log_length;
-        model->mrle2_1->model_context &= model->mrle2_1->model_ctx_mask;
-        len = model->mrle2_1->DecodeSymbolNoUpdate();
-        model->mrle2_2->model_context <<= 1;
-        model->mrle2_2->model_context |= (ref & 1);
-        model->mrle2_2->model_context <<= 5;
-        model->mrle2_2->model_context |= log_length;
-        model->mrle2_2->model_context &= model->mrle2_2->model_ctx_mask;
-        len |= (uint32_t)model->mrle2_2->DecodeSymbolNoUpdate() << 8;
-    } else {
-        model->mrle4_1->model_context <<= 1;
-        model->mrle4_1->model_context |= (ref & 1);
-        model->mrle4_1->model_context <<= 5;
-        model->mrle4_1->model_context |= log_length;
-        model->mrle4_1->model_context &= model->mrle4_1->model_ctx_mask;
-        len = model->mrle4_1->DecodeSymbolNoUpdate();
-        model->mrle4_2->model_context <<= 1;
-        model->mrle4_2->model_context |= (ref & 1);
-        model->mrle4_2->model_context <<= 5;
-        model->mrle4_2->model_context |= log_length;
-        model->mrle4_2->model_context &= model->mrle4_2->model_ctx_mask;
-        len |= (uint32_t)model->mrle4_2->DecodeSymbolNoUpdate() << 8;
-        model->mrle4_3->model_context <<= 1;
-        model->mrle4_3->model_context |= (ref & 1);
-        model->mrle4_3->model_context <<= 5;
-        model->mrle4_3->model_context |= log_length;
-        model->mrle4_3->model_context &= model->mrle4_3->model_ctx_mask;
-        len |= (uint32_t)model->mrle4_3->DecodeSymbolNoUpdate() << 16;
-        model->mrle4_4->model_context <<= 1;
-        model->mrle4_4->model_context |= (ref & 1);
-        model->mrle4_4->model_context <<= 5;
-        model->mrle4_4->model_context |= log_length;
-        model->mrle4_4->model_context &= model->mrle4_4->model_ctx_mask;
-        len |= (uint32_t)model->mrle4_4->DecodeSymbolNoUpdate() << 24;
-    }
-
-    return 1;
-}
-
-int djinn_ctx_model::DecodeWahRLE_nm(uint32_t& ref, uint32_t& len, std::shared_ptr<djinn_ctx_model_t> model) {
-    ref = model->mref->DecodeSymbol();
-    uint32_t log_length = model->mlog_rle->DecodeSymbol();
-    // std::cerr << "ref=" << ref << " log=" << log_length << std::endl;
-
-    if (log_length < 2) {
-        std::cerr << "single=" << len << "," << (ref&15) << std::endl;
-    }
-    else if (log_length <= 8) {
-        model->mrle->model_context = (ref & 15);
-        model->mrle->model_context <<= 5;
-        model->mrle->model_context |= log_length;
-        model->mrle->model_context &= model->mrle->model_ctx_mask;
-        len = model->mrle->DecodeSymbolNoUpdate();
-    } else if (log_length <= 16) {
-        model->mrle2_1->model_context = (ref & 15);
-        model->mrle2_1->model_context <<= 5;
-        model->mrle2_1->model_context |= log_length;
-        model->mrle2_1->model_context &= model->mrle2_1->model_ctx_mask;
-        len = model->mrle2_1->DecodeSymbolNoUpdate();
-        model->mrle2_2->model_context = (ref & 15);
-        model->mrle2_2->model_context <<= 5;
-        model->mrle2_2->model_context |= log_length;
-        model->mrle2_2->model_context &= model->mrle2_2->model_ctx_mask;
-        len |= (uint32_t)model->mrle2_2->DecodeSymbolNoUpdate() << 8;
-    } else {
-        model->mrle4_1->model_context = (ref & 15);
-        model->mrle4_1->model_context <<= 5;
-        model->mrle4_1->model_context |= log_length;
-        model->mrle4_1->model_context &= model->mrle4_1->model_ctx_mask;
-        len = model->mrle4_1->DecodeSymbolNoUpdate();
-        model->mrle4_2->model_context = (ref & 15);
-        model->mrle4_2->model_context <<= 5;
-        model->mrle4_2->model_context |= log_length;
-        model->mrle4_2->model_context &= model->mrle4_2->model_ctx_mask;
-        len |= (uint32_t)model->mrle4_2->DecodeSymbolNoUpdate() << 8;
-        model->mrle4_3->model_context = (ref & 15);
-        model->mrle4_3->model_context <<= 5;
-        model->mrle4_3->model_context |= log_length;
-        model->mrle4_3->model_context &= model->mrle4_3->model_ctx_mask;
-        len |= (uint32_t)model->mrle4_3->DecodeSymbolNoUpdate() << 16;
-        model->mrle4_4->model_context = (ref & 15);
-        model->mrle4_4->model_context <<= 5;
-        model->mrle4_4->model_context |= log_length;
-        model->mrle4_4->model_context &= model->mrle4_4->model_ctx_mask;
-        len |= (uint32_t)model->mrle4_4->DecodeSymbolNoUpdate() << 24;
-    }
-
-    return 1;
-}
-
-void djinn_ctx_model::StartEncoding(bool use_pbwt, bool reset) {
-    if (use_pbwt) {
-        if (model_2mc->pbwt.n_symbols == 0) {
-            if (n_samples == 0) {
-                std::cerr << "illegal: no sample number set!" << std::endl;
-            }
-            model_2mc->pbwt.Initiate(n_samples, 2);
-        }
-
-        if (model_nm->pbwt.n_symbols == 0) {
-            if (n_samples == 0) {
-                std::cerr << "illegal: no sample number set!" << std::endl;
-            }
-            model_nm->pbwt.Initiate(n_samples, 16);
-        }
-    }
-
-    // If resetting the model_2mc->
-    if (reset) {
-        std::cerr << "resetting" << std::endl;
-        model_2mc->reset();
-        model_nm->reset();
-    } else {
-        model_2mc->n_variants = 0;
-        model_nm->n_variants = 0;
-    }
-
-    n_variants = 0;
-
-    // Local range coder
-    range_coder->SetOutput(p);
-    range_coder->StartEncode();
-
-    model_2mc->StartEncoding(use_pbwt, reset);
-    model_nm->StartEncoding(use_pbwt, reset);
-}
-
-size_t djinn_ctx_model::FinishEncoding() {
-    if (range_coder.get() == nullptr) return -1;
-    range_coder->FinishEncode();
-    model_2mc->FinishEncoding();
-    model_nm->FinishEncoding();
-
-    size_t s_rc  = range_coder->OutSize();
-    size_t s_2mc = model_2mc->range_coder->OutSize();
-    size_t s_nm  = model_nm->range_coder->OutSize();
-    // std::cerr << s_rc << " and " << s_2mc << " and " << s_nm << std::endl;
-    
-    return s_rc + s_2mc + s_nm;
-}
-
-int djinn_ctx_model::StartDecoding(djinn_block_t* block) {
-    if (block == nullptr) return  -1;
-    if (block->type != djinn_block_t::BlockType::CONTEXT) return -2;
-    
-    djinn_ctx_t* data_out = (djinn_ctx_t*)block->data;
-
-    if (p_free) delete[] p; // if there is data and we own it then delete
-    p = data_out->ctx_models[0].vptr; p_free = false; // set data but no ownership
-    p_len = data_out->ctx_models[0].vptr_len; // set data length
-
-    bool reset = false; // fix me
-    bool use_pbwt = true; // fix this
-
-    n_variants = block->n_rcds;
-    range_coder->SetInput(p);
-    range_coder->StartDecode();
-    model_2mc->StartDecoding(data_out->ctx_models[1].vptr, reset);
-    model_2mc->n_variants = data_out->ctx_models[1].n_v;
-    model_nm->StartDecoding(data_out->ctx_models[3].vptr, reset);
-    model_nm->n_variants = data_out->ctx_models[3].n_v;
-
-    if (use_pbwt) {
-        if (model_2mc->pbwt.n_symbols == 0) {
-            if (n_samples == 0) {
-                std::cerr << "illegal: no sample number set!" << std::endl;
-            }
-            model_2mc->pbwt.Initiate(n_samples, 2);
-        }
-
-        if (model_nm->pbwt.n_symbols == 0) {
-            if (n_samples == 0) {
-                std::cerr << "illegal: no sample number set!" << std::endl;
-            }
-            model_nm->pbwt.Initiate(n_samples, 16);
-        }
-    }
-
-    return 1;
-}
-
-int djinn_ctx_model::GetBlockReference(djinn_block_t*& block) {
-    if (block != nullptr) {
-        if (block->type != djinn_block_t::BlockType::CONTEXT) {
-            delete block;
-            block = nullptr;
-        } else { // block type is correct context: if data is set then reset it otherwise initiate
-            if (block->data != nullptr) {
-                block->data->reset();
-            } else {
-                block->data = new djinn_ctx_t();
-            }
-        }
-    } else { // data is nullptr
-        block = new djinn_ctx_block_t;
-        block->type = djinn_block_t::BlockType::CONTEXT;
-        block->data = new djinn_ctx_t();
-    }
-    // Internal pointer.
-    djinn_ctx_t* data_out = (djinn_ctx_t*)block->data;
-
-    // Archetype
-    data_out->ctx_models[0].SetDataReference(p, range_coder->OutSize());
-    data_out->ctx_models[0].n = 0;
-    data_out->ctx_models[0].n_c = range_coder->OutSize();
-    data_out->ctx_models[0].n_v = n_variants;
-
-    std::shared_ptr<djinn_ctx_model_t> target_model[3] = {model_2mc, model_2m, model_nm};
-    for (int i = 0; i < 3; ++i) {
-        // std::cerr << target_model[i]->n_variants << std::endl;
-        if (target_model[i]->n_variants) {
-            data_out->ctx_models[i+1].SetDataReference(target_model[i]->p, target_model[i]->range_coder->OutSize());
-            data_out->ctx_models[i+1].n = 0;
-            data_out->ctx_models[i+1].n_c = target_model[i]->range_coder->OutSize();
-            data_out->ctx_models[i+1].n_v = target_model[i]->n_variants;
-        }
-    }
-
-    block->n_rcds = n_variants;
-    block->p_len = data_out->SerializedSize();
-    djinn_ctx_ctrl_t* ctrl = (djinn_ctx_ctrl_t*)&block->ctrl;
-    ctrl->pbwt = model_2mc->use_pbwt;
-    ctrl->dimc = model_2mc->n_variants > 0;
-    ctrl->dim  = model_2m->n_variants > 0;
-    ctrl->nm   = model_nm->n_variants > 0;
-
-    return 1;
 }
 
 }
