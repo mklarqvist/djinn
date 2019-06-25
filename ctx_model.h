@@ -56,9 +56,10 @@ public:
     // Decoding requires:
     // One buffer for decoding into EWAH values.
     // One buffer of size no smaller than ploidy*samples for storing the return vector of alleles.
-    virtual int DecodeNext(uint8_t* data, size_t& len) =0;
-    virtual int DecodeNext(uint8_t* ewah_data, size_t& ret_ewah, uint8_t* ret_buffer, size_t& ret_len) =0;
-    virtual int DecodeNextRaw(uint8_t* data, size_t& len) =0;
+    virtual int DecodeNext(uint8_t* data, uint32_t& len) =0;
+    virtual int DecodeNext(uint8_t* ewah_data, uint32_t& ret_ewah, uint8_t* ret_buffer, uint32_t& ret_len) =0;
+    virtual int DecodeNext(uint8_t* ewah_data, uint32_t& ret_ewah, djinn_variant_t*& variant) =0;
+    virtual int DecodeNextRaw(uint8_t* data, uint32_t& len) =0;
 
 public:
     uint8_t use_pbwt: 1, 
@@ -70,35 +71,6 @@ public:
     // Supportive array for computing allele counts to determine the presence
     // of missing values and/or end-of-vector symbols (in Bcf-encodings).
     uint32_t hist_alts[256];
-};
-
-/*======   Read/write structs for context models   ======*/
-
-struct djn_block_t {
-public:
-    djn_block_t() : store_type(0), n_u(0), n_c(0), n_v(0), data(nullptr), data_off(0), data_free(false){}
-    djn_block_t(uint8_t type, uint32_t alloc) : store_type(type), n_u(0), n_c(0), n_v(0), data(new uint8_t[alloc]), data_off(alloc), data_free(true){}
-    djn_block_t(uint8_t type, uint8_t* in, uint32_t len) : store_type(type), n_u(0), n_c(len), n_v(0), data(in), data_off(0), data_free(false){}
-    ~djn_block_t() {
-        if (data_free) delete[] data;
-    }
-
-public:
-    int Serialize(uint8_t* dst) const;
-    int Serialize(std::ostream& stream) const;
-    int Deserialize(uint8_t* dst);
-    int Deserialize(std::istream& stream);
-    int SetDataCopy(uint8_t* data, uint32_t len);
-    int SetDataReference(uint8_t* data, uint32_t len);
-
-public:
-    int store_type;      // storage type (currently EWAH or CTX): used when decoding from a buffer
-    int n_u, n_c, n_v;   // n: size of uncompressed data, n_c: size of compressed data, 
-                         //    n_v: number of variants
-    int n_models;        // n_models: number of models stored in the data buffer
-    uint8_t* data;       // data array with allocated with data_off bytes
-    uint32_t data_off:31,// bytes allocated for data
-             data_free:1;// indicates that data must be freed
 };
 
 /*======   GT context model type   ======*/
@@ -219,9 +191,9 @@ public:
 
     inline void ResetBitmaps() { memset(wah_bitmaps, 0, n_wah*sizeof(uint32_t)); }
 
-    int DecodeNext(uint8_t* data, size_t& len);
-    int DecodeNext(uint8_t* ewah_data, size_t& ret_ewah, uint8_t* ret_buffer, size_t& ret_len);
-    int DecodeNextRaw(uint8_t* data, size_t& len);
+    int DecodeNext(uint8_t* data, uint32_t& len);
+    int DecodeNext(uint8_t* ewah_data, uint32_t& ret_ewah, uint8_t* ret_buffer, uint32_t& ret_len);
+    int DecodeNextRaw(uint8_t* data, uint32_t& len);
 
     // Read/write
     int Serialize(uint8_t* dst) const {
@@ -280,12 +252,14 @@ public:
     int EncodeWahRLE_nm(uint32_t ref, uint32_t len, std::shared_ptr<djn_ctx_model_t> model);
 
 public:
-    int DecodeRaw(uint8_t* data, size_t& len);
-    int DecodeRaw_nm(uint8_t* data, size_t& len);
+    int DecodeRaw(uint8_t* data, uint32_t& len);
+    int DecodeRaw_nm(uint8_t* data, uint32_t& len);
     int DecodeWahRLE(uint32_t& ref, uint32_t& len, std::shared_ptr<djn_ctx_model_t> model);
     int DecodeWahRLE_nm(uint32_t& ref, uint32_t& len, std::shared_ptr<djn_ctx_model_t> model);
 
 public:
+    bool use_pbwt;
+
     int ploidy;
     int64_t n_samples; // number of "samples" = haplotypes
     int64_t n_variants;
@@ -461,9 +435,10 @@ public:
     int SetDataReference(uint8_t* data, uint32_t len);
 
 public:
-    int DecodeNext(uint8_t* data, size_t& len) override;
-    int DecodeNext(uint8_t* ewah_data, size_t& ret_ewah, uint8_t* ret_buffer, size_t& ret_len) override;
-    int DecodeNextRaw(uint8_t* data, size_t& len) override;
+    int DecodeNext(uint8_t* data, uint32_t& len) override;
+    int DecodeNext(uint8_t* ewah_data, uint32_t& ret_ewah, uint8_t* ret_buffer, uint32_t& ret_len) override;
+    int DecodeNext(uint8_t* ewah_data, uint32_t& ret_ewah, djinn_variant_t*& variant) override;
+    int DecodeNextRaw(uint8_t* data, uint32_t& len) override;
 
 public:
     uint8_t *p;     // data

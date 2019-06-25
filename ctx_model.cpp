@@ -124,36 +124,33 @@ djinn_ctx_model::~djinn_ctx_model() {
 int djinn_ctx_model::EncodeBcf(uint8_t* data, size_t len_data, int ploidy, uint8_t alt_alleles) {
     if (data == nullptr) return -2;
     if (len_data % ploidy != 0) return -3;
+    // Currently limited to 14 alt alleles + missing + EOV marker (total of 16).
+    assert(alt_alleles < 14);
 
     // Todo: check that ploidy_dict model is initiated!
-
     std::shared_ptr<djn_ctx_model_container_t> tgt_container;
 
-    // Todo: check that input data is equal to length
-    // otherwise if length/2 (haploid)
-    // otherwise store but no PBWT regardless of desired or not
     const uint64_t tuple = ((uint64_t)len_data << 32) | ploidy;
     auto search = ploidy_map.find(tuple);
     if (search != ploidy_map.end()) {
         tgt_container = ploidy_models[search->second];
         ploidy_dict->EncodeSymbol(search->second);
     } else {
-        std::cerr << "Not found. Inserting: " << len_data << "," << ploidy << "(" << tuple << ") as " << ploidy_models.size() << std::endl;
+        // std::cerr << "Not found. Inserting: " << len_data << "," << ploidy << "(" << tuple << ") as " << ploidy_models.size() << std::endl;
         ploidy_map[tuple] = ploidy_models.size();
         ploidy_dict->EncodeSymbol(ploidy_models.size());
         ploidy_models.push_back(std::make_shared<djinn::djn_ctx_model_container_t>(len_data, ploidy, true));
         tgt_container = ploidy_models[ploidy_models.size() - 1];
         tgt_container->StartEncoding(true, false); // Todo: fix me
-        std::cerr << "done" <<std::endl;
     }
     assert(tgt_container.get() != nullptr);
 
+    // Compute allele counts.
     memset(hist_alts, 0, 256*sizeof(uint32_t));
     for (int i = 0; i < len_data; ++i) {
         ++hist_alts[BCF_UNPACK_GENOTYPE_GENERAL(data[i])];
     }
-
-    // std::cerr << tgt_container->n_samples << "," << tgt_container->ploidy << std::endl;
+    // Check.
     assert(tgt_container->marchetype.get() != nullptr);
 
     // for (int i = 0; i < 256; ++i) {
@@ -164,10 +161,7 @@ int djinn_ctx_model::EncodeBcf(uint8_t* data, size_t len_data, int ploidy, uint8
     // Biallelic, no missing, and no special EOV symbols.
     if (alt_alleles <= 2 && hist_alts[14] == 0 && hist_alts[15] == 0) {
         tgt_container->marchetype->EncodeSymbol(0); // add archtype as 2mc
-        // Encode archetype in the target container.
 
-        // TODO: we need to remember what the minumum alt cutoff was for the unpermuting
-        // process!
         if (hist_alts[1] < 10) { // dont update if < 10 alts
             for (int i = 0; i < len_data; ++i) {
                 tgt_container->model_2mc->pbwt.prev[i] = BCF_UNPACK_GENOTYPE(data[tgt_container->model_2mc->pbwt.ppa[i]]);
@@ -179,19 +173,17 @@ int djinn_ctx_model::EncodeBcf(uint8_t* data, size_t len_data, int ploidy, uint8
         int ret = (tgt_container->Encode2mc(tgt_container->model_2mc->pbwt.prev, len_data));
         if (ret > 0) ++n_variants;
         return ret;
-        // return Encode2mc(tgt_container->model_2mc->pbwt.prev, n_samples);
-    } else {
+    } else { // Otherwise.
         tgt_container->marchetype->EncodeSymbol(1);
         tgt_container->model_nm->pbwt.UpdateBcfGeneral(data, 1); // otherwise
 
         int ret = (tgt_container->EncodeNm(tgt_container->model_nm->pbwt.prev, len_data));
         if (ret > 0) ++n_variants;
         return ret;
-        // return EncodeNm(tgt_container->model_nm->pbwt.prev, n_samples);
     }
 }
 
-int djinn_ctx_model::DecodeNext(uint8_t* data, size_t& len) {
+int djinn_ctx_model::DecodeNext(uint8_t* data, uint32_t& len) {
     if (data == nullptr) return -1;
     uint8_t type = ploidy_dict->DecodeSymbol();
     std::shared_ptr<djn_ctx_model_container_t> tgt_container = ploidy_models[type];
@@ -199,7 +191,7 @@ int djinn_ctx_model::DecodeNext(uint8_t* data, size_t& len) {
     return(tgt_container->DecodeNext(data, len));
 }
 
-int djinn_ctx_model::DecodeNext(uint8_t* ewah_data, size_t& ret_ewah, uint8_t* ret_buffer, size_t& ret_len) {
+int djinn_ctx_model::DecodeNext(uint8_t* ewah_data, uint32_t& ret_ewah, uint8_t* ret_buffer, uint32_t& ret_len) {
     if (ewah_data == nullptr) return -1;
     if (ret_buffer == nullptr) return -1;
 
@@ -211,7 +203,32 @@ int djinn_ctx_model::DecodeNext(uint8_t* ewah_data, size_t& ret_ewah, uint8_t* r
     return(tgt_container->DecodeNext(ewah_data,ret_ewah,ret_buffer,ret_len));
 }
 
-int djinn_ctx_model::DecodeNextRaw(uint8_t* data, size_t& len) {
+int djinn_ctx_model::DecodeNext(uint8_t* ewah_data, uint32_t& ret_ewah, djinn_variant_t*& variant) {
+    // Decode stream archetype.
+    uint8_t type = ploidy_dict->DecodeSymbol();
+    // std::cerr << "[Decode model] Stream=" << (int)type << std::endl;
+    std::shared_ptr<djn_ctx_model_container_t> tgt_container = ploidy_models[type];
+
+    if (variant == nullptr) {
+        variant = new djinn_variant_t;
+        variant->data = new uint8_t[tgt_container->n_samples + 65536];
+        variant->data_alloc = tgt_container->n_samples + 65536;
+        variant->data_free = true;
+    } else if (tgt_container->n_samples >= variant->data_alloc) {
+        if (variant->data_free) delete[] variant->data;
+        variant->data = new uint8_t[tgt_container->n_samples + 65536];
+        variant->data_alloc = tgt_container->n_samples + 65536;
+        variant->data_free = true;
+    }
+
+    variant->ploidy = tgt_container->ploidy;
+    variant->data_len = 0;
+    variant->errcode = 0;
+
+    return(tgt_container->DecodeNext(ewah_data,ret_ewah,variant->data,variant->data_len));
+}
+
+int djinn_ctx_model::DecodeNextRaw(uint8_t* data, uint32_t& len) {
     if (data == nullptr) return -1;
     uint8_t type = ploidy_dict->DecodeSymbol();
 
@@ -344,6 +361,7 @@ int djinn_ctx_model::StartDecoding() {
 /*======   Container   ======*/
 
 djn_ctx_model_container_t::djn_ctx_model_container_t(int64_t n_s, int pl, bool use_pbwt) : 
+    use_pbwt(use_pbwt),
     ploidy(pl), n_samples(n_s), n_variants(0),
     n_wah(std::ceil((float)n_samples / 32) * 4), 
     n_samples_wah((n_wah * 32) / 4), 
@@ -360,6 +378,7 @@ djn_ctx_model_container_t::djn_ctx_model_container_t(int64_t n_s, int pl, bool u
 }
 
 djn_ctx_model_container_t::djn_ctx_model_container_t(int64_t n_s, int pl, bool use_pbwt, uint8_t* src, uint32_t src_len) : 
+    use_pbwt(use_pbwt),
     ploidy(pl), n_samples(n_s), n_variants(0),
     n_wah(std::ceil((float)n_samples / 32) * 4), 
     n_samples_wah((n_wah * 32) / 4), 
@@ -409,6 +428,7 @@ void djn_ctx_model_container_t::StartEncoding(bool use_pbwt, bool reset) {
         model_nm->n_variants = 0;
     }
 
+    this->use_pbwt = use_pbwt;
     n_variants = 0;
 
     // Local range coder
@@ -463,6 +483,8 @@ void djn_ctx_model_container_t::StartDecoding(bool use_pbwt, bool reset) {
         model_2mc->n_variants = 0;
         model_nm->n_variants = 0;
     }
+
+    this->use_pbwt = use_pbwt;
 
     // Local range coder
     if (range_coder.get() == nullptr)
@@ -522,7 +544,7 @@ int djn_ctx_model_container_t::EncodeNm(uint8_t* data, uint32_t len) {
     // return -1;
 }
 
-int djn_ctx_model_container_t::DecodeRaw_nm(uint8_t* data, size_t& len) {
+int djn_ctx_model_container_t::DecodeRaw_nm(uint8_t* data, uint32_t& len) {
     if (data == nullptr) return -1;
 
     int64_t n_samples_obs = 0;
@@ -937,7 +959,7 @@ int djn_ctx_model_container_t::DecodeWahRLE_nm(uint32_t& ref, uint32_t& len, std
     return 1;
 }
 
-int djn_ctx_model_container_t::DecodeNext(uint8_t* data, size_t& len) {
+int djn_ctx_model_container_t::DecodeNext(uint8_t* data, uint32_t& len) {
     if (data == nullptr) return -1;
     uint8_t type = marchetype->DecodeSymbol();
     
@@ -965,7 +987,7 @@ int djn_ctx_model_container_t::DecodeNext(uint8_t* data, size_t& len) {
     return objs;
 }
 
-int djn_ctx_model_container_t::DecodeNext(uint8_t* ewah_data, size_t& ret_ewah, uint8_t* ret_buffer, size_t& ret_len) {
+int djn_ctx_model_container_t::DecodeNext(uint8_t* ewah_data, uint32_t& ret_ewah, uint8_t* ret_buffer, uint32_t& ret_len) {
     if (ewah_data == nullptr) return -1;
     if (ret_buffer == nullptr) return -1;
 
@@ -990,6 +1012,7 @@ int djn_ctx_model_container_t::DecodeNext(uint8_t* ewah_data, size_t& ret_ewah, 
         case 0: model_2mc->pbwt.ReverseUpdateEWAH(ewah_data, ret_ewah, ret_buffer); break;
         case 1: model_nm->pbwt.ReverseUpdateEWAH(ewah_data, ret_ewah, ret_buffer); break;
         }
+        ret_len = n_samples;
     } else {
         // Todo: finish me
         // Unpack EWAH into literals according to current PPA
@@ -1027,13 +1050,13 @@ int djn_ctx_model_container_t::DecodeNext(uint8_t* ewah_data, size_t& ret_ewah, 
             assert(local_offset <= ret_ewah);
         }
         assert(ret_pos == n_samples);
-        // return n_samples; // todo: should return n_samples
+        ret_len = n_samples;
     }
 
     return objs;
 }
 
-int djn_ctx_model_container_t::DecodeNextRaw(uint8_t* data, size_t& len) {
+int djn_ctx_model_container_t::DecodeNextRaw(uint8_t* data, uint32_t& len) {
     if (data == nullptr) return -1;
     uint8_t type = marchetype->DecodeSymbol();
     
@@ -1048,7 +1071,7 @@ int djn_ctx_model_container_t::DecodeNextRaw(uint8_t* data, size_t& len) {
 }
 
 // Return raw, potentially permuted, EWAH encoding
-int djn_ctx_model_container_t::DecodeRaw(uint8_t* data, size_t& len) {
+int djn_ctx_model_container_t::DecodeRaw(uint8_t* data, uint32_t& len) {
     if (data == nullptr) return -1;
 
     int64_t n_samples_obs = 0;

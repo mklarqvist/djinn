@@ -38,6 +38,7 @@ constexpr const uint8_t TWK_BCF_GT_UNPACK[65] =
 4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,3};
 
 constexpr const char DJN_UNPACK_2M_VCF[4] = {'0', '1', '.', 'x'}; // position 3 is the EOV marker
+
 // const char DJN_UNPACK_VCF[16] = {}
 
 // MISSING -> 14, EOV -> 15, other values as normal
@@ -84,6 +85,22 @@ struct djinn_ewah_t {
     uint64_t ref: 4, clean: 30, dirty: 30;
 };
 #pragma pack(pop)
+
+// Variant record
+struct djinn_variant_t {
+    djinn_variant_t() : ploidy(0), data(nullptr), data_len(0), data_alloc(0), data_free(false), errcode(0) {}
+    ~djinn_variant_t() {
+        if (data_free) delete[] data;
+    }
+
+    int ploidy;
+    uint8_t* data;
+    uint32_t data_len;
+    uint32_t data_alloc: 31, data_free: 1;
+    int errcode;
+};
+
+
 
 // Header structure
 struct djinn_hdr_t {

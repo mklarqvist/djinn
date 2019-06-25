@@ -447,9 +447,9 @@ int GenotypeCompressorModelling::Compress(djinn_block_t*& block) {
 
     // Start manual decoding
     uint8_t* ewah_buf = new uint8_t[65536];
-    size_t offset = 0;
+    uint32_t offset = 0;
     uint8_t* ret_vec = new uint8_t[2*n_samples];
-    size_t len_ret_vec = 0;
+    uint32_t len_ret_vec = 0;
 
     clockdef t1 = std::chrono::high_resolution_clock::now();
     for (int i = 0; i < djn_ctx_decode.n_variants; ++i) {

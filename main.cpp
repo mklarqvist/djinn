@@ -22,15 +22,7 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
 
     std::cerr << "Samples in VCF=" << reader->n_samples_ << std::endl;
 
-    djinn::djinn_hdr_t hdr;
-    hdr.base_ploidy = 2;
-    hdr.n_samples = reader->n_samples_;
-    hdr.version[0] = 0; hdr.version[1] = 1; hdr.version[2] = 0;
-    
-    // std::cout.write((char*)hdr.version, sizeof(uint8_t)*3);
-    // std::cout.write((char*)&hdr.base_ploidy, sizeof(uint8_t));
-    // std::cout.write((char*)&hdr.n_samples, sizeof(int64_t));
-    // std::cout.flush();
+    // djinn::djinn_hdr_t hdr;
 
     djinn::GTCompressor gtcomp;
     if (type & 1) {
@@ -50,7 +42,6 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
     
     uint64_t n_lines = 0;
     uint32_t nv_blocks = 8192; // Number of variants per data block.
-    uint8_t* output_data = new uint8_t[655360];
     uint32_t n_blocks = 0;
 
     // djinn::HaplotypeCompressor hc(reader->n_samples_);
@@ -60,7 +51,7 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
     clockdef t1 = std::chrono::high_resolution_clock::now();
 
     djinn::djinn_ctx_model djn_ctx;
-    djn_ctx.StartEncoding(true, true);
+    djn_ctx.StartEncoding(permute, true);
     
     std::ofstream test_write("/Users/Mivagallery/Downloads/djn_debug.bin", std::ios::out | std::ios::binary);
     if (test_write.good() == false) {
@@ -71,36 +62,23 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
 
     while (reader->Next()) {
         if (n_lines % nv_blocks == 0 && n_lines != 0) {
-            // gtcomp.Compress(block);
             djn_ctx.FinishEncoding();
             int decode_ret = djn_ctx.Serialize(decode_buf);
             assert(decode_ret > 0);
             std::cerr << "[WRITING] " << decode_ret << std::endl;
             test_write.write((char*)decode_buf, decode_ret);
-            djn_ctx.StartEncoding(true, true);
+            djn_ctx.StartEncoding(permute, true);
             ++n_blocks;
         }
 
-        //
         if (reader->bcf1_ == NULL) return -1;
         if (reader->header_ == NULL) return -2;
 
         const bcf_fmt_t* fmt = bcf_get_fmt(reader->header_, reader->bcf1_, "GT");
         if (fmt == NULL) return 0;
-
+        
         int ret = djn_ctx.EncodeBcf(fmt->p, fmt->p_len, fmt->n, reader->bcf1_->n_allele);
         assert(ret>0);
-        //
-
-
-        // gtcomp.Encode(reader->bcf1_, reader->header_);
-        
-        // if (reader->n_samples_ > 50000 && (n_lines % 1000) == 0) {
-        //     clockdef t2 = std::chrono::high_resolution_clock::now();
-        //     auto time_span = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1);
-        //     std::cerr << "Line= " << n_lines << " pos=" << reader->bcf1_->pos+1 << " elapsed=" << time_span.count() << "ms (" << time_span.count()/1000 << "ms/it)" << std::endl;
-        //     t1 = std::chrono::high_resolution_clock::now();
-        // }
 
         ++n_lines;
     }
@@ -127,58 +105,63 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
 
     djinn::djinn_ctx_model djn_ctx_decode;
     uint8_t* ewah_buf = new uint8_t[65536];
-    size_t offset = 0;
-    uint8_t* ret_vec = new uint8_t[2*hdr.n_samples];
-    size_t len_ret_vec = 0;
+    uint32_t offset = 0;
     uint8_t* debug_buffer = new uint8_t[256000];
     uint32_t len_debug = 0;
 
+    djinn::djinn_variant_t* variant = nullptr;
+
+    clockdef t1_decode = std::chrono::high_resolution_clock::now();
     for (int i = 0; i < n_blocks; ++i) {
-        std::cerr << "pre io_pos=" << test_read.tellg() << "/" << filesize << std::endl;
+        // std::cerr << "pre io_pos=" << test_read.tellg() << "/" << filesize << std::endl;
         uint32_t block_len = 0;
+         // Look at first integer. This corresponds to the length of the data block.
         test_read.read((char*)&block_len, sizeof(uint32_t));
         *(uint32_t*)(&decode_buf[0]) = block_len;
-        std::cerr << i << "/" << n_blocks << "block length = " << block_len << std::endl;
+        // Read data block into pre-allocated buffer.
         test_read.read((char*)&decode_buf[sizeof(uint32_t)], block_len-sizeof(uint32_t));
-        std::cerr << "post io_pos=" << test_read.tellg() << "/" << filesize << std::endl;
+        // std::cerr << "post io_pos=" << test_read.tellg() << "/" << filesize << std::endl;
 
+        // Deserialize data and construct the djinn_ctx_model instance. This approach
+        // involves copying the data internally and can be slower compared to reading
+        // and constructing directly from a file stream.
         int decode_ctx_ret = djn_ctx_decode.Deserialize(decode_buf);
-        std::cerr << "Decode_ctx_ret=" << decode_ctx_ret << std::endl;
+        // Initiate decoding.
         djn_ctx_decode.StartDecoding();
-        std::cerr << "[Decode] " << djn_ctx_decode.n_variants << " variants" << std::endl;
 
-        // Emit bcf-encoded data to cout
         clockdef t1 = std::chrono::high_resolution_clock::now();
+        // Cycle over variants in the block.
         for (int i = 0; i < djn_ctx_decode.n_variants; ++i) {
             // std::cerr << "Decoding " << i << "/" << djn_ctx_decode.n_variants << std::endl;
-            int objs = djn_ctx_decode.DecodeNext(ewah_buf, offset, ret_vec, len_ret_vec);
+            int objs = djn_ctx_decode.DecodeNext(ewah_buf, offset, variant);
 
-            for (int j = 0; j < 2*hdr.n_samples; j += 2) {
-                // int ret = sprintf((char*)&debug_buffer[len_debug], "%d", ret_vec[j+0]);
-                // len_debug += ret;
-                debug_buffer[len_debug++] = (char)ret_vec[j+0] + '0';
+            // Write Vcf-encoded data to a local buffer and then write to standard out.
+            for (int j = 0; j < variant->data_len; j += variant->ploidy) {
+                // Todo: phasing
+                debug_buffer[len_debug++] = (char)variant->data[j+0] + '0';
                 debug_buffer[len_debug++] = '|';
-                debug_buffer[len_debug++] = (char)ret_vec[j+1] + '0';
-                // ret = sprintf((char*)&debug_buffer[len_debug], "%d", ret_vec[j+1]);
-                // len_debug += ret;
+                debug_buffer[len_debug++] = (char)variant->data[j+1] + '0';
                 debug_buffer[len_debug++] = '\t';
             }
             debug_buffer[len_debug++] = '\n';
             std::cout.write((char*)debug_buffer, len_debug);
             len_debug = 0;
-
             offset = 0;
-            len_ret_vec = 0;
         }
+        // Timings per block
         clockdef t2 = std::chrono::high_resolution_clock::now();
         auto time_span = std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1);
-        std::cerr << "[Decode] Decoded " << djn_ctx_decode.n_variants << " records in " << time_span.count() << "us (" << time_span.count()/djn_ctx_decode.n_variants << "us/record)" << std::endl;
+        std::cerr << "[Decode] Decoded " << djn_ctx_decode.n_variants << " records in " << time_span.count() << "us (" << (float)time_span.count()/djn_ctx_decode.n_variants << "us/record)" << std::endl;
     }
+    // Timings total
+    clockdef t2_decode = std::chrono::high_resolution_clock::now();
+    auto time_span_decode = std::chrono::duration_cast<std::chrono::milliseconds>(t2_decode - t1_decode);
+    std::cerr << "[Decode] Decoded " << n_lines << " records in " << time_span_decode.count() << "ms (" << (float)time_span_decode.count()/n_lines << "ms/record)" << std::endl;
 
     delete[] ewah_buf;
-    delete[] ret_vec;
     delete[] decode_buf;
     delete[] debug_buffer;
+    delete variant;
 
     return n_lines;
 }
