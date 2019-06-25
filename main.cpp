@@ -104,10 +104,8 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
     test_read.seekg(0);
 
     djinn::djinn_ctx_model djn_ctx_decode;
-    uint8_t* ewah_buf = new uint8_t[65536];
-    uint32_t offset = 0;
-    uint8_t* debug_buffer = new uint8_t[256000];
-    uint32_t len_debug = 0;
+    uint8_t* vcf_out_buffer = new uint8_t[256000];
+    uint32_t len_vcf = 0;
 
     djinn::djinn_variant_t* variant = nullptr;
 
@@ -133,20 +131,19 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
         // Cycle over variants in the block.
         for (int i = 0; i < djn_ctx_decode.n_variants; ++i) {
             // std::cerr << "Decoding " << i << "/" << djn_ctx_decode.n_variants << std::endl;
-            int objs = djn_ctx_decode.DecodeNext(ewah_buf, offset, variant);
+            int objs = djn_ctx_decode.DecodeNext(variant);
 
             // Write Vcf-encoded data to a local buffer and then write to standard out.
             for (int j = 0; j < variant->data_len; j += variant->ploidy) {
                 // Todo: phasing
-                debug_buffer[len_debug++] = (char)variant->data[j+0] + '0';
-                debug_buffer[len_debug++] = '|';
-                debug_buffer[len_debug++] = (char)variant->data[j+1] + '0';
-                debug_buffer[len_debug++] = '\t';
+                vcf_out_buffer[len_vcf++] = (char)variant->data[j+0] + '0';
+                vcf_out_buffer[len_vcf++] = '|';
+                vcf_out_buffer[len_vcf++] = (char)variant->data[j+1] + '0';
+                vcf_out_buffer[len_vcf++] = '\t';
             }
-            debug_buffer[len_debug++] = '\n';
-            std::cout.write((char*)debug_buffer, len_debug);
-            len_debug = 0;
-            offset = 0;
+            vcf_out_buffer[len_vcf++] = '\n';
+            std::cout.write((char*)vcf_out_buffer, len_vcf);
+            len_vcf = 0;
         }
         // Timings per block
         clockdef t2 = std::chrono::high_resolution_clock::now();
@@ -158,9 +155,9 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
     auto time_span_decode = std::chrono::duration_cast<std::chrono::milliseconds>(t2_decode - t1_decode);
     std::cerr << "[Decode] Decoded " << n_lines << " records in " << time_span_decode.count() << "ms (" << (float)time_span_decode.count()/n_lines << "ms/record)" << std::endl;
 
-    delete[] ewah_buf;
+    // delete[] ewah_buf;
     delete[] decode_buf;
-    delete[] debug_buffer;
+    delete[] vcf_out_buffer;
     delete variant;
 
     return n_lines;

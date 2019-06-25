@@ -102,6 +102,7 @@ int djn_ctx_model_t::StartDecoding(bool use_pbwt, bool reset) {
 
 djinn_ctx_model::djinn_ctx_model() : 
     p(new uint8_t[1000000]), p_len(0), p_cap(1000000), p_free(true),
+    q(nullptr), q_len(0), q_alloc(0), q_free(true),
     range_coder(std::make_shared<RangeCoder>()), 
     ploidy_dict(std::make_shared<GeneralModel>(256, 256, range_coder))
 {
@@ -111,6 +112,7 @@ djinn_ctx_model::djinn_ctx_model() :
 djinn_ctx_model::djinn_ctx_model(uint64_t n_s) : 
     djinn_model(n_s),
     p(new uint8_t[1000000]), p_len(0), p_cap(1000000), p_free(true),
+    q(nullptr), q_len(0), q_alloc(0), q_free(true),
     range_coder(std::make_shared<RangeCoder>()), 
     ploidy_dict(std::make_shared<GeneralModel>(256, 256, range_coder))
 {
@@ -119,6 +121,7 @@ djinn_ctx_model::djinn_ctx_model(uint64_t n_s) :
 
 djinn_ctx_model::~djinn_ctx_model() { 
     if (p_free) delete[] p;
+    if (q_free) delete[] q;
 }
 
 int djinn_ctx_model::EncodeBcf(uint8_t* data, size_t len_data, int ploidy, uint8_t alt_alleles) {
@@ -203,7 +206,7 @@ int djinn_ctx_model::DecodeNext(uint8_t* ewah_data, uint32_t& ret_ewah, uint8_t*
     return(tgt_container->DecodeNext(ewah_data,ret_ewah,ret_buffer,ret_len));
 }
 
-int djinn_ctx_model::DecodeNext(uint8_t* ewah_data, uint32_t& ret_ewah, djinn_variant_t*& variant) {
+int djinn_ctx_model::DecodeNext(djinn_variant_t*& variant) {
     // Decode stream archetype.
     uint8_t type = ploidy_dict->DecodeSymbol();
     // std::cerr << "[Decode model] Stream=" << (int)type << std::endl;
@@ -211,21 +214,35 @@ int djinn_ctx_model::DecodeNext(uint8_t* ewah_data, uint32_t& ret_ewah, djinn_va
 
     if (variant == nullptr) {
         variant = new djinn_variant_t;
-        variant->data = new uint8_t[tgt_container->n_samples + 65536];
         variant->data_alloc = tgt_container->n_samples + 65536;
+        variant->data = new uint8_t[variant->data_alloc];
         variant->data_free = true;
     } else if (tgt_container->n_samples >= variant->data_alloc) {
         if (variant->data_free) delete[] variant->data;
-        variant->data = new uint8_t[tgt_container->n_samples + 65536];
         variant->data_alloc = tgt_container->n_samples + 65536;
+        variant->data = new uint8_t[variant->data_alloc];
         variant->data_free = true;
     }
+
+    if (q == nullptr) {
+        q_alloc = tgt_container->n_samples + 65536;
+        q = new uint8_t[q_alloc];
+        q_len = 0;
+        q_free = true;
+    } else if (tgt_container->n_samples >= q_alloc) {
+        if (q_free) delete[] q;
+        q_alloc = tgt_container->n_samples + 65536;
+        q = new uint8_t[q_alloc];
+        q_len = 0;
+        q_free = true;
+    }
+    q_len = 0; // Reset q_len for next iteration.
 
     variant->ploidy = tgt_container->ploidy;
     variant->data_len = 0;
     variant->errcode = 0;
 
-    return(tgt_container->DecodeNext(ewah_data,ret_ewah,variant->data,variant->data_len));
+    return(tgt_container->DecodeNext(q,q_len,variant->data,variant->data_len));
 }
 
 int djinn_ctx_model::DecodeNextRaw(uint8_t* data, uint32_t& len) {

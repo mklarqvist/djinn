@@ -58,7 +58,7 @@ public:
     // One buffer of size no smaller than ploidy*samples for storing the return vector of alleles.
     virtual int DecodeNext(uint8_t* data, uint32_t& len) =0;
     virtual int DecodeNext(uint8_t* ewah_data, uint32_t& ret_ewah, uint8_t* ret_buffer, uint32_t& ret_len) =0;
-    virtual int DecodeNext(uint8_t* ewah_data, uint32_t& ret_ewah, djinn_variant_t*& variant) =0;
+    virtual int DecodeNext(djinn_variant_t*& variant) =0;
     virtual int DecodeNextRaw(uint8_t* data, uint32_t& len) =0;
 
 public:
@@ -437,13 +437,18 @@ public:
 public:
     int DecodeNext(uint8_t* data, uint32_t& len) override;
     int DecodeNext(uint8_t* ewah_data, uint32_t& ret_ewah, uint8_t* ret_buffer, uint32_t& ret_len) override;
-    int DecodeNext(uint8_t* ewah_data, uint32_t& ret_ewah, djinn_variant_t*& variant) override;
+    int DecodeNext(djinn_variant_t*& variant) override;
     int DecodeNextRaw(uint8_t* data, uint32_t& len) override;
 
 public:
     uint8_t *p;     // data
     uint32_t p_len; // data length
     uint32_t p_cap:31, p_free:1; // allocated data length, ownership of data flag
+
+    // Support buffer. Currently only used for decoding EWAH.
+    uint8_t *q;     // data
+    uint32_t q_len; // data length
+    uint32_t q_alloc:31, q_free:1; // allocated data length, ownership of data flag
 
     // Shared range coder: All context models share this range coder and emit
     // encodings to a shared buffer.
