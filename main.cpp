@@ -50,21 +50,22 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
     // While there are bcf records available.
     clockdef t1 = std::chrono::high_resolution_clock::now();
 
+    std::cerr << "============== ENCODING ===============" << std::endl;
+
     djinn::djinn_ctx_model djn_ctx;
     djn_ctx.StartEncoding(permute, true);
     
-    std::ofstream test_write("/Users/Mivagallery/Downloads/djn_debug.bin", std::ios::out | std::ios::binary);
+    std::ofstream test_write("/media/mdrk/08dcb478-5359-41f4-97c8-469190c8a034/djn_debug.bin", std::ios::out | std::ios::binary);
     if (test_write.good() == false) {
         std::cerr << "could not open outfile handle" << std::endl;
         return -3;
     }
-    uint8_t* decode_buf = new uint8_t[5000000];
+    uint8_t* decode_buf = new uint8_t[10000000];
 
     while (reader->Next()) {
         if (n_lines % nv_blocks == 0 && n_lines != 0) {
             djn_ctx.FinishEncoding();
             int decode_ret = djn_ctx.Serialize(decode_buf);
-            assert(decode_ret > 0);
             std::cerr << "[WRITING] " << decode_ret << std::endl;
             test_write.write((char*)decode_buf, decode_ret);
             djn_ctx.StartEncoding(permute, true);
@@ -95,7 +96,9 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
     test_write.close();
 
     // Decode test
-    std::ifstream test_read("/Users/Mivagallery/Downloads/djn_debug.bin", std::ios::in | std::ios::binary | std::ios::ate);
+    std::cerr << "============== DECODING ===============" << std::endl;
+
+    std::ifstream test_read("/media/mdrk/08dcb478-5359-41f4-97c8-469190c8a034/djn_debug.bin", std::ios::in | std::ios::binary | std::ios::ate);
     if (test_read.good() == false) {
         std::cerr << "could not open infile handle" << std::endl;
         return -3;
@@ -104,21 +107,22 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
     test_read.seekg(0);
 
     djinn::djinn_ctx_model djn_ctx_decode;
-    uint8_t* vcf_out_buffer = new uint8_t[256000];
+    uint8_t* vcf_out_buffer = new uint8_t[512000];
     uint32_t len_vcf = 0;
 
     djinn::djinn_variant_t* variant = nullptr;
 
     clockdef t1_decode = std::chrono::high_resolution_clock::now();
     for (int i = 0; i < n_blocks; ++i) {
-        // std::cerr << "pre io_pos=" << test_read.tellg() << "/" << filesize << std::endl;
+        std::cerr << "============== BLOCK-" << i << "===============" << std::endl;
+        std::cerr << "pre io_pos=" << test_read.tellg() << "/" << filesize << std::endl;
         uint32_t block_len = 0;
          // Look at first integer. This corresponds to the length of the data block.
         test_read.read((char*)&block_len, sizeof(uint32_t));
         *(uint32_t*)(&decode_buf[0]) = block_len;
         // Read data block into pre-allocated buffer.
         test_read.read((char*)&decode_buf[sizeof(uint32_t)], block_len-sizeof(uint32_t));
-        // std::cerr << "post io_pos=" << test_read.tellg() << "/" << filesize << std::endl;
+        std::cerr << "[READ DECODE] post io_pos=" << test_read.tellg() << "/" << filesize << " read=" << block_len << "b" << std::endl;
 
         // Deserialize data and construct the djinn_ctx_model instance. This approach
         // involves copying the data internally and can be slower compared to reading
@@ -132,6 +136,7 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
         for (int i = 0; i < djn_ctx_decode.n_variants; ++i) {
             // std::cerr << "Decoding " << i << "/" << djn_ctx_decode.n_variants << std::endl;
             int objs = djn_ctx_decode.DecodeNext(variant);
+            assert(objs > 0);
 
             // Write Vcf-encoded data to a local buffer and then write to standard out.
             for (int j = 0; j < variant->data_len; j += variant->ploidy) {

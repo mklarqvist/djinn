@@ -85,6 +85,7 @@ size_t djn_ctx_model_t::FinishEncoding() {
     if (range_coder.get() == nullptr) return -1;
     range_coder->FinishEncode();
     p_len = range_coder->OutSize();
+    std::cerr << "[djn_ctx_model_t::FinishEncoding] p_len=" << p_len << std::endl;
     return range_coder->OutSize();
 }
 
@@ -285,6 +286,9 @@ void djinn_ctx_model::StartEncoding(bool use_pbwt, bool reset) {
 size_t djinn_ctx_model::FinishEncoding() {
     if (range_coder.get() == nullptr) return -1;
     range_coder->FinishEncode();
+    p_len = range_coder->OutSize();
+
+    std::cerr << "[djinn_ctx_model::FinishEncoding] p_len=" << p_len << std::endl;
 
     size_t s_models = 0;
     for (int i = 0; i < ploidy_models.size(); ++i) {
@@ -293,51 +297,9 @@ size_t djinn_ctx_model::FinishEncoding() {
     }
 
     size_t s_rc  = range_coder->OutSize();
-
     std::cerr << "Model sizes=" << s_rc << " and models=" << s_models << std::endl;
     
     return s_rc + s_models;
-}
-
-int djinn_ctx_model::StartDecoding(djinn_block_t* block) {
-    if (block == nullptr) return  -1;
-    if (block->type != djinn_block_t::BlockType::CONTEXT) return -2;
-    
-    djinn_ctx_t* data_out = (djinn_ctx_t*)block->data;
-
-    if (p_free) delete[] p; // if there is data and we own it then delete
-    p = data_out->ctx_models[0].vptr; p_free = false; // set data but no ownership
-    p_len = data_out->ctx_models[0].vptr_len; // set data length
-
-    bool reset = false; // fix me
-    bool use_pbwt = true; // fix this
-
-    n_variants = block->n_rcds;
-    range_coder->SetInput(p);
-    range_coder->StartDecode();
-    /*
-    model_2mc->StartDecoding(data_out->ctx_models[1].vptr, reset);
-    model_2mc->n_variants = data_out->ctx_models[1].n_v;
-    model_nm->StartDecoding(data_out->ctx_models[3].vptr, reset);
-    model_nm->n_variants = data_out->ctx_models[3].n_v;
-
-    if (use_pbwt) {
-        if (model_2mc->pbwt.n_symbols == 0) {
-            if (n_samples == 0) {
-                std::cerr << "illegal: no sample number set!" << std::endl;
-            }
-            model_2mc->pbwt.Initiate(n_samples, 2);
-        }
-
-        if (model_nm->pbwt.n_symbols == 0) {
-            if (n_samples == 0) {
-                std::cerr << "illegal: no sample number set!" << std::endl;
-            }
-            model_nm->pbwt.Initiate(n_samples, 16);
-        }
-    }
-    */
-   return 1;
 }
 
 int djinn_ctx_model::StartDecoding() {
@@ -350,29 +312,7 @@ int djinn_ctx_model::StartDecoding() {
 
     range_coder->SetInput(p);
     range_coder->StartDecode();
-    /*
-    model_2mc->StartDecoding(data_out->ctx_models[1].vptr, reset);
-    model_2mc->n_variants = data_out->ctx_models[1].n_v;
-    model_nm->StartDecoding(data_out->ctx_models[3].vptr, reset);
-    model_nm->n_variants = data_out->ctx_models[3].n_v;
-
-    if (use_pbwt) {
-        if (model_2mc->pbwt.n_symbols == 0) {
-            if (n_samples == 0) {
-                std::cerr << "illegal: no sample number set!" << std::endl;
-            }
-            model_2mc->pbwt.Initiate(n_samples, 2);
-        }
-
-        if (model_nm->pbwt.n_symbols == 0) {
-            if (n_samples == 0) {
-                std::cerr << "illegal: no sample number set!" << std::endl;
-            }
-            model_nm->pbwt.Initiate(n_samples, 16);
-        }
-    }
-    */
-   return 1;
+    return 1;
 }
 
 /*======   Container   ======*/
@@ -437,7 +377,7 @@ void djn_ctx_model_container_t::StartEncoding(bool use_pbwt, bool reset) {
     }
 
     if (reset) {
-        std::cerr << "resetting" << std::endl;
+        std::cerr << "[djn_ctx_model_container_t::StartEncoding] resetting" << std::endl;
         model_2mc->reset();
         model_nm->reset();
     } else {
@@ -463,6 +403,7 @@ size_t djn_ctx_model_container_t::FinishEncoding() {
     range_coder->FinishEncode();
     model_2mc->FinishEncoding();
     model_nm->FinishEncoding();
+    p_len = range_coder->OutSize();
 
     size_t s_rc  = range_coder->OutSize();
     size_t s_2mc = model_2mc->range_coder->OutSize();
@@ -473,7 +414,7 @@ size_t djn_ctx_model_container_t::FinishEncoding() {
 }
 
 void djn_ctx_model_container_t::StartDecoding(bool use_pbwt, bool reset) {
-    std::cerr << "in start decoding: " << model_2mc->pbwt.n_symbols << std::endl; 
+    // std::cerr << "in start decoding: " << model_2mc->pbwt.n_symbols << std::endl; 
     if (use_pbwt) {
         if (model_2mc->pbwt.n_symbols == 0) {
             std::cerr << "init pbwt: " << n_samples << "," << 2 << std::endl;
@@ -493,13 +434,14 @@ void djn_ctx_model_container_t::StartDecoding(bool use_pbwt, bool reset) {
     }
 
     if (reset) {
-        std::cerr << "resetting" << std::endl;
+        std::cerr << "[djn_ctx_model_container_t::StartDecoding] resetting" << std::endl;
         model_2mc->reset();
         model_nm->reset();
     } else {
         model_2mc->n_variants = 0;
         model_nm->n_variants = 0;
     }
+    std::cerr << "[djn_ctx_model_container_t::StartDecoding] p_len=" << p_len << std::endl;
 
     this->use_pbwt = use_pbwt;
 
@@ -988,7 +930,7 @@ int djn_ctx_model_container_t::DecodeNext(uint8_t* data, uint32_t& len) {
     switch(type) {
     case 0: objs = DecodeRaw(data, len); break;
     case 1: objs = DecodeRaw_nm(data, len); break;
-    default: std::cerr << "decoding error: " << type << std::endl; return -1;
+    default: std::cerr << "[djn_ctx_model_container_t::DecodeNext] decoding error: " << (int)type << " (valid=[0,1])" << std::endl; return -1;
     }
 
     // Compute alts
@@ -1017,7 +959,7 @@ int djn_ctx_model_container_t::DecodeNext(uint8_t* ewah_data, uint32_t& ret_ewah
     switch(type) {
     case 0: objs = DecodeRaw(ewah_data, ret_ewah); break;
     case 1: objs = DecodeRaw_nm(ewah_data, ret_ewah); break;
-    default: std::cerr << "decoding error: " << type << std::endl; return -1;
+    default: std::cerr << "[djn_ctx_model_container_t::DecodeNext] decoding error: " << (int)type << " (valid=[0,1])" << std::endl; return -1;
     }
 
     if (objs <= 0) return -1;
@@ -1080,7 +1022,7 @@ int djn_ctx_model_container_t::DecodeNextRaw(uint8_t* data, uint32_t& len) {
     switch(type) {
     case 0: return DecodeRaw(data, len);
     case 1: return DecodeRaw_nm(data, len);
-    default: std::cerr << "decoding error: " << type << std::endl; return -1;
+    default: std::cerr << "[djn_ctx_model_container_t::DecodeNext] " << type << std::endl; return -1;
     }
 
     // Never reached.

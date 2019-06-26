@@ -51,7 +51,7 @@ public:
 
     virtual void StartEncoding(bool use_pbwt, bool reset = false) =0;
     virtual size_t FinishEncoding() =0;
-    virtual int StartDecoding(djinn_block_t* block) =0;
+    virtual int StartDecoding() =0;
 
     // Decoding requires:
     // One buffer for decoding into EWAH values.
@@ -185,6 +185,12 @@ public:
     djn_ctx_model_container_t(int64_t n_s, int pl, bool use_pbwt, uint8_t* src, uint32_t src_len);
     ~djn_ctx_model_container_t();
 
+    // Delete move and copy ctors
+    djn_ctx_model_container_t(const djn_ctx_model_container_t& other) = delete;
+    djn_ctx_model_container_t(djn_ctx_model_container_t&& other) = delete;
+    djn_ctx_model_container_t& operator=(const djn_ctx_model_container_t& other) = delete;
+    djn_ctx_model_container_t& operator=(djn_ctx_model_container_t&& other) = delete;
+    
     void StartEncoding(bool use_pbwt, bool reset = false);
     size_t FinishEncoding();
     void StartDecoding(bool use_pbwt, bool reset = false);
@@ -220,7 +226,7 @@ public:
     int Deserialize(uint8_t* dst) {
         uint32_t offset = 0;
         int pl = *((int*)&dst[offset]);
-        std::cerr << "pl=" << pl << " ploidy=" << ploidy << std::endl;
+        // std::cerr << "pl=" << pl << " ploidy=" << ploidy << std::endl;
         assert(pl == ploidy);
         offset += sizeof(int);
         uint32_t n_s = *((uint32_t*)&dst[offset]);
@@ -327,16 +333,15 @@ public:
      */
     void StartEncoding(bool use_pbwt, bool reset = false) override;
     size_t FinishEncoding() override;
-    
-    // Implement me
-    int StartDecoding(djinn_block_t* block) override;
-    int StartDecoding();
+    int StartDecoding() override;
 
     // Read/write
     int Serialize(uint8_t* dst) const {
         // Serialize as (int,uint32_t,uint32_t,uint8_t*,ctx1,ctx2):
         // #models,p_len,p,[models...]
         uint32_t offset = 0;
+
+        std::cerr << "[djinn_ctx_model::Serialize] p_len=" << p_len << std::endl;
 
         // Reserve space for offset
         offset += sizeof(uint32_t);
@@ -370,13 +375,13 @@ public:
     }
 
     int Serialize(std::ostream& stream) const;
+
     // Deserialize data from an external buffer.
     int Deserialize(uint8_t* src) {
         // Reset.
         // Todo: fix
         ploidy_map.clear();
         ploidy_models.clear();
-        p_len = 0;
 
         uint32_t offset = 0;
 
@@ -400,9 +405,10 @@ public:
         offset += p_len;
         // Deserialize each model.
         std::cerr << "[Deserialize] Offset here=" << offset << " #models=" << n_models << std::endl;
+        std::cerr << "[Deserialize] tot_offset=" << tot_offset << ",n_variants=" << n_variants << ",use_pbwt=" << (int)use_pbwt << ",init=" << (bool)init << ",p_len=" << p_len << std::endl;
         
         for (int i = 0; i < n_models; ++i) {
-            // First peek at their content to invoke correct constructor as it
+            // First peek at their content to invoke the correct constructor as it
             // requires #samples, #ploidy, use_pbwt
             // djn_ctx_model_container_t(int64_t n_s, int pl, bool use_pbwt);
             int pl = *((int*)&src[offset]);
@@ -417,12 +423,13 @@ public:
                 std::cerr << "Illegal! Cannot exist! Corruption..." << std::endl;
                 exit(1);
             } else {
-                std::cerr << "Adding map [" << tuple << "] for [" << n_s << "," << pl << "]" << std::endl; 
+                std::cerr << "[Deserialize] Adding map [" << tuple << "] for [" << n_s << "," << pl << "]" << std::endl; 
                 ploidy_map[tuple] = ploidy_models.size();
                 ploidy_models.push_back(std::make_shared<djinn::djn_ctx_model_container_t>(n_s, pl, (bool)use_pbwt));
                 offset += ploidy_models.back()->Deserialize(&src[offset]);
             }
         }
+        std::cerr << "[Deserialize] Decoded=" << offset << "/" << tot_offset << std::endl;
         assert(offset == tot_offset);
         return offset;
     }
