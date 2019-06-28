@@ -15,6 +15,9 @@
 * specific language governing permissions and limitations
 * under the License.
 */
+#ifndef DJINN_CTX_MODEL_H_
+#define DJINN_CTX_MODEL_H_
+
 #include <unordered_map> //std::unordered_map
 #include <limits> //std::numeric_limit
 
@@ -36,42 +39,6 @@ static uint32_t round_log2(uint32_t x) {
 	for (/**/; x; ++r) x >>= 1;
 	return r;
 }
-
-/*======   Base interface for Djinn   ======*/
-
-class djinn_model {
-public:
-    djinn_model() : use_pbwt(true), init(true), unused(0), n_samples(0), n_variants(0) {}
-    djinn_model(uint64_t n_s) : use_pbwt(true), init(true), unused(0), n_samples(n_s), n_variants(0) {}
-    virtual ~djinn_model() {}
-
-    virtual void SetSamples(int64_t n_s) { n_samples = n_s; }
-
-    virtual int EncodeBcf(uint8_t* data, size_t len_data, int ploidy, uint8_t alt_alleles) =0;
-
-    virtual void StartEncoding(bool use_pbwt, bool reset = false) =0;
-    virtual size_t FinishEncoding() =0;
-    virtual int StartDecoding() =0;
-
-    // Decoding requires:
-    // One buffer for decoding into EWAH values.
-    // One buffer of size no smaller than ploidy*samples for storing the return vector of alleles.
-    virtual int DecodeNext(uint8_t* data, uint32_t& len) =0;
-    virtual int DecodeNext(uint8_t* ewah_data, uint32_t& ret_ewah, uint8_t* ret_buffer, uint32_t& ret_len) =0;
-    virtual int DecodeNext(djinn_variant_t*& variant) =0;
-    virtual int DecodeNextRaw(uint8_t* data, uint32_t& len) =0;
-
-public:
-    uint8_t use_pbwt: 1, 
-            init: 1, 
-            unused: 6;
-    int64_t n_samples; // number of samples or haplotypes
-    uint32_t n_variants; // number of encoded variants
-
-    // Supportive array for computing allele counts to determine the presence
-    // of missing values and/or end-of-vector symbols (in Bcf-encodings).
-    uint32_t hist_alts[256];
-};
 
 /*======   GT context model type   ======*/
 
@@ -135,10 +102,11 @@ public:
         offset += sizeof(uint32_t);
 
         // initiate a buffer if there is none or it's too small
-        if (p_cap == 0 || p == nullptr || p_len < p_cap) {
+        if (p_cap == 0 || p == nullptr || p_len > p_cap) {
+            std::cerr << "[Deserialize] Limit. p_cap=" << p_cap << "," << "p is nullptr=" << (p == nullptr ? "yes" : "no") << ",p_len=" << p_len << "/" << p_cap << std::endl;
             if (p_free) delete[] p;
-            p = new uint8_t[10000000];
-            p_cap = 10000000;
+            p = new uint8_t[p_len + 65536];
+            p_cap = p_len + 65536;
             p_free = true;
         }
 
@@ -149,8 +117,6 @@ public:
     }
 
     int Deserialize(std::istream& stream);
-    int SetDataCopy(uint8_t* data, uint32_t len);
-    int SetDataReference(uint8_t* data, uint32_t len);
 
 public:
     PBWT pbwt;
@@ -197,7 +163,6 @@ public:
 
     inline void ResetBitmaps() { memset(wah_bitmaps, 0, n_wah*sizeof(uint32_t)); }
 
-    int DecodeNext(uint8_t* data, uint32_t& len);
     int DecodeNext(uint8_t* ewah_data, uint32_t& ret_ewah, uint8_t* ret_buffer, uint32_t& ret_len);
     int DecodeNextRaw(uint8_t* data, uint32_t& len);
 
@@ -246,12 +211,12 @@ public:
     }
 
     int Deserialize(std::istream& stream);
-    int SetDataCopy(uint8_t* data, uint32_t len);
-    int SetDataReference(uint8_t* data, uint32_t len);
 
 public:
     int Encode2mc(uint8_t* data, uint32_t len);
+    int Encode2mc(uint8_t* data, uint32_t len, const uint8_t* map, const int shift = 1);
     int EncodeNm(uint8_t* data, uint32_t len);
+    int EncodeNm(uint8_t* data, uint32_t len, const uint8_t* map, const int shift = 1);
     int EncodeWah(uint32_t* wah, uint32_t len);
     int EncodeWahNm(uint32_t* wah, uint32_t len);
     int EncodeWahRLE(uint32_t ref, uint32_t len, std::shared_ptr<djn_ctx_model_t> model);
@@ -297,7 +262,6 @@ public:
 class djinn_ctx_model : public djinn_model {
 public:
     djinn_ctx_model();
-    djinn_ctx_model(uint64_t n_s);
     ~djinn_ctx_model();
 
     /**
@@ -322,6 +286,7 @@ public:
      * @return int 
      */
     int EncodeBcf(uint8_t* data, size_t len_data, int ploidy, uint8_t alt_alleles) override;
+    int Encode(uint8_t* data, size_t len_data, int ploidy, uint8_t alt_alleles) override;
 
     /**
      * Builds all the neccessary objects before passing data for encoding. 
@@ -385,9 +350,11 @@ public:
 
         uint32_t offset = 0;
 
+        // Read total offset.
         uint32_t tot_offset = *((uint32_t*)&src[offset]);
         offset += sizeof(uint32_t);
 
+        // Read #models,#variants,packed bools
         int n_models = *((int*)&src[offset]);
         offset += sizeof(int);
         n_variants = *((uint32_t*)&src[offset]);
@@ -398,6 +365,7 @@ public:
         unused = 0;
         offset += sizeof(uint8_t);
 
+        // Read p_len,p
         p_len = *((uint32_t*)&src[offset]);
         offset += sizeof(uint32_t);
         // Store model selection data.
@@ -407,10 +375,10 @@ public:
         std::cerr << "[Deserialize] Offset here=" << offset << " #models=" << n_models << std::endl;
         std::cerr << "[Deserialize] tot_offset=" << tot_offset << ",n_variants=" << n_variants << ",use_pbwt=" << (int)use_pbwt << ",init=" << (bool)init << ",p_len=" << p_len << std::endl;
         
+        // Read each model.
         for (int i = 0; i < n_models; ++i) {
             // First peek at their content to invoke the correct constructor as it
             // requires #samples, #ploidy, use_pbwt
-            // djn_ctx_model_container_t(int64_t n_s, int pl, bool use_pbwt);
             int pl = *((int*)&src[offset]);
             uint32_t n_s = *((uint32_t*)&src[offset+sizeof(int)]);
             std::cerr << "[Deserialize] #pl=" << pl << ", #n_s=" << n_s << std::endl;
@@ -438,13 +406,10 @@ public:
     // as data does NOT have to be copied and the current model can be
     // reused.
     int Deserialize(std::istream& stream);
-    int SetDataCopy(uint8_t* data, uint32_t len);
-    int SetDataReference(uint8_t* data, uint32_t len);
 
 public:
-    int DecodeNext(uint8_t* data, uint32_t& len) override;
-    int DecodeNext(uint8_t* ewah_data, uint32_t& ret_ewah, uint8_t* ret_buffer, uint32_t& ret_len) override;
     int DecodeNext(djinn_variant_t*& variant) override;
+    int DecodeNext(uint8_t* ewah_data, uint32_t& ret_ewah, uint8_t* ret_buffer, uint32_t& ret_len) override;
     int DecodeNextRaw(uint8_t* data, uint32_t& len) override;
 
 public:
@@ -460,13 +425,10 @@ public:
     // Shared range coder: All context models share this range coder and emit
     // encodings to a shared buffer.
     std::shared_ptr<RangeCoder> range_coder;
-
-    // Todo: these objects should be placed in a container
-    // to serve arbitrary N-ploidy
-    // Todo: map from offset to ploidy (ploidy here is interpreted as number of haplotypes)
     std::shared_ptr<GeneralModel> ploidy_dict; // 0 for first dict encoding, 1 for second etc.
     std::unordered_map<uint64_t, uint32_t> ploidy_map; // maps (data length, ploidy) packed into a 64-bit word to model offsets
     std::vector< std::shared_ptr<djn_ctx_model_container_t> > ploidy_models;
 };
 
 }
+#endif

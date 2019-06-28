@@ -157,23 +157,31 @@ int PBWT::Update(const uint8_t* arr, uint32_t stride) {
 
     for (int i = 0; i < n_samples; ++i) {
         const uint8_t& gt = arr[ppa[i] * stride];
-        if (gt >= n_symbols) {
-            std::cerr << "error=" << (int)gt << "/" << n_symbols << std::endl;
-        }
+        // if (gt >= n_symbols) {
+        //     std::cerr << "error=" << (int)arr[ppa[i]*stride] << "->" << (int)gt << ">=" << n_symbols << std::endl;
+        // }
         assert(gt < n_symbols);
-        for (int j = 0; j < n_symbols; ++j) {
-            if (gt == j)
-                queue[j][n_queue[j]++] = ppa[i];
-        }
+        queue[gt][n_queue[gt]++] = ppa[i];
         prev[i] = gt;
+        // std::cerr << " " << (int)gt;
     }
+    // std::cerr << std::endl << std::endl;
 
     uint32_t of = 0;
     for (int j = 0; j < n_symbols; ++j) {
         for (uint32_t i = 0; i < n_queue[j]; ++i, ++of)
             ppa[of] = queue[j][i];
     }
+    //for (int i = 0; i < n_q2; ++i, ++of) ppa[of] = q2[i];
+    //std::cerr << "of=" << of << "/" << n_samples << std::endl;
     assert(of == n_samples);
+    // Debug: data is sorted at this point.
+    // std::cerr << ToPrettyString() << std::endl;
+    // std::cerr << "Alts=" << n_queue[1] << std::endl;
+    // for (int i = 0; i < n_samples; ++i) {
+    //   std::cerr << " " << (int)BCF_UNPACK_GENOTYPE(arr[ppa[i]*stride]);
+    // }
+    // std::cerr << std::endl;
     ++n_steps;
 
     return(1);

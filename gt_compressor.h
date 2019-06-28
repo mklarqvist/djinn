@@ -22,7 +22,6 @@
 #include "vcf_reader.h"
 #include "pbwt.h"
 #include "compressors.h"
-
 #include "ctx_model.h"
 
 // temp
@@ -213,9 +212,6 @@ public:
     //
     int32_t RemapGenotypeEOV(uint8_t* data, const uint32_t len);
 
-    //
-    virtual int Compress(djinn_block_t*& block) =0;
-
 public:
     // Compression strategy used.
     friend GTCompressor; // Wrapper class friendship.
@@ -262,8 +258,6 @@ private:
     // 2N any M (up to 16)
     int Encode2NXM(uint8_t* data, const int32_t n_data, const int32_t n_alleles, const bool permute) override;
 
-    int Compress(djinn_block_t*& block) override;
-
 #if DEBUG_CONTEXT
 #define CALL_MEMBER_FN(object,ptrToMember)  ((object).*(ptrToMember))
     typedef int(GenotypeDecompressorContext::*context_debug_decode)(uint8_t*);
@@ -292,8 +286,6 @@ public:
 
     // Encode data using htslib.
     int Encode2N(bcf1_t* bcf, const bcf_hdr_t* hdr) override { return(-1); }
-
-    int Compress(djinn_block_t*& block) override;
 
     // Compression routines.
     int EncodeRLEBitmap2N2MC(const int target);
@@ -582,7 +574,6 @@ public:
 
     inline int Encode(bcf1_t* bcf, const bcf_hdr_t* hdr) { return this->instance->Encode(bcf, hdr); }
     inline int Encode(uint8_t* data, const int32_t n_data, const int n_ploidy, const int n_alleles, const bool permute) { return this->instance->Encode(data, n_data, n_ploidy, n_alleles, permute); }
-    inline int Compress(djinn_block_t*& block) { return this->instance->Compress(block); }
 
 public:
     CompressionStrategy strategy;

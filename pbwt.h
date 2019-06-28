@@ -15,8 +15,8 @@
 * specific language governing permissions and limitations
 * under the License.
 */
-#ifndef PBWT_H_
-#define PBWT_H_
+#ifndef DJINN_PBWT_H_
+#define DJINN_PBWT_H_
 
 #include <cstdint>//types
 #include <cstring>//memcpy

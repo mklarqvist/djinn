@@ -1,6 +1,9 @@
 #include "getopt.h"
 
 #include "vcf_reader.h"
+#include "ctx_model.h"
+#include "ewah_model.h"
+
 #include "gt_compressor.h"
 #include "gt_decompressor.h"
 
@@ -38,7 +41,6 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
         }
     }
     gtcomp.SetPermutePbwt(permute);
-    djinn::djinn_block_t* block = nullptr; // output djinn block
     
     uint64_t n_lines = 0;
     uint32_t nv_blocks = 8192; // Number of variants per data block.
@@ -54,6 +56,8 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
 
     djinn::djinn_ctx_model djn_ctx;
     djn_ctx.StartEncoding(permute, true);
+    djinn::djinn_ewah_model djn_ewah;
+    djn_ewah.StartEncoding(permute, true);
     
     std::ofstream test_write("/media/mdrk/08dcb478-5359-41f4-97c8-469190c8a034/djn_debug.bin", std::ios::out | std::ios::binary);
     if (test_write.good() == false) {
@@ -66,13 +70,21 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
         if (n_lines % nv_blocks == 0 && n_lines != 0) {
             djn_ctx.FinishEncoding();
             int decode_ret = djn_ctx.Serialize(decode_buf);
-            std::cerr << "[WRITING] " << decode_ret << std::endl;
+            std::cerr << "[WRITING CTX] " << decode_ret << "b" << std::endl;
             test_write.write((char*)decode_buf, decode_ret);
             djn_ctx.StartEncoding(permute, true);
             ++n_blocks;
+            // EWAH
+            int ret_ewah = djn_ewah.FinishEncoding();
+            std::cerr << "[WRITING EWAH] " << ret_ewah << "b" << std::endl;
+            // int decode_ret = djn_ctx.Serialize(decode_buf);
+            // std::cerr << "[WRITING] " << decode_ret << "b" << std::endl;
+            // test_write.write((char*)decode_buf, decode_ret);
+            djn_ewah.StartEncoding(permute, true);
+            // ++n_blocks;
         }
 
-        if (reader->bcf1_ == NULL) return -1;
+        if (reader->bcf1_ == NULL)   return -1;
         if (reader->header_ == NULL) return -2;
 
         const bcf_fmt_t* fmt = bcf_get_fmt(reader->header_, reader->bcf1_, "GT");
@@ -80,6 +92,7 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
         
         int ret = djn_ctx.EncodeBcf(fmt->p, fmt->p_len, fmt->n, reader->bcf1_->n_allele);
         assert(ret>0);
+        int ret2 = djn_ewah.EncodeBcf(fmt->p, fmt->p_len, fmt->n, reader->bcf1_->n_allele);
 
         ++n_lines;
     }
@@ -107,7 +120,7 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
     test_read.seekg(0);
 
     djinn::djinn_ctx_model djn_ctx_decode;
-    uint8_t* vcf_out_buffer = new uint8_t[512000];
+    uint8_t* vcf_out_buffer = new uint8_t[4*reader->n_samples_+65536];
     uint32_t len_vcf = 0;
 
     djinn::djinn_variant_t* variant = nullptr;
@@ -298,7 +311,7 @@ void usage() {
     printf("   -l BOOL   compress with RLE-hybrid + LZ4-HC-9\n");
     printf("   -m BOOL   compress with context modelling\n");
     printf("   -p BOOL   permute data with PBWT\n");
-    printf("   -P BOOL   do not permute data with PBWT\n\n");
+    printf("   -P BOOL   do NOT permute data with PBWT\n\n");
     printf("Examples:\n");
     printf("  djinn -clpi file.bcf > /dev/null\n");
     printf("  djinn -czPi file.bcf > /dev/null\n");

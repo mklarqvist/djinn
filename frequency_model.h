@@ -51,9 +51,8 @@
 /*
  * Code rewritten to C++11 and commented by Marcus D. R. Klarqvist
  */
-
-#ifndef FREQUENCY_MODEL_H_
-#define FREQUENCY_MODEL_H_
+#ifndef DJINN_FREQUENCY_MODEL_H_
+#define DJINN_FREQUENCY_MODEL_H_
 
 #ifdef __SSE__
 #include <xmmintrin.h>
@@ -80,8 +79,8 @@ public:
 public:
     void SetInput(uint8_t* in) { out_buf = in_buf = in; }
     void SetOutput(uint8_t* out) { in_buf = out_buf = out; }
-    char* GetInput() { return (char *)in_buf; }
-    char* GetOutput() { return (char *)out_buf; }
+    char* GetInput() { return (char*)in_buf; }
+    char* GetOutput() { return (char*)out_buf; }
     size_t OutSize() { return out_buf - in_buf; }
     size_t InSize() { return in_buf - out_buf; }
 
