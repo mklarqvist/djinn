@@ -75,6 +75,7 @@ int djn_ctx_model_t::StartEncoding(bool use_pbwt, bool reset) {
         p_free = true;
     }
     if (reset) this->reset();
+    p_len = 0;
 
     range_coder->SetOutput(p);
     range_coder->StartEncode();
@@ -85,7 +86,7 @@ size_t djn_ctx_model_t::FinishEncoding() {
     if (range_coder.get() == nullptr) return -1;
     range_coder->FinishEncode();
     p_len = range_coder->OutSize();
-    std::cerr << "[djn_ctx_model_t::FinishEncoding] p_len=" << p_len << std::endl;
+    // std::cerr << "[djn_ctx_model_t::FinishEncoding] p_len=" << p_len << std::endl;
     return range_coder->OutSize();
 }
 
@@ -148,9 +149,9 @@ int djinn_ctx_model::EncodeBcf(uint8_t* data, size_t len_data, int ploidy, uint8
     assert(tgt_container->marchetype.get() != nullptr);
 
     // for (int i = 0; i < 256; ++i) {
-    //     if (hist_alts[i]) std::cerr << i << ":" << hist_alts[i] << ",";
+        // if (hist_alts[i]) std::cerr << i << ":" << hist_alts[i] << ",";
     // }
-    // std::cerr << " data2m=" << tgt_container->model_2mc->range_coder->OutSize() << " dataNm=" << tgt_container->model_nm->range_coder->OutSize() << " permute=" << permute << std::endl;
+    // std::cerr << " n_variants=" << tgt_container->n_variants << " data2m=" << tgt_container->model_2mc->range_coder->OutSize() << " dataNm=" << tgt_container->model_nm->range_coder->OutSize() << " permute=" << (int)use_pbwt << std::endl;
 
     // Biallelic, no missing, and no special EOV symbols.
     if (alt_alleles <= 2 && hist_alts[14] == 0 && hist_alts[15] == 0) {
@@ -168,6 +169,7 @@ int djinn_ctx_model::EncodeBcf(uint8_t* data, size_t len_data, int ploidy, uint8
                 tgt_container->model_2mc->pbwt.UpdateBcf(data, 1);
             }
 
+            // std::cerr << "here 2mc: " << hist_alts[1] << std::endl;
             ret = (tgt_container->Encode2mc(tgt_container->model_2mc->pbwt.prev, len_data));
         } else {
             // std::cerr << "encoding nopbwt" << std::endl;
@@ -226,7 +228,7 @@ int djinn_ctx_model::Encode(uint8_t* data, size_t len_data, int ploidy, uint8_t 
     // for (int i = 0; i < 256; ++i) {
     //     if (hist_alts[i]) std::cerr << i << ":" << hist_alts[i] << ",";
     // }
-    // std::cerr << " data2m=" << tgt_container->model_2mc->range_coder->OutSize() << " dataNm=" << tgt_container->model_nm->range_coder->OutSize() << " permute=" << permute << std::endl;
+    // std::cerr << " data2m=" << tgt_container->model_2mc->range_coder->OutSize() << " dataNm=" << tgt_container->model_nm->range_coder->OutSize() << " permute=" << (bool)use_pbwt << std::endl;
 
     // Biallelic, no missing, and no special EOV symbols.
     if (alt_alleles <= 2 && hist_alts[14] == 0 && hist_alts[15] == 0) {
@@ -333,7 +335,7 @@ void djinn_ctx_model::StartEncoding(bool use_pbwt, bool reset) {
     
     // If resetting the model_2mc->
     if (reset) {
-        std::cerr << "[djinn_ctx_model::StartEncoding] resetting" << std::endl;
+        // std::cerr << "[djinn_ctx_model::StartEncoding] resetting" << std::endl;
         for (int i = 0; i < ploidy_models.size(); ++i) {
             ploidy_models[i]->model_2mc->reset();
             ploidy_models[i]->model_nm->reset();
@@ -346,12 +348,13 @@ void djinn_ctx_model::StartEncoding(bool use_pbwt, bool reset) {
     }
 
     n_variants = 0;
+    p_len = 0;
 
     // Local range coder
     range_coder->SetOutput(p);
     range_coder->StartEncode();
 
-    std::cerr << "[djinn_ctx_model::StartEncoding] models start encoding" << std::endl;
+    // std::cerr << "[djinn_ctx_model::StartEncoding] models start encoding" << std::endl;
     for (int i = 0; i < ploidy_models.size(); ++i) {
         ploidy_models[i]->StartEncoding(use_pbwt, reset);
     }
@@ -362,16 +365,16 @@ size_t djinn_ctx_model::FinishEncoding() {
     range_coder->FinishEncode();
     p_len = range_coder->OutSize();
 
-    std::cerr << "[djinn_ctx_model::FinishEncoding] p_len=" << p_len << std::endl;
+    // std::cerr << "[djinn_ctx_model::FinishEncoding] p_len=" << p_len << std::endl;
 
     size_t s_models = 0;
     for (int i = 0; i < ploidy_models.size(); ++i) {
         s_models += ploidy_models[i]->FinishEncoding();
-        std::cerr << "Model-" << i << ": " << ploidy_models[i]->range_coder->OutSize() << std::endl;
+        // std::cerr << "Model-" << i << ": " << ploidy_models[i]->range_coder->OutSize() << std::endl;
     }
 
     size_t s_rc  = range_coder->OutSize();
-    std::cerr << "Model sizes=" << s_rc << " and models=" << s_models << std::endl;
+    // std::cerr << "Model sizes=" << s_rc << " and models=" << s_models << std::endl;
     
     return s_rc + s_models;
 }
@@ -389,6 +392,204 @@ int djinn_ctx_model::StartDecoding() {
     return 1;
 }
 
+// Read/write
+int djinn_ctx_model::Serialize(uint8_t* dst) const {
+    // Serialize as (int,uint32_t,uint32_t,uint8_t*,ctx1,ctx2):
+    // #models,p_len,p,[models...]
+    uint32_t offset = 0;
+
+    // std::cerr << "[djinn_ctx_model::Serialize] p_len=" << p_len << std::endl;
+
+    // Reserve space for offset
+    offset += sizeof(uint32_t);
+
+    // Add
+    *((int*)&dst[offset]) = (int)ploidy_models.size(); // number of models
+    offset += sizeof(int);
+    *((uint32_t*)&dst[offset]) = n_variants; // number of variants
+    offset += sizeof(uint32_t);
+
+    // Serialize bit-packed controller.
+    uint8_t pack = (use_pbwt << 7) | (init << 6) | (unused << 0);
+    dst[offset] = pack;
+    offset += sizeof(uint8_t);
+
+    *((uint32_t*)&dst[offset]) = p_len; // data length
+    offset += sizeof(uint32_t);
+    // Store model selection data.
+    memcpy(&dst[offset], p, p_len); // data
+    offset += p_len;
+
+    // std::cerr << "[Serialize] Offset here=" << offset << std::endl;
+
+    // Serialize each model.
+    for (int i = 0; i < ploidy_models.size(); ++i) {
+        offset += ploidy_models[i]->Serialize(&dst[offset]);    
+    }
+    
+    *((uint32_t*)&dst[0]) = offset;
+    // std::cerr << "test=" << GetSerializedSize() << "/" << offset << std::endl;
+    // assert(GetSerializedSize() == offset);
+    
+    return offset;
+}
+
+int djinn_ctx_model::Serialize(std::ostream& stream) const {
+    // Serialize as (int,uint32_t,uint32_t,uint8_t*,ctx1,ctx2):
+    // #models,p_len,p,[models...]
+    uint32_t out_len = GetSerializedSize();
+    stream.write((char*)&out_len, sizeof(uint32_t));
+
+    int n_models = ploidy_models.size();
+    stream.write((char*)&n_models, sizeof(int));
+    stream.write((char*)&n_variants, sizeof(uint32_t));
+
+    // Serialize bit-packed controller.
+    uint8_t pack = (use_pbwt << 7) | (init << 6) | (unused << 0);
+    stream.write((char*)&pack, sizeof(uint8_t));
+    stream.write((char*)&p_len, sizeof(uint32_t));
+    stream.write((char*)p, p_len);
+
+    // Serialize each model.
+    for (int i = 0; i < ploidy_models.size(); ++i)
+        ploidy_models[i]->Serialize(stream);
+
+    return out_len;
+}
+
+int djinn_ctx_model::GetSerializedSize() const {
+    int ret = sizeof(uint32_t) + sizeof(int) + sizeof(uint32_t) + sizeof(uint8_t) + sizeof(uint32_t) + p_len;
+    for (int i = 0; i < ploidy_models.size(); ++i) {
+        ret += ploidy_models[i]->GetSerializedSize();
+    }
+    return ret;
+}
+
+int djinn_ctx_model::GetCurrentSize() const {
+    int ret = range_coder->OutSize();
+    for (int i = 0; i < ploidy_models.size(); ++i) {
+        ret += ploidy_models[i]->GetCurrentSize();
+    }
+    return ret;
+}
+
+// Deserialize data from an external buffer.
+int djinn_ctx_model::Deserialize(uint8_t* src) {
+    // Reset.
+    ploidy_remap.clear();
+
+    uint32_t offset = 0;
+
+    // Read total offset.
+    uint32_t tot_offset = *((uint32_t*)&src[offset]);
+    offset += sizeof(uint32_t);
+
+    // Read #models,#variants,packed bools
+    int n_models = *((int*)&src[offset]);
+    offset += sizeof(int);
+    n_variants = *((uint32_t*)&src[offset]);
+    offset += sizeof(uint32_t);
+    uint8_t pack = src[offset];
+    use_pbwt = (pack >> 7) & 1;
+    init = (pack >> 6) & 1;
+    unused = 0;
+    offset += sizeof(uint8_t);
+
+    // Read p_len,p
+    p_len = *((uint32_t*)&src[offset]);
+    offset += sizeof(uint32_t);
+    // Store model selection data.
+    memcpy(p, &src[offset], p_len);
+    offset += p_len;
+    // Deserialize each model.
+    // std::cerr << "[Deserialize] Offset here=" << offset << " #models=" << n_models << std::endl;
+    // std::cerr << "[Deserialize] tot_offset=" << tot_offset << ",n_variants=" << n_variants << ",use_pbwt=" << (int)use_pbwt << ",init=" << (bool)init << ",p_len=" << p_len << std::endl;
+    
+    // Read each model.
+    for (int i = 0; i < n_models; ++i) {
+        // First peek at their content to invoke the correct constructor as it
+        // requires #samples, #ploidy, use_pbwt
+        int pl = *((int*)&src[offset]);
+        uint32_t n_s = *((uint32_t*)&src[offset+sizeof(int)]);
+        // std::cerr << "[Deserialize] #pl=" << pl << ", #n_s=" << n_s << std::endl;
+        
+        // Update ploidy map and insert data in the correct position relative
+        // the encoding order.
+        const uint64_t tuple = ((uint64_t)n_s << 32) | pl;
+        auto search = ploidy_map.find(tuple);
+        if (search != ploidy_map.end()) {
+            // std::cerr << "Illegal! Cannot exist! Corruption..." << std::endl;
+            // exit(1);
+            // std::cerr << "Already exist: " << search->second << std::endl;
+            // ploidy_remap[search->second] = search->second;
+            offset += ploidy_models[search->second]->Deserialize(&src[offset]);
+        } else {
+            // std::cerr << "[Deserialize] Adding map [" << tuple << "] for [" << n_s << "," << pl << "]" << std::endl; 
+            ploidy_map[tuple] = ploidy_models.size();
+            ploidy_models.push_back(std::make_shared<djinn::djn_ctx_model_container_t>(n_s, pl, (bool)use_pbwt));
+            offset += ploidy_models.back()->Deserialize(&src[offset]);
+        }
+    }
+    // std::cerr << "[Deserialize] Decoded=" << offset << "/" << tot_offset << std::endl;
+    assert(offset == tot_offset);
+    return offset;
+}
+
+// Deserialize data from a IO stream. This approach is more efficient
+// as data does NOT have to be copied and the current model can be
+// reused.
+int djinn_ctx_model::Deserialize(std::istream& stream) {
+    // uint32_t out_len = GetSerializedSize();
+    uint32_t out_len = 0;
+    stream.read((char*)&out_len, sizeof(uint32_t));
+
+    int n_models = 0;
+    stream.read((char*)&n_models, sizeof(int));
+    stream.read((char*)&n_variants, sizeof(uint32_t));
+
+    // Deserialize bit-packed controller.
+    uint8_t pack = 0;
+    stream.read((char*)&pack, sizeof(uint8_t));
+    use_pbwt = (pack >> 7) & 1;
+    init = (pack >> 6) & 1;
+    unused = 0;
+
+    stream.read((char*)&p_len, sizeof(uint32_t));
+    stream.read((char*)p, p_len);
+
+    // Serialize each model.
+    for (int i = 0; i < n_models; ++i) {
+        // First peek at their content to invoke the correct constructor as it
+        // requires #samples, #ploidy, use_pbwt
+        int pl = 0; 
+        uint32_t n_s = 0; 
+        stream.read((char*)&pl, sizeof(int));
+        stream.read((char*)&n_s, sizeof(uint32_t));
+
+        // std::cerr << "[Deserialize] #pl=" << pl << ", #n_s=" << n_s << std::endl;
+
+        // Update ploidy map and insert data in the correct position relative
+        // the encoding order.
+        const uint64_t tuple = ((uint64_t)n_s << 32) | pl;
+        auto search = ploidy_map.find(tuple);
+        if (search != ploidy_map.end()) {
+            // std::cerr << "Illegal! Cannot exist! Corruption..." << std::endl;
+            // exit(1);
+            // std::cerr << "Already exist: " << search->second << std::endl;
+            // ploidy_remap[search->second] = search->second;
+            ploidy_models[search->second]->Deserialize(stream);
+        } else {
+            // std::cerr << "[Deserialize] Adding map [" << tuple << "] for [" << n_s << "," << pl << "]" << std::endl; 
+            ploidy_map[tuple] = ploidy_models.size();
+            ploidy_models.push_back(std::make_shared<djinn::djn_ctx_model_container_t>(n_s, pl, (bool)use_pbwt));
+            ploidy_models.back()->Deserialize(stream);
+        }
+    }
+    // std::cerr << "[Deserialize] Decoded=" << offset << "/" << tot_offset << std::endl;
+
+    return stream.tellg();
+}
+
 /*======   Container   ======*/
 
 djn_ctx_model_container_t::djn_ctx_model_container_t(int64_t n_s, int pl, bool use_pbwt) : 
@@ -396,6 +597,7 @@ djn_ctx_model_container_t::djn_ctx_model_container_t(int64_t n_s, int pl, bool u
     ploidy(pl), n_samples(n_s), n_variants(0),
     n_wah(std::ceil((float)n_samples / 32) * 4), 
     n_samples_wah((n_wah * 32) / 4), 
+    n_samples_wah_nm(std::ceil((float)n_samples * 4 / 32) * 8),
     wah_bitmaps(new uint32_t[n_wah]), 
     p(new uint8_t[1000000]), p_len(0), p_cap(1000000), p_free(true),
     range_coder(std::make_shared<RangeCoder>()), 
@@ -413,6 +615,7 @@ djn_ctx_model_container_t::djn_ctx_model_container_t(int64_t n_s, int pl, bool u
     ploidy(pl), n_samples(n_s), n_variants(0),
     n_wah(std::ceil((float)n_samples / 32) * 4), 
     n_samples_wah((n_wah * 32) / 4), 
+    n_samples_wah_nm(std::ceil((float)n_samples * 4 / 32) * 8),
     wah_bitmaps(new uint32_t[n_wah]), 
     p(src), p_len(src_len), p_cap(0), p_free(false),
     range_coder(std::make_shared<RangeCoder>()), 
@@ -431,10 +634,10 @@ djn_ctx_model_container_t::~djn_ctx_model_container_t() {
 }
 
 void djn_ctx_model_container_t::StartEncoding(bool use_pbwt, bool reset) {
-    std::cerr << "in start encoding: " << model_2mc->pbwt.n_symbols << std::endl; 
+    // std::cerr << "in start encoding: " << model_2mc->pbwt.n_symbols << std::endl; 
     if (use_pbwt) {
         if (model_2mc->pbwt.n_symbols == 0) {
-            std::cerr << "init pbwt: " << n_samples << "," << 2 << std::endl;
+            // std::cerr << "init pbwt: " << n_samples << "," << 2 << std::endl;
             if (n_samples == 0) {
                 std::cerr << "illegal: no sample number set!" << std::endl;
             }
@@ -442,7 +645,7 @@ void djn_ctx_model_container_t::StartEncoding(bool use_pbwt, bool reset) {
         }
 
         if (model_nm->pbwt.n_symbols == 0) {
-            std::cerr << "init pbwt: " << n_samples << "," << 16 << std::endl;
+            // std::cerr << "init pbwt: " << n_samples << "," << 16 << std::endl;
             if (n_samples == 0) {
                 std::cerr << "illegal: no sample number set!" << std::endl;
             }
@@ -451,7 +654,7 @@ void djn_ctx_model_container_t::StartEncoding(bool use_pbwt, bool reset) {
     }
 
     if (reset) {
-        std::cerr << "[djn_ctx_model_container_t::StartEncoding] resetting" << std::endl;
+        // std::cerr << "[djn_ctx_model_container_t::StartEncoding] resetting" << std::endl;
         model_2mc->reset();
         model_nm->reset();
     } else {
@@ -482,7 +685,7 @@ size_t djn_ctx_model_container_t::FinishEncoding() {
     size_t s_rc  = range_coder->OutSize();
     size_t s_2mc = model_2mc->range_coder->OutSize();
     size_t s_nm  = model_nm->range_coder->OutSize();
-    std::cerr << "container finish=" << s_rc << " and " << s_2mc << " and " << s_nm << std::endl; 
+    std::cerr << "container finish. type=" << s_rc << " 2mc=" << s_2mc << " nm=" << s_nm << std::endl; 
     
     return s_rc + s_2mc + s_nm;
 }
@@ -491,7 +694,7 @@ void djn_ctx_model_container_t::StartDecoding(bool use_pbwt, bool reset) {
     // std::cerr << "in start decoding: " << model_2mc->pbwt.n_symbols << std::endl; 
     if (use_pbwt) {
         if (model_2mc->pbwt.n_symbols == 0) {
-            std::cerr << "init pbwt: " << n_samples << "," << 2 << std::endl;
+            // std::cerr << "init pbwt: " << n_samples << "," << 2 << std::endl;
             if (n_samples == 0) {
                 std::cerr << "illegal: no sample number set!" << std::endl;
             }
@@ -499,7 +702,7 @@ void djn_ctx_model_container_t::StartDecoding(bool use_pbwt, bool reset) {
         }
 
         if (model_nm->pbwt.n_symbols == 0) {
-            std::cerr << "init pbwt: " << n_samples << "," << 16 << std::endl;
+            // std::cerr << "init pbwt: " << n_samples << "," << 16 << std::endl;
             if (n_samples == 0) {
                 std::cerr << "illegal: no sample number set!" << std::endl;
             }
@@ -508,14 +711,14 @@ void djn_ctx_model_container_t::StartDecoding(bool use_pbwt, bool reset) {
     }
 
     if (reset) {
-        std::cerr << "[djn_ctx_model_container_t::StartDecoding] resetting" << std::endl;
+        // std::cerr << "[djn_ctx_model_container_t::StartDecoding] resetting" << std::endl;
         model_2mc->reset();
         model_nm->reset();
     } else {
         model_2mc->n_variants = 0;
         model_nm->n_variants = 0;
     }
-    std::cerr << "[djn_ctx_model_container_t::StartDecoding] p_len=" << p_len << std::endl;
+    // std::cerr << "[djn_ctx_model_container_t::StartDecoding] p_len=" << p_len << std::endl;
 
     this->use_pbwt = use_pbwt;
 
@@ -532,10 +735,11 @@ void djn_ctx_model_container_t::StartDecoding(bool use_pbwt, bool reset) {
 int djn_ctx_model_container_t::Encode2mc(uint8_t* data, uint32_t len) {
     if (data == nullptr) return -1;
     if (n_samples == 0) return -2;
-    
+
     if (wah_bitmaps == nullptr) {
         n_wah = std::ceil((float)n_samples / 32) * 4;
         n_samples_wah = (n_wah * 32) / 4;
+        n_samples_wah_nm = std::ceil((float)n_samples * 4 / 32) * 8;
         wah_bitmaps = new uint32_t[n_wah];
     }
     
@@ -558,6 +762,7 @@ int djn_ctx_model_container_t::Encode2mc(uint8_t* data, uint32_t len, const uint
     if (wah_bitmaps == nullptr) {
         n_wah = std::ceil((float)n_samples / 32) * 4;
         n_samples_wah = (n_wah * 32) / 4;
+        n_samples_wah_nm = std::ceil((float)n_samples * 4 / 32) * 8;
         wah_bitmaps = new uint32_t[n_wah];
     }
     
@@ -582,6 +787,7 @@ int djn_ctx_model_container_t::EncodeNm(uint8_t* data, uint32_t len) {
     if (wah_bitmaps == nullptr) {
         n_wah = std::ceil((float)n_samples / 32) * 4;
         n_samples_wah = (n_wah * 32) / 4;
+        n_samples_wah_nm = std::ceil((float)n_samples * 4 / 32) * 8;
         wah_bitmaps = new uint32_t[n_wah];
     }
     
@@ -595,7 +801,7 @@ int djn_ctx_model_container_t::EncodeNm(uint8_t* data, uint32_t len) {
     // for (int i = 0; i < n_wah; ++i) std::cerr << std::bitset<64>(wah_bitmaps[i]) << " ";
     // std::cerr << std::endl;
 
-    return EncodeWahNm(wah_bitmaps, n_wah);
+    return EncodeWahNm(wah_bitmaps, n_samples_wah/4);
     // return -1;
 }
 
@@ -607,6 +813,7 @@ int djn_ctx_model_container_t::EncodeNm(uint8_t* data, uint32_t len, const uint8
     if (wah_bitmaps == nullptr) {
         n_wah = std::ceil((float)n_samples / 32) * 4;
         n_samples_wah = (n_wah * 32) / 4;
+        n_samples_wah_nm = std::ceil((float)n_samples * 4 / 32) * 8;
         wah_bitmaps = new uint32_t[n_wah];
     }
     
@@ -620,7 +827,7 @@ int djn_ctx_model_container_t::EncodeNm(uint8_t* data, uint32_t len, const uint8
     // for (int i = 0; i < n_wah; ++i) std::cerr << std::bitset<64>(wah_bitmaps[i]) << " ";
     // std::cerr << std::endl;
 
-    return EncodeWahNm(wah_bitmaps, n_wah);
+    return EncodeWahNm(wah_bitmaps, n_samples_wah/4);
     // return -1;
 }
 
@@ -629,6 +836,8 @@ int djn_ctx_model_container_t::DecodeRaw_nm(uint8_t* data, uint32_t& len) {
 
     int64_t n_samples_obs = 0;
     int objects = 0;
+
+    // std::cerr << "[djn_ctx_model_container_t::DecodeRaw_nm] start pos=" << len << std::endl;
 
     // Emit empty EWAH marker.
     djinn_ewah_t* ewah = (djinn_ewah_t*)&data[len]; 
@@ -644,6 +853,7 @@ int djn_ctx_model_container_t::DecodeRaw_nm(uint8_t* data, uint32_t& len) {
             ++ewah->dirty;
             // uint64_t wah = 0;
             // std::cerr << "Bitmap=";
+            uint32_t* t = (uint32_t*)&data[len];
             for (int i = 0; i < 4; ++i) {
                 data[len++] = model_nm->dirty_wah->DecodeSymbol();
                 // wah |= model_nm->dirty_wah->DecodeSymbol();
@@ -651,11 +861,13 @@ int djn_ctx_model_container_t::DecodeRaw_nm(uint8_t* data, uint32_t& len) {
                 // wah <<= 8;
             }
             // std::cerr << std::endl;
+            // std::cerr << "[djn_ctx_model_container_t::DecodeRaw_nm] dirty " << std::bitset<32>(*t) << std::endl;
             n_samples_obs += 8;
 
         } else { // is RLE
             // Emit new EWAH marker
             if (ewah->clean > 0 || ewah->dirty > 0) {
+                // std::cerr << "[djn_ctx_model_container_t::DecodeRaw_nm] clean=" << ewah->clean << ", dirty=" << ewah->dirty << ", ref=" << ewah->ref << std::endl;
                 ewah = (djinn_ewah_t*)&data[len];
                 ewah->reset();
                 len += sizeof(djinn_ewah_t);
@@ -666,26 +878,28 @@ int djn_ctx_model_container_t::DecodeRaw_nm(uint8_t* data, uint32_t& len) {
             uint32_t ref = 1; uint32_t len = 1;
             DecodeWahRLE_nm(ref, len, model_nm);
             // std::cerr << "decoded RLE=" << ref << " len=" << len << std::endl;
-            ewah->ref = ref & 1;
+            ewah->ref = ref & 15;
             ewah->clean = len;
 
-            n_samples_obs += len*8;
+            n_samples_obs += ewah->clean*8;
         }
 
-        if (n_samples_obs == n_samples_wah) {
-            // std::cerr << "obs=" << n_samples_obs << "/" << n_samples_wah << std::endl;
+        if (n_samples_obs == n_samples_wah_nm) {
+            // std::cerr << "[djn_ctx_model_container_t::DecodeRaw_nm] obs=" << n_samples_obs << "/" << n_samples_wah_nm << std::endl;
             break;
         }
-        if (n_samples_obs > n_samples_wah) {
-            std::cerr << "Decompression corruption: " << n_samples_obs << "/" << n_samples_wah  << std::endl;
+        if (n_samples_obs > n_samples_wah_nm) {
+            std::cerr << "[djn_ctx_model_container_t::DecodeRaw_nm] Decompression corruption: " << n_samples_obs << "/" << n_samples_wah_nm  << std::endl;
             exit(1);
         }
     }
 
     if (ewah->clean > 0 || ewah->dirty > 0) {
         ++objects;
+        // std::cerr << "[djn_ctx_model_container_t::DecodeRaw_nm] clean=" << ewah->clean << ", dirty=" << ewah->dirty << ", ref=" << ewah->ref << std::endl;
         // std::cerr << "final=" << std::bitset<64>(*ewah) << " ref=" << ewah_ref << ",run=" << ewah_run << ",dirty=" << ewah_dirty << std::endl;
     }
+    // std::cerr << "n_objs=" << objects << std::endl;
 
     return 1;
 }
@@ -698,20 +912,18 @@ int djn_ctx_model_container_t::EncodeWah(uint32_t* wah, uint32_t len) { // input
     uint32_t wah_run = 1;
 
     // Resize if necessary.
-    if (model_2mc->range_coder->OutSize() + 2*n_samples > model_2mc->p_cap) {
+    // std::cerr << "[ENCODE] " << model_2mc->range_coder->OutSize() << "/" << model_2mc->p_cap << std::endl;
+    if (model_2mc->range_coder->OutSize() + n_samples > model_2mc->p_cap) {
         const uint32_t rc_size = model_2mc->range_coder->OutSize();
-        std::cerr << "[djn_ctx_model_container_t::EncodeWah][RESIZE] resizing from: " << rc_size << "->" << 2*rc_size << std::endl;
+        std::cerr << "[djn_ctx_model_container_t::EncodeWah][RESIZE] resizing from: " << rc_size << "->" << (rc_size + 2*n_samples + 65536) << std::endl;
         uint8_t* prev = model_2mc->p; // old
-        model_2mc->p = new uint8_t[rc_size*2]; // double size. should rarely occur
-        model_2mc->p_cap = rc_size*2;
+        model_2mc->p_cap = rc_size + 2*n_samples + 65536;
+        model_2mc->p = new uint8_t[model_2mc->p_cap];
         memcpy(model_2mc->p, prev, rc_size);
         if (model_2mc->p_free) delete[] prev;
         model_2mc->p_free = true;
-        std::cerr << "done resizing" << std::endl;
         model_2mc->range_coder->out_buf = model_2mc->p + rc_size; 
         model_2mc->range_coder->in_buf  = model_2mc->p;
-        std::cerr << "done updating rc" << std::endl;
-        // exit(1);
     }
 
     for (int i = 1; i < len; ++i) {
@@ -719,15 +931,17 @@ int djn_ctx_model_container_t::EncodeWah(uint32_t* wah, uint32_t len) { // input
             if ((wah_ref != 0 && wah_ref != std::numeric_limits<uint32_t>::max()) || wah_run == 1) {
                 model_2mc->mtype->EncodeSymbol(0);
                 
-                // std::cerr << "Bitmap=" << std::bitset<32>(wah_ref) << ": " << __builtin_popcount(wah_ref) << " at pos=" << wah_ref_pos << std::endl;
+                // std::cerr << "Bitmap=" << std::bitset<32>(wah_ref) << ": " << __builtin_popcount(wah_ref) << std::endl;
                 for (int i = 0; i < 4; ++i) {
                     model_2mc->dirty_wah->EncodeSymbol(wah_ref & 255);
-                    // std::cerr << "bitmap-" << i << " " << std::bitset<32>(wah_ref * 255)
+                    // std::cerr << "bitmap-" << i << " " << std::bitset<32>(wah_ref * 255) << " ";
                     // ref_alt[1] += __builtin_popcount(wah_ref & 255);
                     wah_ref >>= 8;
                 }
+                // std::cerr << std::endl;
             } else {
                 model_2mc->mtype->EncodeSymbol(1);
+                // std::cerr << "wah_ref: " << (int)(wah_ref&1) << " wah_run=" << wah_run << std::endl;
                 // ref_alt[wah_ref & 1] += wah_run * 32;
                 EncodeWahRLE(wah_ref, wah_run, model_2mc);
             }
@@ -743,7 +957,7 @@ int djn_ctx_model_container_t::EncodeWah(uint32_t* wah, uint32_t len) { // input
         if ((wah_ref != 0 && wah_ref != std::numeric_limits<uint32_t>::max()) || wah_run == 1) {
             model_2mc->mtype->EncodeSymbol(0);
             
-            // std::cerr << "Bitmap=" << std::bitset<32>(wah_ref) << ": " << __builtin_popcount(wah_ref) << " at pos=" << wah_ref_pos << std::endl;
+            // std::cerr << "Bitmap=" << std::bitset<32>(wah_ref) << ": " << __builtin_popcount(wah_ref) << std::endl;
             for (int i = 0; i < 4; ++i) {
                 model_2mc->dirty_wah->EncodeSymbol(wah_ref & 255);
                 // ref_alt[1] += __builtin_popcount(wah_ref & 255);
@@ -753,10 +967,10 @@ int djn_ctx_model_container_t::EncodeWah(uint32_t* wah, uint32_t len) { // input
         } else {
             model_2mc->mtype->EncodeSymbol(1);
             // ref_alt[wah_ref & 1] += wah_run * 32;
+            // std::cerr << "wah_ref: " << (int)(wah_ref&1) << " wah_run=" << wah_run << std::endl;
             EncodeWahRLE(wah_ref, wah_run, model_2mc);
         }
     }
-
     // std::cerr << "encoding wah ref_alt=" << ref_alt[0] << "," << ref_alt[1] << std::endl;
 
     ++n_variants;
@@ -774,20 +988,18 @@ int djn_ctx_model_container_t::EncodeWahNm(uint32_t* wah, uint32_t len) { // inp
     uint64_t wah_run = 1;
 
     // Resize if necessary.
-    if (model_nm->range_coder->OutSize() + 2*n_samples > model_nm->p_cap) {
+    // std::cerr << "[ENCODE] " << model_nm->range_coder->OutSize() << "/" << model_nm->p_cap << std::endl;
+    if (model_nm->range_coder->OutSize() + n_samples > model_nm->p_cap) {
         const uint32_t rc_size = model_nm->range_coder->OutSize();
-        std::cerr << "[djn_ctx_model_container_t::EncodeWah][RESIZE] resizing from: " << rc_size << "->" << 2*rc_size << std::endl;
-        uint8_t* prev = model_nm->p;
-        model_nm->p = new uint8_t[rc_size*2]; // double size. should rarely occur
-        model_nm->p_cap = rc_size*2;
+        std::cerr << "[djn_ctx_model_container_t::EncodeWah][RESIZE] resizing from: " << rc_size << "->" << (rc_size + 2*n_samples + 65536) << std::endl;
+        uint8_t* prev = model_nm->p; // old
+        model_nm->p_cap = rc_size + 2*n_samples + 65536;
+        model_nm->p = new uint8_t[model_nm->p_cap];
         memcpy(model_nm->p, prev, rc_size);
         if (model_nm->p_free) delete[] prev;
         model_nm->p_free = true;
-        std::cerr << "done resizing" << std::endl;
         model_nm->range_coder->out_buf = model_nm->p + rc_size; 
-        model_nm->range_coder->in_buf = model_nm->p;
-        std::cerr << "done updating rc" << std::endl;
-        // exit(1);
+        model_nm->range_coder->in_buf  = model_nm->p;
     }
 
     for (int i = 1; i < len; ++i) {
@@ -1072,11 +1284,11 @@ int djn_ctx_model_container_t::DecodeWahRLE_nm(uint32_t& ref, uint32_t& len, std
 
 int djn_ctx_model_container_t::DecodeNext(uint8_t* ewah_data, uint32_t& ret_ewah, uint8_t* ret_buffer, uint32_t& ret_len) {
     if (ewah_data == nullptr) return -1;
-    if (ret_buffer == nullptr) return -1;
+    if (ret_buffer == nullptr) return -2;
 
     // Decode stream archetype.
     uint8_t type = marchetype->DecodeSymbol();
-    // std::cerr << "[Decode container] Type=" << (int)type << std::endl;
+    // std::cerr << "[djn_ctx_model_container_t::DecodeNext] Type=" << (int)type << std::endl;
 
     size_t ret_ewah_init = ret_ewah;
     int objs = 0;
@@ -1091,14 +1303,55 @@ int djn_ctx_model_container_t::DecodeNext(uint8_t* ewah_data, uint32_t& ret_ewah
     // std::cerr << "alts=" << hist_alts[0] << "," << hist_alts[1] << std::endl;
 
     if (use_pbwt) {
-        if (hist_alts[1] >= 10) {
-            switch(type) {
-            case 0: model_2mc->pbwt.ReverseUpdateEWAH(ewah_data, ret_ewah, ret_buffer); break;
-            case 1: model_nm->pbwt.ReverseUpdateEWAH(ewah_data, ret_ewah, ret_buffer); break;
+        if (type == 0) {
+            if (hist_alts[1] >= 10) {
+                model_2mc->pbwt.ReverseUpdateEWAH(ewah_data, ret_ewah, ret_buffer); 
+                ret_len = n_samples;
+            } else {
+                // Unpack EWAH into literals according to current PPA
+                uint32_t local_offset = ret_ewah_init;
+                uint32_t ret_pos = 0;
+                for (int j = 0; j < objs; ++j) {
+                    djinn_ewah_t* ewah = (djinn_ewah_t*)&ewah_data[local_offset];
+                    local_offset += sizeof(djinn_ewah_t);
+                    // std::cerr << "ewah=" << ewah->ref << "," << ewah->clean << "," << ewah->dirty << std::endl;
+                    
+                    // Clean words.
+                    uint32_t to = ret_pos + ewah->clean*32 > n_samples ? n_samples : ret_pos + ewah->clean*32;
+                    for (int i = ret_pos; i < to; ++i) {
+                        ret_buffer[model_2mc->pbwt.ppa[i]] = (ewah->ref & 1);
+                    }
+                    ret_pos = to;
+
+                    for (int i = 0; i < ewah->dirty; ++i) {
+                        to = ret_pos + 32 > n_samples ? n_samples : ret_pos + 32;
+                        
+                        uint32_t dirty = *((uint32_t*)(&ewah_data[local_offset])); // copy
+                        for (int j = ret_pos; j < to; ++j) {
+                            ret_buffer[model_2mc->pbwt.ppa[j]] = (dirty & 1);
+                            dirty >>= 1;
+                        }
+                        local_offset += sizeof(uint32_t);
+                        ret_pos = to;
+                    }
+
+                    // local_offset += ewah->dirty * sizeof(uint32_t);
+                    // vals += ewah->dirty + ewah->clean;
+
+                    // std::cerr << "local=" << local_offset << "/" << ret_ewah << std::endl;
+                    assert(ret_pos <= n_samples);
+                    assert(local_offset <= ret_ewah);
+                }
+                assert(ret_pos == n_samples);
+                ret_len = n_samples;
             }
+        } else { // is NM
+            model_nm->pbwt.ReverseUpdateEWAHNm(ewah_data, ret_ewah, ret_buffer);
             ret_len = n_samples;
-        } else {
-            // Unpack EWAH into literals according to current PPA
+        }
+    } else { // not using PBWT
+        if (type == 0) {
+            // Unpack EWAH into literals
             uint32_t local_offset = ret_ewah_init;
             uint32_t ret_pos = 0;
             for (int j = 0; j < objs; ++j) {
@@ -1109,7 +1362,7 @@ int djn_ctx_model_container_t::DecodeNext(uint8_t* ewah_data, uint32_t& ret_ewah
                 // Clean words.
                 uint32_t to = ret_pos + ewah->clean*32 > n_samples ? n_samples : ret_pos + ewah->clean*32;
                 for (int i = ret_pos; i < to; ++i) {
-                    ret_buffer[model_2mc->pbwt.ppa[i]] = (ewah->ref & 1);
+                    ret_buffer[i] = (ewah->ref & 1);
                 }
                 ret_pos = to;
 
@@ -1118,7 +1371,7 @@ int djn_ctx_model_container_t::DecodeNext(uint8_t* ewah_data, uint32_t& ret_ewah
                     
                     uint32_t dirty = *((uint32_t*)(&ewah_data[local_offset])); // copy
                     for (int j = ret_pos; j < to; ++j) {
-                        ret_buffer[model_2mc->pbwt.ppa[j]] = (dirty & 1);
+                        ret_buffer[j] = (dirty & 1);
                         dirty >>= 1;
                     }
                     local_offset += sizeof(uint32_t);
@@ -1134,44 +1387,11 @@ int djn_ctx_model_container_t::DecodeNext(uint8_t* ewah_data, uint32_t& ret_ewah
             }
             assert(ret_pos == n_samples);
             ret_len = n_samples;
+        } else {
+            // Todo:
+            std::cerr << "[NM PBWT] not avail" << std::endl;
+            exit(1);
         }
-    } else { // not using PBWT
-        // Unpack EWAH into literals
-        uint32_t local_offset = ret_ewah_init;
-        uint32_t ret_pos = 0;
-        for (int j = 0; j < objs; ++j) {
-            djinn_ewah_t* ewah = (djinn_ewah_t*)&ewah_data[local_offset];
-            local_offset += sizeof(djinn_ewah_t);
-            // std::cerr << "ewah=" << ewah->ref << "," << ewah->clean << "," << ewah->dirty << std::endl;
-            
-            // Clean words.
-            uint32_t to = ret_pos + ewah->clean*32 > n_samples ? n_samples : ret_pos + ewah->clean*32;
-            for (int i = ret_pos; i < to; ++i) {
-                ret_buffer[i] = (ewah->ref & 1);
-            }
-            ret_pos = to;
-
-            for (int i = 0; i < ewah->dirty; ++i) {
-                to = ret_pos + 32 > n_samples ? n_samples : ret_pos + 32;
-                
-                uint32_t dirty = *((uint32_t*)(&ewah_data[local_offset])); // copy
-                for (int j = ret_pos; j < to; ++j) {
-                    ret_buffer[j] = (dirty & 1);
-                    dirty >>= 1;
-                }
-                local_offset += sizeof(uint32_t);
-                ret_pos = to;
-            }
-
-            // local_offset += ewah->dirty * sizeof(uint32_t);
-            // vals += ewah->dirty + ewah->clean;
-
-            // std::cerr << "local=" << local_offset << "/" << ret_ewah << std::endl;
-            assert(ret_pos <= n_samples);
-            assert(local_offset <= ret_ewah);
-        }
-        assert(ret_pos == n_samples);
-        ret_len = n_samples;
     }
 
     return objs;
@@ -1188,7 +1408,7 @@ int djn_ctx_model_container_t::DecodeNextRaw(uint8_t* data, uint32_t& len) {
     }
 
     // Never reached.
-    return -1;
+    return -3;
 }
 
 // Return raw, potentially permuted, EWAH encoding
@@ -1202,8 +1422,6 @@ int djn_ctx_model_container_t::DecodeRaw(uint8_t* data, uint32_t& len) {
     djinn_ewah_t* ewah = (djinn_ewah_t*)&data[len]; 
     ewah->reset();
     len += sizeof(djinn_ewah_t);
-
-    // uint32_t ref_alt[2] = {0};
 
     // Compute als
     memset(hist_alts, 0, 256*sizeof(uint32_t));
@@ -1255,7 +1473,7 @@ int djn_ctx_model_container_t::DecodeRaw(uint8_t* data, uint32_t& len) {
             break;
         }
         if (n_samples_obs > n_samples_wah) {
-            std::cerr << "Decompression corruption: " << n_samples_obs << "/" << n_samples_wah  << std::endl;
+            std::cerr << "[djn_ctx_model_container_t::DecodeNextRaw] Decompression corruption: " << n_samples_obs << "/" << n_samples_wah  << std::endl;
             exit(1);
         }
     }

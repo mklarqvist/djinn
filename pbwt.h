@@ -105,6 +105,7 @@ public:
     int ReverseUpdateEWAH(const uint8_t* ewah, const uint32_t len);
     // Update ret instead of PPA to avoid copying.
     int ReverseUpdateEWAH(const uint8_t* ewah, const uint32_t len, uint8_t* ret);
+    int ReverseUpdateEWAHNm(const uint8_t* ewah, const uint32_t len, uint8_t* ret);
 
     // Debug function for printing out the current state of the PBWT.
     std::string ToPrettyString() const;

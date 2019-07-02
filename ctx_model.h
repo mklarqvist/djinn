@@ -27,36 +27,6 @@
 
 namespace djinn {
 
-/**
- * Supportive function for converting an input variable 
- * x to floor(log2(x)).
- * 
- * @param x 
- * @return uint32_t 
- */
-static uint32_t round_log2(uint32_t x) {
-	uint32_t r = 0;
-	for (/**/; x; ++r) x >>= 1;
-	return r;
-}
-
-/*======   GT context model type   ======*/
-
-/**
- * Naming convention: djinn_* structures/classes are considered front-end
- * and djn_*_t* are considered back-end.
- * 
- * GeneralModel
- * djinn_model               base model for context modelling and EWAH
- * 
- * djn_block_t
- * djn_ctx_store_t
- * djn_ctx_store_tt          st
- * djn_ctx_model_t           context models for storing haplotypes: models for 2MC and NM
- * djn_ctx_model_container_t model container for each (#samples,ploidy)-tuple context model
- * djinn_ctx_model           root interface extending djinn_model
- */
-
 struct djn_ctx_model_t {
 public:
     djn_ctx_model_t();
@@ -92,7 +62,23 @@ public:
         return offset;
     }
 
-    int Serialize(std::ostream& stream) const;
+    int Serialize(std::ostream& stream) const {
+        // Serialize as (uint32_t,uint32_t,uint8_t*):
+        // p_len, n_variants, p
+        stream.write((char*)&p_len, sizeof(uint32_t));
+        stream.write((char*)&n_variants, sizeof(uint32_t));
+        stream.write((char*)p, p_len);
+        return stream.tellp();
+    }
+    
+    int GetSerializedSize() const {
+        int ret = sizeof(uint32_t) + sizeof(uint32_t) + p_len;
+        return ret;
+    }
+
+    int GetCurrentSize() const {
+        return range_coder->OutSize();
+    }
     
     int Deserialize(uint8_t* dst) {
         uint32_t offset = 0;
@@ -103,7 +89,7 @@ public:
 
         // initiate a buffer if there is none or it's too small
         if (p_cap == 0 || p == nullptr || p_len > p_cap) {
-            std::cerr << "[Deserialize] Limit. p_cap=" << p_cap << "," << "p is nullptr=" << (p == nullptr ? "yes" : "no") << ",p_len=" << p_len << "/" << p_cap << std::endl;
+            // std::cerr << "[Deserialize] Limit. p_cap=" << p_cap << "," << "p is nullptr=" << (p == nullptr ? "yes" : "no") << ",p_len=" << p_len << "/" << p_cap << std::endl;
             if (p_free) delete[] p;
             p = new uint8_t[p_len + 65536];
             p_cap = p_len + 65536;
@@ -116,7 +102,24 @@ public:
         return offset;
     }
 
-    int Deserialize(std::istream& stream);
+    int Deserialize(std::istream& stream) {
+        // Serialize as (uint32_t,uint32_t,uint8_t*):
+        // p_len, n_variants, p
+        stream.read((char*)&p_len, sizeof(uint32_t));
+        stream.read((char*)&n_variants, sizeof(uint32_t));
+
+        // initiate a buffer if there is none or it's too small
+        if (p_cap == 0 || p == nullptr || p_len > p_cap) {
+            // std::cerr << "[Deserialize] Limit. p_cap=" << p_cap << "," << "p is nullptr=" << (p == nullptr ? "yes" : "no") << ",p_len=" << p_len << "/" << p_cap << std::endl;
+            if (p_free) delete[] p;
+            p = new uint8_t[p_len + 65536];
+            p_cap = p_len + 65536;
+            p_free = true;
+        }
+
+        stream.read((char*)p, p_len);
+        return stream.tellg();
+    }
 
 public:
     PBWT pbwt;
@@ -186,7 +189,30 @@ public:
         return offset;
     }
 
-    int Serialize(std::ostream& stream) const;
+    int Serialize(std::ostream& stream) const {
+        // Serialize as (int,uint32_t,uint32_t,uint8_t*,ctx1,ctx2):
+        // ploidy,n_samples,n_variants,p_len,p,model_2mc,model_nm
+        stream.write((char*)&ploidy, sizeof(int));
+        stream.write((char*)&n_samples, sizeof(uint32_t));
+        stream.write((char*)&n_variants, sizeof(uint32_t));
+        stream.write((char*)&p_len, sizeof(uint32_t));
+        stream.write((char*)p, p_len);
+        model_2mc->Serialize(stream);
+        model_nm->Serialize(stream);
+        return stream.tellp();
+    }
+
+    int GetSerializedSize() const {
+        int ret = sizeof(int) + 3*sizeof(uint32_t) + p_len + model_2mc->GetSerializedSize() + model_nm->GetSerializedSize();
+        return ret;
+    }
+
+    int GetCurrentSize() const {
+        int ret = range_coder->OutSize();
+        ret += model_2mc->GetCurrentSize();
+        ret += model_nm->GetCurrentSize();
+        return ret;
+    }
     
     int Deserialize(uint8_t* dst) {
         uint32_t offset = 0;
@@ -201,6 +227,16 @@ public:
         offset += sizeof(uint32_t);
         p_len = *((uint32_t*)&dst[offset]);
         offset += sizeof(uint32_t);
+
+        // initiate a buffer if there is none or it's too small
+        if (p_cap == 0 || p == nullptr || p_len > p_cap) {
+            // std::cerr << "[Deserialize] Limit. p_cap=" << p_cap << "," << "p is nullptr=" << (p == nullptr ? "yes" : "no") << ",p_len=" << p_len << "/" << p_cap << std::endl;
+            if (p_free) delete[] p;
+            p = new uint8_t[p_len + 65536];
+            p_cap = p_len + 65536;
+            p_free = true;
+        }
+
         memcpy(p, &dst[offset], p_len); // data
         offset += p_len;
         // Todo objects
@@ -210,7 +246,30 @@ public:
         return(offset);
     }
 
-    int Deserialize(std::istream& stream);
+    int Deserialize(std::istream& stream) {
+        // #pl and #n_s read outside of this function in Deserialize() for
+        // the parent.
+        //
+        // stream.read((char*)&ploidy, sizeof(int));
+        // stream.read((char*)&n_samples, sizeof(uint32_t));
+
+        stream.read((char*)&n_variants, sizeof(uint32_t));
+        stream.read((char*)&p_len, sizeof(uint32_t));
+        
+        // initiate a buffer if there is none or it's too small
+        if (p_cap == 0 || p == nullptr || p_len > p_cap) {
+            // std::cerr << "[Deserialize] Limit. p_cap=" << p_cap << "," << "p is nullptr=" << (p == nullptr ? "yes" : "no") << ",p_len=" << p_len << "/" << p_cap << std::endl;
+            if (p_free) delete[] p;
+            p = new uint8_t[p_len + 65536];
+            p_cap = p_len + 65536;
+            p_free = true;
+        }
+
+        stream.read((char*)p, p_len);
+        model_2mc->Deserialize(stream);
+        model_nm->Deserialize(stream);
+        return stream.tellg();
+    }
 
 public:
     int Encode2mc(uint8_t* data, uint32_t len);
@@ -238,6 +297,7 @@ public:
     // Fields for constructing EWAH encodings from input data.
     uint64_t n_wah; // Number of allocated 32-bit bitmaps
     int64_t n_samples_wah; // Number of samples rounded up to closes 32-bit boundary
+    int64_t n_samples_wah_nm;
     uint32_t* wah_bitmaps; // Bitmaps
 
     uint8_t* p;     // data
@@ -301,111 +361,18 @@ public:
     int StartDecoding() override;
 
     // Read/write
-    int Serialize(uint8_t* dst) const {
-        // Serialize as (int,uint32_t,uint32_t,uint8_t*,ctx1,ctx2):
-        // #models,p_len,p,[models...]
-        uint32_t offset = 0;
-
-        std::cerr << "[djinn_ctx_model::Serialize] p_len=" << p_len << std::endl;
-
-        // Reserve space for offset
-        offset += sizeof(uint32_t);
-
-        // Add
-        *((int*)&dst[offset]) = (int)ploidy_models.size(); // number of models
-        offset += sizeof(int);
-        *((uint32_t*)&dst[offset]) = n_variants; // number of variants
-        offset += sizeof(uint32_t);
-
-        // Serialize bit-packed controller.
-        uint8_t pack = (use_pbwt << 7) | (init << 6) | (unused << 0);
-        dst[offset] = pack;
-        offset += sizeof(uint8_t);
-
-        *((uint32_t*)&dst[offset]) = p_len; // data length
-        offset += sizeof(uint32_t);
-        // Store model selection data.
-        memcpy(&dst[offset], p, p_len); // data
-        offset += p_len;
-
-        // std::cerr << "[Serialize] Offset here=" << offset << std::endl;
-
-        // Serialize each model.
-        for (int i = 0; i < ploidy_models.size(); ++i) {
-            offset += ploidy_models[i]->Serialize(&dst[offset]);    
-        }
-        
-        *((uint32_t*)&dst[0]) = offset;
-        return offset;
-    }
-
-    int Serialize(std::ostream& stream) const;
-
+    int Serialize(uint8_t* dst) const override;
+    int Serialize(std::ostream& stream) const override;
+    int GetSerializedSize() const;
+    int GetCurrentSize() const;
+    
     // Deserialize data from an external buffer.
-    int Deserialize(uint8_t* src) {
-        // Reset.
-        // Todo: fix
-        ploidy_map.clear();
-        ploidy_models.clear();
-
-        uint32_t offset = 0;
-
-        // Read total offset.
-        uint32_t tot_offset = *((uint32_t*)&src[offset]);
-        offset += sizeof(uint32_t);
-
-        // Read #models,#variants,packed bools
-        int n_models = *((int*)&src[offset]);
-        offset += sizeof(int);
-        n_variants = *((uint32_t*)&src[offset]);
-        offset += sizeof(uint32_t);
-        uint8_t pack = src[offset];
-        use_pbwt = (pack >> 7) & 1;
-        init = (pack >> 6) & 1;
-        unused = 0;
-        offset += sizeof(uint8_t);
-
-        // Read p_len,p
-        p_len = *((uint32_t*)&src[offset]);
-        offset += sizeof(uint32_t);
-        // Store model selection data.
-        memcpy(p, &src[offset], p_len);
-        offset += p_len;
-        // Deserialize each model.
-        std::cerr << "[Deserialize] Offset here=" << offset << " #models=" << n_models << std::endl;
-        std::cerr << "[Deserialize] tot_offset=" << tot_offset << ",n_variants=" << n_variants << ",use_pbwt=" << (int)use_pbwt << ",init=" << (bool)init << ",p_len=" << p_len << std::endl;
-        
-        // Read each model.
-        for (int i = 0; i < n_models; ++i) {
-            // First peek at their content to invoke the correct constructor as it
-            // requires #samples, #ploidy, use_pbwt
-            int pl = *((int*)&src[offset]);
-            uint32_t n_s = *((uint32_t*)&src[offset+sizeof(int)]);
-            std::cerr << "[Deserialize] #pl=" << pl << ", #n_s=" << n_s << std::endl;
-            
-            // Update ploidy map and insert data in the correct position relative
-            // the encoding order.
-            const uint64_t tuple = ((uint64_t)n_s << 32) | pl;
-            auto search = ploidy_map.find(tuple);
-            if (search != ploidy_map.end()) {
-                std::cerr << "Illegal! Cannot exist! Corruption..." << std::endl;
-                exit(1);
-            } else {
-                std::cerr << "[Deserialize] Adding map [" << tuple << "] for [" << n_s << "," << pl << "]" << std::endl; 
-                ploidy_map[tuple] = ploidy_models.size();
-                ploidy_models.push_back(std::make_shared<djinn::djn_ctx_model_container_t>(n_s, pl, (bool)use_pbwt));
-                offset += ploidy_models.back()->Deserialize(&src[offset]);
-            }
-        }
-        std::cerr << "[Deserialize] Decoded=" << offset << "/" << tot_offset << std::endl;
-        assert(offset == tot_offset);
-        return offset;
-    }
+    int Deserialize(uint8_t* src) override;
 
     // Deserialize data from a IO stream. This approach is more efficient
     // as data does NOT have to be copied and the current model can be
     // reused.
-    int Deserialize(std::istream& stream);
+    int Deserialize(std::istream& stream) override;
 
 public:
     int DecodeNext(djinn_variant_t*& variant) override;
@@ -426,7 +393,8 @@ public:
     // encodings to a shared buffer.
     std::shared_ptr<RangeCoder> range_coder;
     std::shared_ptr<GeneralModel> ploidy_dict; // 0 for first dict encoding, 1 for second etc.
-    std::unordered_map<uint64_t, uint32_t> ploidy_map; // maps (data length, ploidy) packed into a 64-bit word to model offsets
+    std::unordered_map<uint64_t, uint32_t> ploidy_map; // hash table that maps (data length, ploidy) packed into a 64-bit word to model offsets
+    std::unordered_map<uint64_t, uint32_t> ploidy_remap; // use to remap in the case when reset is set to false
     std::vector< std::shared_ptr<djn_ctx_model_container_t> > ploidy_models;
 };
 

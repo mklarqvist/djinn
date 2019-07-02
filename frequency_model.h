@@ -95,6 +95,10 @@ public:
         low += range * cumFreq;
         range *= symFreq;
 
+        if (range ==0) {
+            std::cerr << "range error. cum=" << cumFreq << ",sym=" << symFreq << ",tot=" << totalFreqSum << std::endl;
+        }
+
         while(range < TopValue) {
             assert(range != 0);
             // range = 0x00ffffff..

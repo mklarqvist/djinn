@@ -31,7 +31,7 @@ public:
     ~djn_ewah_model_t();
 
     int StartEncoding(bool use_pbwt, bool reset = false);
-    size_t FinishEncoding();
+    size_t FinishEncoding(uint8_t* support_buffer, uint32_t support_cap);
     int StartDecoding(bool use_pbwt, bool reset = false);
     size_t FinishDecoding() { return 0; } // no effect
     
@@ -58,7 +58,7 @@ public:
     ~djn_ewah_model_container_t();
 
     void StartEncoding(bool use_pbwt, bool reset = false);
-    size_t FinishEncoding();
+    size_t FinishEncoding(uint8_t* support_buffer, uint32_t support_cap);
     void StartDecoding(bool use_pbwt, bool reset = false);
 
     inline void ResetBitmaps() { memset(wah_bitmaps, 0, n_wah*sizeof(uint32_t)); }
@@ -88,6 +88,7 @@ public:
     // Fields for constructing EWAH encodings from input data.
     uint64_t n_wah; // Number of allocated 32-bit bitmaps
     int64_t n_samples_wah; // Number of samples rounded up to closes 32-bit boundary
+    int64_t n_samples_wah_nm;
     uint32_t* wah_bitmaps; // Bitmaps
 
     uint8_t* p;     // data
@@ -96,7 +97,7 @@ public:
     
     // std::shared_ptr<GeneralModel> marchetype; // 0 for 2MC, 2 else
     std::shared_ptr<djn_ewah_model_t> model_2mc;
-    std::shared_ptr<djn_ewah_model_t> model_2m;
+    std::shared_ptr<djn_ewah_model_t> model_2m; // unused
     std::shared_ptr<djn_ewah_model_t> model_nm;
 
     // Supportive array for computing allele counts to determine the presence
@@ -105,6 +106,10 @@ public:
 };
 
 class djinn_ewah_model : public djinn_model {
+public:
+    // Compression strategy used.
+    enum class CompressionStrategy : uint32_t { ZSTD = 0, LZ4 = 1 };
+
 public:
     djinn_ewah_model();
     ~djinn_ewah_model();
@@ -146,13 +151,13 @@ public:
     int StartDecoding() override;
 
     // Read/write
-    int Serialize(uint8_t* dst) const;
-    int Serialize(std::ostream& stream) const;
-    int Deserialize(uint8_t* src);
+    int Serialize(uint8_t* dst) const override { return -1; };
+    int Serialize(std::ostream& stream) const override { return -1; };
+    int Deserialize(uint8_t* src) override { return -1; };
     // Deserialize data from a IO stream. This approach is more efficient
     // as data does NOT have to be copied and the current model can be
     // reused.
-    int Deserialize(std::istream& stream);
+    int Deserialize(std::istream& stream) override { return -1; };
 
 public:
     int DecodeNext(djinn_variant_t*& variant) override;
@@ -160,7 +165,8 @@ public:
     int DecodeNextRaw(uint8_t* data, uint32_t& len) override;
 
 public:
-    uint8_t codec; // 0 for ZSTD and 1 for LZ4
+    CompressionStrategy codec; // Either ZSTD or LZ4 at the moment.
+
     uint8_t *p;     // data
     uint32_t p_len; // data length
     uint32_t p_cap:31, p_free:1; // allocated data length, ownership of data flag

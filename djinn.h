@@ -117,7 +117,35 @@ struct djinn_variant_t {
     int errcode;
 };
 
+/**
+ * Supportive function for converting an input variable 
+ * x to floor(log2(x)).
+ * 
+ * @param x 
+ * @return uint32_t 
+ */
+static uint32_t round_log2(uint32_t x) {
+	uint32_t r = 0;
+	for (/**/; x; ++r) x >>= 1;
+	return r;
+}
+
 /*======   Base interface for Djinn   ======*/
+
+/**
+ * Naming convention: djinn_* structures/classes are considered front-end
+ * and djn_*_t* are considered back-end.
+ * 
+ * GeneralModel
+ * djinn_model               base model for context modelling and EWAH
+ * 
+ * djn_block_t
+ * djn_ctx_store_t
+ * djn_ctx_store_tt          st
+ * djn_ctx_model_t           context models for storing haplotypes: models for 2MC and NM
+ * djn_ctx_model_container_t model container for each (#samples,ploidy)-tuple context model
+ * djinn_ctx_model           root interface extending djinn_model
+ */
 
 class djinn_model {
 public:
@@ -140,6 +168,12 @@ public:
     virtual int DecodeNext(uint8_t* ewah_data, uint32_t& ret_ewah, uint8_t* ret_buffer, uint32_t& ret_len) =0;
     virtual int DecodeNext(djinn_variant_t*& variant) =0;
     virtual int DecodeNextRaw(uint8_t* data, uint32_t& len) =0;
+
+    // Read write
+    virtual int Serialize(uint8_t* dst) const =0;
+    virtual int Serialize(std::ostream& stream) const =0;
+    virtual int Deserialize(uint8_t* dst) =0;
+    virtual int Deserialize(std::istream& stream) =0;
 
 public:
     uint8_t use_pbwt: 1, 

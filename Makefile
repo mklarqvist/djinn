@@ -16,7 +16,7 @@
 # under the License.
 ###################################################################
 
-OPTFLAGS  := -O3
+OPTFLAGS  := -O3 -DLZ4_AVAIL -DZSTD_AVAIL
 CFLAGS     = -std=c99 $(OPTFLAGS) $(DEBUG_FLAGS) -g
 CPPFLAGS   = -std=c++0x $(OPTFLAGS) $(DEBUG_FLAGS) -g
 CPP_SOURCE = frequency_model.cpp main.cpp pbwt.cpp gt_compressor.cpp djinn.cpp ctx_model.cpp ewah_model.cpp
