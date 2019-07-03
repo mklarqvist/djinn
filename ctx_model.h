@@ -295,9 +295,9 @@ public:
     int64_t n_variants;
 
     // Fields for constructing EWAH encodings from input data.
-    uint64_t n_wah; // Number of allocated 32-bit bitmaps
     int64_t n_samples_wah; // Number of samples rounded up to closes 32-bit boundary
     int64_t n_samples_wah_nm;
+    uint64_t n_wah; // Number of allocated 32-bit bitmaps
     uint32_t* wah_bitmaps; // Bitmaps
 
     uint8_t* p;     // data

@@ -37,9 +37,13 @@ int djn_ewah_model_t::StartEncoding(bool use_pbwt, bool reset) {
     return 1;
 }
 
-size_t djn_ewah_model_t::FinishEncoding(uint8_t* support_buffer, uint32_t support_cap) {
+size_t djn_ewah_model_t::FinishEncoding(uint8_t* support_buffer, uint32_t support_cap, CompressionStrategy strat) {
     // int ZstdCompress(const uint8_t* in, uint32_t n_in, uint8_t* out, uint32_t out_capacity, const int32_t c_level = 1) {
-    GeneralCompressor comp = &ZstdCompress;
+    GeneralCompressor comp;
+    switch(strat) {
+        case (CompressionStrategy::ZSTD): comp = &ZstdCompress; break;
+        case (CompressionStrategy::LZ4): comp = &Lz4Compress; break;
+    }
     int ret = (*comp)(p, p_len, support_buffer, support_cap, 21);
     // std::cerr << "[djn_ewah_model_t::FinishEncoding] debug=" << p_len << "->" << ret << std::endl;
     // return p_len;
@@ -306,15 +310,23 @@ size_t djinn_ewah_model::FinishEncoding() {
     }
     q_len = 0;
 
-    // int ZstdCompress(const uint8_t* in, uint32_t n_in, uint8_t* out, uint32_t out_capacity, const int32_t c_level = 1) {
-    GeneralCompressor comp = &ZstdCompress;
+    GeneralCompressor comp;
+    switch(codec) {
+        case (CompressionStrategy::ZSTD): comp = &ZstdCompress; break;
+        case (CompressionStrategy::LZ4): comp = &Lz4Compress; break;
+    }
+
     int ret = (*comp)(p, p_len, q, q_alloc, 21);
+
+    // int ZstdCompress(const uint8_t* in, uint32_t n_in, uint8_t* out, uint32_t out_capacity, const int32_t c_level = 1) {
+    // GeneralCompressor comp = &ZstdCompress;
+    // int ret = (*comp)(p, p_len, q, q_alloc, 21);
     
     // std::cerr << "[djinn_ewah_model::FinishEncoding] p_len=" << p_len << "->" << ret << std::endl;
 
     size_t s_models = 0;
     for (int i = 0; i < ploidy_models.size(); ++i) {
-        int ret = ploidy_models[i]->FinishEncoding(q, q_alloc); // use q as support buffer
+        int ret = ploidy_models[i]->FinishEncoding(q, q_alloc, codec); // use q as support buffer
         s_models += ret;
     }
 
@@ -406,11 +418,19 @@ void djn_ewah_model_container_t::StartEncoding(bool use_pbwt, bool reset) {
     model_nm->StartEncoding(use_pbwt, reset);
 }
 
-size_t djn_ewah_model_container_t::FinishEncoding(uint8_t* support_buffer, uint32_t support_cap) {
-    int s_2mc = model_2mc->FinishEncoding(support_buffer, support_cap);
-    int s_nm  = model_nm->FinishEncoding(support_buffer, support_cap);
+size_t djn_ewah_model_container_t::FinishEncoding(uint8_t* support_buffer, uint32_t support_cap, CompressionStrategy strat) {
+    int s_2mc = model_2mc->FinishEncoding(support_buffer, support_cap, strat);
+    int s_nm  = model_nm->FinishEncoding(support_buffer, support_cap, strat);
 
-    size_t s_rc  = p_len;
+    GeneralCompressor comp;
+    switch(strat) {
+        case (CompressionStrategy::ZSTD): comp = &ZstdCompress; break;
+        case (CompressionStrategy::LZ4): comp = &Lz4Compress; break;
+    }
+
+    int ret = (*comp)(p, p_len, support_buffer, support_cap, 21);
+
+    size_t s_rc  = ret;
     // size_t s_2mc = model_2mc->p_len;
     // size_t s_nm  = model_nm->p_len;
     std::cerr << "container finish=" << s_rc << " and " << s_2mc << " and " << s_nm << std::endl; 

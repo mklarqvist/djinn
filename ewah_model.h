@@ -25,13 +25,16 @@
 
 namespace djinn {
 
+// Compression strategy used.
+enum class CompressionStrategy : uint32_t { ZSTD = 0, LZ4 = 1 };
+
 struct djn_ewah_model_t {
 public:
     djn_ewah_model_t();
     ~djn_ewah_model_t();
 
     int StartEncoding(bool use_pbwt, bool reset = false);
-    size_t FinishEncoding(uint8_t* support_buffer, uint32_t support_cap);
+    size_t FinishEncoding(uint8_t* support_buffer, uint32_t support_cap, CompressionStrategy strat);
     int StartDecoding(bool use_pbwt, bool reset = false);
     size_t FinishDecoding() { return 0; } // no effect
     
@@ -58,7 +61,7 @@ public:
     ~djn_ewah_model_container_t();
 
     void StartEncoding(bool use_pbwt, bool reset = false);
-    size_t FinishEncoding(uint8_t* support_buffer, uint32_t support_cap);
+    size_t FinishEncoding(uint8_t* support_buffer, uint32_t support_cap, CompressionStrategy strat);
     void StartDecoding(bool use_pbwt, bool reset = false);
 
     inline void ResetBitmaps() { memset(wah_bitmaps, 0, n_wah*sizeof(uint32_t)); }
@@ -106,10 +109,6 @@ public:
 };
 
 class djinn_ewah_model : public djinn_model {
-public:
-    // Compression strategy used.
-    enum class CompressionStrategy : uint32_t { ZSTD = 0, LZ4 = 1 };
-
 public:
     djinn_ewah_model();
     ~djinn_ewah_model();

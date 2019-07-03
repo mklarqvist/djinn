@@ -595,9 +595,9 @@ int djinn_ctx_model::Deserialize(std::istream& stream) {
 djn_ctx_model_container_t::djn_ctx_model_container_t(int64_t n_s, int pl, bool use_pbwt) : 
     use_pbwt(use_pbwt),
     ploidy(pl), n_samples(n_s), n_variants(0),
-    n_wah(std::ceil((float)n_samples / 32) * 4), 
-    n_samples_wah((n_wah * 32) / 4), 
-    n_samples_wah_nm(std::ceil((float)n_samples * 4 / 32) * 8),
+    n_samples_wah(std::ceil((float)n_samples / 32) * 32), 
+    n_samples_wah_nm(std::ceil((float)n_samples * 4/32) * 8),
+    n_wah(n_samples_wah_nm / 8),
     wah_bitmaps(new uint32_t[n_wah]), 
     p(new uint8_t[1000000]), p_len(0), p_cap(1000000), p_free(true),
     range_coder(std::make_shared<RangeCoder>()), 
@@ -613,9 +613,9 @@ djn_ctx_model_container_t::djn_ctx_model_container_t(int64_t n_s, int pl, bool u
 djn_ctx_model_container_t::djn_ctx_model_container_t(int64_t n_s, int pl, bool use_pbwt, uint8_t* src, uint32_t src_len) : 
     use_pbwt(use_pbwt),
     ploidy(pl), n_samples(n_s), n_variants(0),
-    n_wah(std::ceil((float)n_samples / 32) * 4), 
-    n_samples_wah((n_wah * 32) / 4), 
-    n_samples_wah_nm(std::ceil((float)n_samples * 4 / 32) * 8),
+    n_samples_wah(std::ceil((float)n_samples / 32) * 32), 
+    n_samples_wah_nm(std::ceil((float)n_samples * 4/32) * 8),
+    n_wah(n_samples_wah_nm / 8),
     wah_bitmaps(new uint32_t[n_wah]), 
     p(src), p_len(src_len), p_cap(0), p_free(false),
     range_coder(std::make_shared<RangeCoder>()), 
@@ -737,9 +737,9 @@ int djn_ctx_model_container_t::Encode2mc(uint8_t* data, uint32_t len) {
     if (n_samples == 0) return -2;
 
     if (wah_bitmaps == nullptr) {
-        n_wah = std::ceil((float)n_samples / 32) * 4;
-        n_samples_wah = (n_wah * 32) / 4;
-        n_samples_wah_nm = std::ceil((float)n_samples * 4 / 32) * 8;
+        n_samples_wah = std::ceil((float)n_samples / 32) * 32;
+        n_samples_wah_nm = std::ceil((float)n_samples * 4/32) * 8; // Can fit eight 4-bit entries in a 32-bit word
+        n_wah = n_samples_wah_nm / 8; 
         wah_bitmaps = new uint32_t[n_wah];
     }
     
@@ -751,7 +751,7 @@ int djn_ctx_model_container_t::Encode2mc(uint8_t* data, uint32_t len) {
         }
     }
 
-    return EncodeWah(wah_bitmaps, n_wah/4); // 4 bytes in a 32-bit word
+    return EncodeWah(wah_bitmaps, n_samples_wah >> 5); // n_samples_wah / 32
 }
 
 int djn_ctx_model_container_t::Encode2mc(uint8_t* data, uint32_t len, const uint8_t* map, const int shift) {
@@ -760,9 +760,9 @@ int djn_ctx_model_container_t::Encode2mc(uint8_t* data, uint32_t len, const uint
     if (map == nullptr)  return -3;
     
     if (wah_bitmaps == nullptr) {
-        n_wah = std::ceil((float)n_samples / 32) * 4;
-        n_samples_wah = (n_wah * 32) / 4;
-        n_samples_wah_nm = std::ceil((float)n_samples * 4 / 32) * 8;
+        n_samples_wah = std::ceil((float)n_samples / 32) * 32;
+        n_samples_wah_nm = std::ceil((float)n_samples * 4/32) * 8; // Can fit eight 4-bit entries in a 32-bit word
+        n_wah = n_samples_wah_nm / 8; 
         wah_bitmaps = new uint32_t[n_wah];
     }
     
@@ -777,7 +777,7 @@ int djn_ctx_model_container_t::Encode2mc(uint8_t* data, uint32_t len, const uint
     }
     // std::cerr << "encoding 2mc=" << n_wah/4 << "->" << n_wah/4*32 << std::endl;
 
-    return EncodeWah(wah_bitmaps, n_wah/4); // 4 bytes in a 32-bit word
+    return EncodeWah(wah_bitmaps, n_samples_wah >> 5); // n_samples_wah / 32
 }
 
 int djn_ctx_model_container_t::EncodeNm(uint8_t* data, uint32_t len) {
@@ -785,9 +785,9 @@ int djn_ctx_model_container_t::EncodeNm(uint8_t* data, uint32_t len) {
     if (n_samples == 0) return -2;
     
     if (wah_bitmaps == nullptr) {
-        n_wah = std::ceil((float)n_samples / 32) * 4;
-        n_samples_wah = (n_wah * 32) / 4;
-        n_samples_wah_nm = std::ceil((float)n_samples * 4 / 32) * 8;
+        n_samples_wah = std::ceil((float)n_samples / 32) * 32;
+        n_samples_wah_nm = std::ceil((float)n_samples * 4/32) * 8; // Can fit eight 4-bit entries in a 32-bit word
+        n_wah = n_samples_wah_nm / 8; 
         wah_bitmaps = new uint32_t[n_wah];
     }
     
@@ -798,11 +798,15 @@ int djn_ctx_model_container_t::EncodeNm(uint8_t* data, uint32_t len) {
         wah_bitmaps[i / 8] |= (uint64_t)data[i] << (4*(i % 8));
     }
 
-    // for (int i = 0; i < n_wah; ++i) std::cerr << std::bitset<64>(wah_bitmaps[i]) << " ";
+    for (int i = 0; i < (n_samples_wah_nm >> 3); ++i) { 
+        if (wah_bitmaps[i] != 0) std::cerr << i << ":" << std::bitset<32>(wah_bitmaps[i]) << std::endl;
+    }
     // std::cerr << std::endl;
 
-    return EncodeWahNm(wah_bitmaps, n_samples_wah/4);
-    // return -1;
+    std::cerr << "[djn_ctx_model_container_t::EncodeNm] n_wah=" << n_wah << " and input=" << (n_samples_wah_nm >> 3) << std::endl;
+    // exit(1);
+
+    return EncodeWahNm(wah_bitmaps, n_samples_wah_nm >> 3); // n_samples_wah_nm / 8
 }
 
 int djn_ctx_model_container_t::EncodeNm(uint8_t* data, uint32_t len, const uint8_t* map, const int shift) {
@@ -811,9 +815,9 @@ int djn_ctx_model_container_t::EncodeNm(uint8_t* data, uint32_t len, const uint8
     if (map == nullptr) return -3;
 
     if (wah_bitmaps == nullptr) {
-        n_wah = std::ceil((float)n_samples / 32) * 4;
-        n_samples_wah = (n_wah * 32) / 4;
-        n_samples_wah_nm = std::ceil((float)n_samples * 4 / 32) * 8;
+        n_samples_wah = std::ceil((float)n_samples / 32) * 32;
+        n_samples_wah_nm = std::ceil((float)n_samples * 4/32) * 8; // Can fit eight 4-bit entries in a 32-bit word
+        n_wah = n_samples_wah_nm / 8; 
         wah_bitmaps = new uint32_t[n_wah];
     }
     
@@ -827,8 +831,7 @@ int djn_ctx_model_container_t::EncodeNm(uint8_t* data, uint32_t len, const uint8
     // for (int i = 0; i < n_wah; ++i) std::cerr << std::bitset<64>(wah_bitmaps[i]) << " ";
     // std::cerr << std::endl;
 
-    return EncodeWahNm(wah_bitmaps, n_samples_wah/4);
-    // return -1;
+    return EncodeWahNm(wah_bitmaps, n_samples_wah_nm >> 3); // n_samples_wah_nm / 8
 }
 
 int djn_ctx_model_container_t::DecodeRaw_nm(uint8_t* data, uint32_t& len) {
@@ -867,7 +870,7 @@ int djn_ctx_model_container_t::DecodeRaw_nm(uint8_t* data, uint32_t& len) {
         } else { // is RLE
             // Emit new EWAH marker
             if (ewah->clean > 0 || ewah->dirty > 0) {
-                // std::cerr << "[djn_ctx_model_container_t::DecodeRaw_nm] clean=" << ewah->clean << ", dirty=" << ewah->dirty << ", ref=" << ewah->ref << std::endl;
+                std::cerr << "[djn_ctx_model_container_t::DecodeRaw_nm] clean=" << ewah->clean << ", dirty=" << ewah->dirty << ", ref=" << ewah->ref << std::endl;
                 ewah = (djinn_ewah_t*)&data[len];
                 ewah->reset();
                 len += sizeof(djinn_ewah_t);
@@ -896,7 +899,7 @@ int djn_ctx_model_container_t::DecodeRaw_nm(uint8_t* data, uint32_t& len) {
 
     if (ewah->clean > 0 || ewah->dirty > 0) {
         ++objects;
-        // std::cerr << "[djn_ctx_model_container_t::DecodeRaw_nm] clean=" << ewah->clean << ", dirty=" << ewah->dirty << ", ref=" << ewah->ref << std::endl;
+        std::cerr << "[djn_ctx_model_container_t::DecodeRaw_nm] clean=" << ewah->clean << ", dirty=" << ewah->dirty << ", ref=" << ewah->ref << std::endl;
         // std::cerr << "final=" << std::bitset<64>(*ewah) << " ref=" << ewah_ref << ",run=" << ewah_run << ",dirty=" << ewah_dirty << std::endl;
     }
     // std::cerr << "n_objs=" << objects << std::endl;
@@ -984,14 +987,14 @@ int djn_ctx_model_container_t::EncodeWahNm(uint32_t* wah, uint32_t len) { // inp
 
     // std::cerr << "refnm=" << std::bitset<32>(wah[0]) << std::endl;
 
-    uint32_t wah_ref = wah[0];
-    uint64_t wah_run = 1;
+    // uint32_t wah_ref = wah[0];
+    // uint64_t wah_run = 1;
 
     // Resize if necessary.
     // std::cerr << "[ENCODE] " << model_nm->range_coder->OutSize() << "/" << model_nm->p_cap << std::endl;
     if (model_nm->range_coder->OutSize() + n_samples > model_nm->p_cap) {
         const uint32_t rc_size = model_nm->range_coder->OutSize();
-        std::cerr << "[djn_ctx_model_container_t::EncodeWah][RESIZE] resizing from: " << rc_size << "->" << (rc_size + 2*n_samples + 65536) << std::endl;
+        std::cerr << "[djn_ctx_model_container_t::EncodeWahNm][RESIZE] resizing from: " << rc_size << "->" << (rc_size + 2*n_samples + 65536) << std::endl;
         uint8_t* prev = model_nm->p; // old
         model_nm->p_cap = rc_size + 2*n_samples + 65536;
         model_nm->p = new uint8_t[model_nm->p_cap];
@@ -1001,43 +1004,114 @@ int djn_ctx_model_container_t::EncodeWahNm(uint32_t* wah, uint32_t len) { // inp
         model_nm->range_coder->out_buf = model_nm->p + rc_size; 
         model_nm->range_coder->in_buf  = model_nm->p;
     }
+    
+    djinn_ewah_t ewah; ewah.reset();
+    
+    // Build reference by broadcasting lower 4 bits
+    // to all 8 four-bit positions in a 32-bit word.
+    uint32_t wah_ref = (wah[0] & 15);
+    uint32_t wah_cmp = wah_ref;
+    for (int i = 1; i < 8; ++i) wah_cmp |= wah_ref << (i*4);
 
-    for (int i = 1; i < len; ++i) {
-        if ((wah_ref != ref_bits[1] && wah_ref != ref_bits[2] && wah_ref != ref_bits[0]) || (wah_ref != wah[i])) {
-            if ((wah_ref != wah_bitmaps[i]) || wah_run == 1) {
-                // std::cerr << "Bitmap=" << std::bitset<64>(wah_ref) << " = " << wah_ref << std::endl;
-                model_nm->mtype->EncodeSymbol(0);
-                for (int i = 0; i < 4; ++i) {
-                    model_nm->dirty_wah->EncodeSymbol(wah_ref & 255);
-                    wah_ref >>= 8;
-                }
-            } else {
-                // std::cerr << "RLE=" << wah_ref << "(" << (wah_ref&15) << "):" << wah_run << std::endl;
-                model_nm->mtype->EncodeSymbol(1);
-                EncodeWahRLE_nm(wah_ref, wah_run, model_nm);
-            }
-            wah_run = 0;
-            wah_ref = wah[i];
+    // Word is dirty if the word is different from the expected clean word.
+    ewah.dirty += (wah_ref != wah_cmp);
+    if (ewah.dirty) {
+        std::cerr << "First word is dirty!" << std::endl;
+        model_nm->mtype->EncodeSymbol(0);
+        for (int i = 0; i < 4; ++i) {
+            model_nm->dirty_wah->EncodeSymbol(wah_ref & 255);
+            wah_ref >>= 8;
         }
-        ++wah_run;
     }
 
-    if (wah_run) {
-        if ((wah_ref != ref_bits[1] && wah_ref != ref_bits[2] && wah_ref != ref_bits[0]) || wah_run == 1) {
-            // std::cerr << "Bitmap=" << std::bitset<64>(wah_ref) << " = " << wah_ref << std::endl;
+    // Word is clean: pattern is repeated.
+    ewah.clean += (wah_ref == wah_cmp);
+    if (ewah.clean) ewah.ref = (wah[0] & 15);
+    assert(ewah.dirty + ewah.clean == 1);
+
+    uint32_t n_objs = 1;
+    uint32_t n_obs = 0;
+
+    for (int i = 1; i < len; ++i) {
+        // Build reference.
+        wah_ref = (wah[i] & 15);
+        wah_cmp = wah_ref;
+        for (int j = 1; j < 8; ++j) wah_cmp |= wah_ref << (j*4);
+
+        // if (i == 136 || i == 338 || i == 386 || i == 522) {
+        //     std::cerr << "Debug@" << i << ": " << wah_ref << "," << wah_cmp << "," << std::bitset<32>(wah[i]) << std::endl;
+        //     std::cerr << "Equality test=" << (wah[i] == wah_cmp) << std::endl;
+        // }
+
+        // Is dirty
+        if (wah[i] != wah_cmp) {
+            if (ewah.clean) {
+                model_nm->mtype->EncodeSymbol(1);
+                EncodeWahRLE_nm(ewah.ref, ewah.clean, model_nm);
+                n_obs += ewah.clean;
+                ewah.reset();
+            }
+
+            ++ewah.dirty;
             model_nm->mtype->EncodeSymbol(0);
             
+            wah_ref = wah[i];
+            // std::cerr << "[djn_ctx_model_container_t::EncodeWahNm] Dirty: " << i << "/" << len << " " << std::bitset<32>(wah_ref) << std::endl;
             for (int i = 0; i < 4; ++i) {
                 model_nm->dirty_wah->EncodeSymbol(wah_ref & 255);
                 wah_ref >>= 8;
             }
-            
-        } else {
-            // std::cerr << "RLE=" << wah_ref << "(" << (wah_ref&15) << "):" << wah_run << std::endl;
-            model_nm->mtype->EncodeSymbol(1);
-            EncodeWahRLE_nm(wah_ref, wah_run, model_nm);
+            ++n_obs;
+        } 
+        // Is clean
+        else {
+            // Dirty have been set then make new EWAH
+            if (ewah.dirty) {
+                if (ewah.clean) {
+                    model_nm->mtype->EncodeSymbol(1);
+                    EncodeWahRLE_nm(ewah.ref, ewah.clean, model_nm);
+                    n_obs += ewah.clean;
+                }
+                // n_obs += ewah.run;
+
+                ewah.reset();
+                ++ewah.clean;
+                ewah.ref = wah_ref;
+                ++n_objs;
+            } 
+            // No dirty have been set
+            else {
+                if (ewah.clean == 0) ewah.ref = wah_ref;
+                if (ewah.ref == wah_ref) ++ewah.clean;
+                else { // Different clean word
+                    if (ewah.clean) {
+                        model_nm->mtype->EncodeSymbol(1);
+                        EncodeWahRLE_nm(ewah.ref, ewah.clean, model_nm);
+                        n_obs += ewah.clean;
+                        // n_obs += wah_run;
+                    }
+
+                    ewah.reset();
+                    ++ewah.clean;
+                    ewah.ref = wah_ref;
+                    ++n_objs;
+                }
+            }
         }
     }
+
+    if (ewah.dirty || ewah.clean) {
+        // std::cerr << "[djn_ctx_model_container_t::EncodeWahNm] Residuals = " << ewah.clean << "," << ewah.dirty << std::endl;    
+        if (ewah.clean) {
+            model_nm->mtype->EncodeSymbol(1);
+            EncodeWahRLE_nm(ewah.ref, ewah.clean, model_nm);
+            n_obs += ewah.clean;
+            ++n_objs;
+        }
+    }
+
+    std::cerr << "[djn_ctx_model_container_t::EncodeWahNm] Done. Total = " << n_obs << "/" << len << std::endl;
+    assert(n_obs == len);
 
     ++n_variants;
     return 1;
