@@ -109,7 +109,9 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
     djn_ewah.StartEncoding(permute, reset_models);
     // djn_ewah.codec = djinn::CompressionStrategy::LZ4;
     
-    std::ofstream test_write("/media/mdrk/08dcb478-5359-41f4-97c8-469190c8a034/djn_debug.bin", std::ios::out | std::ios::binary);
+    // std::string temp_file = "/media/mdrk/08dcb478-5359-41f4-97c8-469190c8a034/djn_debug.bin";
+    std::string temp_file = "/Users/Mivagallery/Downloads/djn_debug.bin";
+    std::ofstream test_write(temp_file, std::ios::out | std::ios::binary);
     if (test_write.good() == false) {
         std::cerr << "could not open outfile handle" << std::endl;
         return -3;
@@ -126,7 +128,6 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
             // int decode_ret2 = djn_ctx->Serialize(std::cout);
             std::cerr << "[WRITING CTX] " << decode_ret << "b" << std::endl;
             test_write.write((char*)decode_buf, decode_ret);
-            std::cerr << "pos write" << std::endl;
             ++n_blocks;
             ctx_out += decode_ret;
             // ctx_out += decode_ret2;
@@ -144,7 +145,6 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
                 << " (" << (double)data_in_vcf/ewah_out << "-fold)" << std::endl;
 
             djn_ctx->StartEncoding(permute, reset_models);
-            std::cerr << "post start encoding" << std::endl;
         }
 
         if (reader->bcf1_ == NULL)   return -1;
@@ -195,7 +195,7 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
     // Decode test
     std::cerr << "============== DECODING ===============" << std::endl;
 
-    std::ifstream test_read("/media/mdrk/08dcb478-5359-41f4-97c8-469190c8a034/djn_debug.bin", std::ios::in | std::ios::binary | std::ios::ate);
+    std::ifstream test_read(temp_file, std::ios::in | std::ios::binary | std::ios::ate);
     if (test_read.good() == false) {
         std::cerr << "could not open infile handle" << std::endl;
         return -3;

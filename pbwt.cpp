@@ -384,24 +384,25 @@ int PBWT::ReverseUpdateEWAHNm(const uint8_t* arr, const uint32_t len, uint8_t* r
     memset(ret, 0, n_samples); // O(n)
     memset(n_queue, 0, sizeof(uint32_t)*n_symbols);
 
-    std::cerr << ToPrettyString() << std::endl;
+    // std::cerr << ToPrettyString() << std::endl;
 
     uint32_t local_offset = 0;
     uint64_t n_s_obs = 0;
+
     while (local_offset < len) {
         djinn_ewah_t* ewah = (djinn_ewah_t*)&arr[local_offset];
         local_offset += sizeof(djinn_ewah_t);
 
-        std::cerr << "[PBWT::ReverseUpdateEWAHNm] ewah=" << ewah->ref << "," << ewah->clean << "," << ewah->dirty << std::endl;
+        // std::cerr << "[PBWT::ReverseUpdateEWAHNm] ewah=" << ewah->ref << "," << ewah->clean << "," << ewah->dirty << std::endl;
         
         // Clean words.
         uint64_t to = n_s_obs + ewah->clean * 8 > n_samples ? n_samples : n_s_obs + ewah->clean * 8;
-        std::cerr << "[PBWT::ReverseUpdateEWAHNm] clean=" << n_s_obs << "->" << to << std::endl; 
+        // std::cerr << "[PBWT::ReverseUpdateEWAHNm] clean=" << n_s_obs << "->" << to << std::endl; 
         for (int i = n_s_obs; i < to; ++i) {
             queue[ewah->ref & 15][n_queue[ewah->ref & 15]++] = ppa[i];
-            if (ppa[i] == 0) {
-                std::cerr << "ppa[i]=0 -> " << (int)ewah->ref << " for i=" << i << std::endl;;
-            }
+            // if (ppa[i] == 0) {
+                // std::cerr << "ppa[i]=0 -> " << (int)ewah->ref << " for i=" << i << std::endl;;
+            // }
             ret[ppa[i]] = (ewah->ref & 15); // update prev when non-zero
         }
         n_s_obs = to;
@@ -415,13 +416,15 @@ int PBWT::ReverseUpdateEWAHNm(const uint8_t* arr, const uint32_t len, uint8_t* r
             assert(to <= n_samples);
             
             uint32_t dirty = *((uint32_t*)(&arr[local_offset])); // copy
-            std::cerr << "[PBWT::ReverseUpdateEWAHNm] Dirty: " << i << "/" << ewah->dirty << ": " << std::bitset<32>(dirty) << std::endl;
+            // std::cerr << "[PBWT::ReverseUpdateEWAHNm] Dirty: " << i << "/" << ewah->dirty << ": " << std::bitset<32>(dirty) << std::endl;
+
             for (int j = n_s_obs; j < to; ++j) {
                 queue[dirty & 15][n_queue[dirty & 15]++] = ppa[j];
-                if (ppa[j] == 0) {
-                    std::cerr << "ppa[j]=0 -> " << (int)(dirty & 15) << " for j=" << j << std::endl;;
-                }
+                // if (ppa[j] == 0) {
+                //     std::cerr << "ppa[j]=0 -> " << (int)(dirty & 15) << " for j=" << j << std::endl;;
+                // }
                 ret[ppa[j]] = (dirty & 15); // update prev when non-zero
+                // std::cerr << "\t" << std::bitset<4>(dirty&15) << std::endl;
                 dirty >>= 4;
                 // ++n_s_obs;
             }
@@ -450,7 +453,7 @@ int PBWT::ReverseUpdateEWAHNm(const uint8_t* arr, const uint32_t len, uint8_t* r
     // Merge PPA queues.
     uint32_t of = 0;
     for (int j = 0; j < n_symbols; ++j) { // O(n)
-        // std::cerr << "queue=" << j << ": " << n_queue[j] << std::endl;
+        // std::cerr << "[PBWT::ReverseUpdateEWAHNm] queue=" << j << ": " << n_queue[j] << std::endl;
         memcpy(&ppa[of], queue[j], sizeof(uint32_t)*n_queue[j]);
         // for (int i = 0; i < n_queue[j]; ++i, ++of) {
         //     ppa[of] = queue[j][i];

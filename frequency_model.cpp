@@ -340,18 +340,14 @@ GeneralModel::~GeneralModel() {
 
 void GeneralModel::Reset() {
     n_additions = 0;
-    std::cerr << "[GeneralModel::Reset] Resetting" << std::endl;
+    // std::cerr << "[GeneralModel::Reset] Resetting" << std::endl;
     ResetModels();
-    std::cerr << "post models" << std::endl;
     ResetContext();
-    std::cerr << "post context" << std::endl;
 }
 
 void GeneralModel::ResetModels() {
-    std::cerr << "[GeneralModel::ResetModels] #models=" << models.size() << std::endl;
+    // std::cerr << "[GeneralModel::ResetModels] #models=" << models.size() << std::endl;
     for (int i = 0; i < models.size(); ++i) {
-        assert(models[i].get() != nullptr);
-        std::cerr << "reset model#" << i << "/" << models.size() << std::endl;
         models[i]->Initiate(max_model_symbols, max_model_symbols);
     }
 }
