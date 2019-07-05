@@ -986,6 +986,8 @@ int djn_ctx_model_container_t::EncodeWah(uint32_t* wah, uint32_t len) { // input
     return 1;
 }
 
+constexpr uint32_t djn_ctx_model_container_t::ref_bits[16];
+
 int djn_ctx_model_container_t::EncodeWahNm(uint32_t* wah, uint32_t len) { // input WAH-encoded data
     if (wah == nullptr) return -1;
 
@@ -1019,7 +1021,7 @@ int djn_ctx_model_container_t::EncodeWahNm(uint32_t* wah, uint32_t len) { // inp
     // Build reference by broadcasting lower 4 bits
     // to all 8 four-bit positions in a 32-bit word.
     uint32_t wah_ref = (wah[0] & 15);
-    uint32_t wah_cmp = wah_ref;
+    // uint32_t wah_cmp = wah_ref;
     // for (int i = 1; i < 8; ++i) wah_cmp |= wah_ref << (i*4);
 
     // // Word is dirty if the word is different from the expected clean word.
@@ -1040,16 +1042,16 @@ int djn_ctx_model_container_t::EncodeWahNm(uint32_t* wah, uint32_t len) { // inp
     // // Word is clean: pattern is repeated.
     // ewah.clean += (wah_ref == wah_cmp);
     // if (ewah.clean) ewah.ref = (wah[0] & 15);
-    // assert(ewah.dirty + ewah.clean == 1);
-
+    // assert(ewah.dirty + ewah.clean == 1)
     for (int i = 0; i < len; ++i) {
         // Build reference.
         wah_ref = (wah[i] & 15);
-        wah_cmp = wah_ref;
-        for (int j = 1; j < 8; ++j) wah_cmp |= wah_ref << (j*4);
+        // wah_cmp = djn_ctx_model_container_t::ref_bits[wah_ref];
+        // for (int j = 1; j < 8; ++j) wah_cmp |= wah_ref << (j*4);
+        // assert(wah_cmp == djn_ctx_model_container_t::ref_bits[wah_ref]);
 
         // Is dirty
-        if (wah[i] != wah_cmp) {
+        if (wah[i] != djn_ctx_model_container_t::ref_bits[wah_ref]) {
             if (ewah.clean) {
                 model_nm->mtype->EncodeSymbol(1);
                 EncodeWahRLE_nm(ewah.ref, ewah.clean, model_nm);
