@@ -18,48 +18,50 @@ djn_ctx_model_t::~djn_ctx_model_t() {
 }
 
 void djn_ctx_model_t::Initiate2mc() {
-    range_coder = std::make_shared<RangeCoder>();
-    mref = std::make_shared<GeneralModel>(2, 512, 18, 32, range_coder);
-    mlog_rle = std::make_shared<GeneralModel>(16, 32, 18, 16, range_coder);  // 2^32 max -> log2() = 5
-    mrle = std::make_shared<GeneralModel>(256, 64, 18, 32, range_coder); // 1 bit ref, 5 bit alt
-    mrle2_1 = std::make_shared<GeneralModel>(256, 64, 18, 8, range_coder);
-    mrle2_2 = std::make_shared<GeneralModel>(256, 64, 18, 8, range_coder);
-    mrle4_1 = std::make_shared<GeneralModel>(256, 64, 18, 8, range_coder);
-    mrle4_2 = std::make_shared<GeneralModel>(256, 64, 18, 8, range_coder);
-    mrle4_3 = std::make_shared<GeneralModel>(256, 64, 18, 8, range_coder);
-    mrle4_4 = std::make_shared<GeneralModel>(256, 64, 18, 8, range_coder);
-    dirty_wah = std::make_shared<GeneralModel>(256, 256, 18, 16, range_coder);
-    mtype = std::make_shared<GeneralModel>(2, 512, 18, 1, range_coder);
+    range_coder= std::make_shared<RangeCoder>();
+    mref       = std::make_shared<GeneralModel>(2,   512, 18, 32, range_coder);
+    mlog_rle   = std::make_shared<GeneralModel>(16,  32,  18, 16, range_coder); // 2^32 max -> log2() = 5
+    mrle       = std::make_shared<GeneralModel>(256, 64,  18, 32, range_coder); // 1 bit ref, 5 bit alt
+    mrle2_1    = std::make_shared<GeneralModel>(256, 64,  18, 8,  range_coder);
+    mrle2_2    = std::make_shared<GeneralModel>(256, 64,  18, 8,  range_coder);
+    mrle4_1    = std::make_shared<GeneralModel>(256, 64,  18, 8,  range_coder);
+    mrle4_2    = std::make_shared<GeneralModel>(256, 64,  18, 8,  range_coder);
+    mrle4_3    = std::make_shared<GeneralModel>(256, 64,  18, 8,  range_coder);
+    mrle4_4    = std::make_shared<GeneralModel>(256, 64,  18, 8,  range_coder);
+    dirty_wah  = std::make_shared<GeneralModel>(256, 256, 18, 16, range_coder);
+    mtype      = std::make_shared<GeneralModel>(2,   512, 18, 1,  range_coder);
 }
 
 void djn_ctx_model_t::InitiateNm() {
-    range_coder = std::make_shared<RangeCoder>();
-    mref = std::make_shared<GeneralModel>(2, 512, 18, 32, range_coder);
-    mlog_rle = std::make_shared<GeneralModel>(64, 32, 18, 16, range_coder);  // 4 bit ref, log2(32) = 5 bit -> 2^9 = 512
-    mrle = std::make_shared<GeneralModel>(256, 512, 24, 1, range_coder); // 4 bits ref + 5 bits log2(run) -> 2^9
-    mrle2_1 = std::make_shared<GeneralModel>(256, 512, range_coder);
-    mrle2_2 = std::make_shared<GeneralModel>(256, 512, range_coder);
-    mrle4_1 = std::make_shared<GeneralModel>(256, 512, range_coder);
-    mrle4_2 = std::make_shared<GeneralModel>(256, 512, range_coder);
-    mrle4_3 = std::make_shared<GeneralModel>(256, 512, range_coder);
-    mrle4_4 = std::make_shared<GeneralModel>(256, 512, range_coder);
-    dirty_wah = std::make_shared<GeneralModel>(256, 256, 18, 32, range_coder);
-    mtype = std::make_shared<GeneralModel>(2, 512, 18, 1, range_coder);
+    range_coder= std::make_shared<RangeCoder>();
+    mref       = std::make_shared<GeneralModel>(2,   512, 18, 32, range_coder);
+    mlog_rle   = std::make_shared<GeneralModel>(64,  32,  18, 16, range_coder); // 4 bit ref, log2(32) = 5 bit -> 2^9 = 512
+    mrle       = std::make_shared<GeneralModel>(256, 512, 24, 1,  range_coder); // 4 bits ref + 5 bits log2(run) -> 2^9
+    mrle2_1    = std::make_shared<GeneralModel>(256, 512, range_coder);
+    mrle2_2    = std::make_shared<GeneralModel>(256, 512, range_coder);
+    mrle4_1    = std::make_shared<GeneralModel>(256, 512, range_coder);
+    mrle4_2    = std::make_shared<GeneralModel>(256, 512, range_coder);
+    mrle4_3    = std::make_shared<GeneralModel>(256, 512, range_coder);
+    mrle4_4    = std::make_shared<GeneralModel>(256, 512, range_coder);
+    dirty_wah  = std::make_shared<GeneralModel>(256, 256, 18, 32, range_coder);
+    mtype      = std::make_shared<GeneralModel>(2,   512, 18, 1,  range_coder);
 }
 
 void djn_ctx_model_t::reset() {
-    if (mref.get() != nullptr) mref->Reset();
-    if (mlog_rle.get() != nullptr) mlog_rle->Reset();
-    if (mrle.get() != nullptr) mrle->Reset();
-    if (mrle2_1.get() != nullptr) mrle2_1->Reset(); 
-    if (mrle2_2.get() != nullptr) mrle2_2->Reset();
-    if (mrle4_1.get() != nullptr) mrle4_1->Reset(); 
-    if (mrle4_2.get() != nullptr) mrle4_2->Reset(); 
-    if (mrle4_3.get() != nullptr) mrle4_3->Reset(); 
-    if (mrle4_4.get() != nullptr) mrle4_4->Reset();
+    std::cerr << "[djn_ctx_model_t::reset] resetting" << std::endl;
+    // range_coder = std::make_shared<RangeCoder>();
+    if (mref.get() != nullptr)      mref->Reset();
+    if (mlog_rle.get() != nullptr)  mlog_rle->Reset();
+    if (mrle.get() != nullptr)      mrle->Reset();
+    if (mrle2_1.get() != nullptr)   mrle2_1->Reset(); 
+    if (mrle2_2.get() != nullptr)   mrle2_2->Reset();
+    if (mrle4_1.get() != nullptr)   mrle4_1->Reset(); 
+    if (mrle4_2.get() != nullptr)   mrle4_2->Reset(); 
+    if (mrle4_3.get() != nullptr)   mrle4_3->Reset(); 
+    if (mrle4_4.get() != nullptr)   mrle4_4->Reset();
     if (dirty_wah.get() != nullptr) dirty_wah->Reset();
-    if (mtype.get() != nullptr) mtype->Reset();
-    if (mref.get() != nullptr) mref->Reset();
+    if (mtype.get() != nullptr)     mtype->Reset();
+    if (mref.get() != nullptr)      mref->Reset();
     pbwt.Reset();
     n_variants = 0; p_len = 0;
 }
@@ -67,7 +69,7 @@ void djn_ctx_model_t::reset() {
 int djn_ctx_model_t::StartEncoding(bool use_pbwt, bool reset) {
     if (range_coder.get() == nullptr) return -1;
 
-    if (p_cap == 0) { // initiate a buffer if there is none
+    if (p == nullptr) { // initiate a buffer if there is none
         delete[] p;
         p = new uint8_t[10000000];
         p_len = 0;
@@ -335,11 +337,17 @@ void djinn_ctx_model::StartEncoding(bool use_pbwt, bool reset) {
     
     // If resetting the model_2mc->
     if (reset) {
-        // std::cerr << "[djinn_ctx_model::StartEncoding] resetting" << std::endl;
+        std::cerr << "[djinn_ctx_model::StartEncoding] resetting " << ploidy_models.size() << " models" << std::endl;
         for (int i = 0; i < ploidy_models.size(); ++i) {
+            assert(ploidy_models[i].get() != nullptr);
+            assert(ploidy_models[i]->model_2mc.get() != nullptr);
+            assert(ploidy_models[i]->model_nm.get() != nullptr);
+            std::cerr << "test1=" << ploidy_models[i]->model_2mc->p_len << "," << ploidy_models[i]->model_2mc->p_free << std::endl;
+            std::cerr << "test2=" << ploidy_models[i]->model_nm->p_len << "," << ploidy_models[i]->model_nm->p_free << std::endl;
             ploidy_models[i]->model_2mc->reset();
             ploidy_models[i]->model_nm->reset();
         }
+        std::cerr << "alive here" << std::endl;
     } else {
         for (int i = 0; i < ploidy_models.size(); ++i) {
             ploidy_models[i]->model_2mc->n_variants = 0;
@@ -798,12 +806,12 @@ int djn_ctx_model_container_t::EncodeNm(uint8_t* data, uint32_t len) {
         wah_bitmaps[i / 8] |= (uint64_t)data[i] << (4*(i % 8));
     }
 
-    for (int i = 0; i < (n_samples_wah_nm >> 3); ++i) { 
-        if (wah_bitmaps[i] != 0) std::cerr << i << ":" << std::bitset<32>(wah_bitmaps[i]) << std::endl;
-    }
+    // for (int i = 0; i < (n_samples_wah_nm >> 3); ++i) { 
+        // if (wah_bitmaps[i] != 0) std::cerr << i << ":" << std::bitset<32>(wah_bitmaps[i]) << std::endl;
+    // }
     // std::cerr << std::endl;
 
-    std::cerr << "[djn_ctx_model_container_t::EncodeNm] n_wah=" << n_wah << " and input=" << (n_samples_wah_nm >> 3) << std::endl;
+    // std::cerr << "[djn_ctx_model_container_t::EncodeNm] n_wah=" << n_wah << " and input=" << (n_samples_wah_nm >> 3) << std::endl;
     // exit(1);
 
     return EncodeWahNm(wah_bitmaps, n_samples_wah_nm >> 3); // n_samples_wah_nm / 8
@@ -985,13 +993,8 @@ int djn_ctx_model_container_t::EncodeWahNm(uint32_t* wah, uint32_t len) { // inp
 
     ++model_nm->n_variants;
 
-    // std::cerr << "refnm=" << std::bitset<32>(wah[0]) << std::endl;
-
-    // uint32_t wah_ref = wah[0];
-    // uint64_t wah_run = 1;
-
     // Resize if necessary.
-    // std::cerr << "[ENCODE] " << model_nm->range_coder->OutSize() << "/" << model_nm->p_cap << std::endl;
+    std::cerr << "[djn_ctx_model_container_t::EncodeWahNm] " << model_nm->range_coder->OutSize() << "/" << model_nm->p_cap << std::endl;
     if (model_nm->range_coder->OutSize() + n_samples > model_nm->p_cap) {
         const uint32_t rc_size = model_nm->range_coder->OutSize();
         std::cerr << "[djn_ctx_model_container_t::EncodeWahNm][RESIZE] resizing from: " << rc_size << "->" << (rc_size + 2*n_samples + 65536) << std::endl;
@@ -1004,6 +1007,10 @@ int djn_ctx_model_container_t::EncodeWahNm(uint32_t* wah, uint32_t len) { // inp
         model_nm->range_coder->out_buf = model_nm->p + rc_size; 
         model_nm->range_coder->in_buf  = model_nm->p;
     }
+
+    // Debug
+    uint32_t n_objs = 1;
+    uint32_t n_obs = 0;
     
     djinn_ewah_t ewah; ewah.reset();
     
@@ -1016,12 +1023,15 @@ int djn_ctx_model_container_t::EncodeWahNm(uint32_t* wah, uint32_t len) { // inp
     // Word is dirty if the word is different from the expected clean word.
     ewah.dirty += (wah_ref != wah_cmp);
     if (ewah.dirty) {
-        std::cerr << "First word is dirty!" << std::endl;
+        // std::cerr << "First word is dirty!" << std::endl;
         model_nm->mtype->EncodeSymbol(0);
+        wah_ref = wah[0];
         for (int i = 0; i < 4; ++i) {
             model_nm->dirty_wah->EncodeSymbol(wah_ref & 255);
             wah_ref >>= 8;
         }
+        ++n_obs;
+        ++n_objs;
     }
 
     // Word is clean: pattern is repeated.
@@ -1029,19 +1039,11 @@ int djn_ctx_model_container_t::EncodeWahNm(uint32_t* wah, uint32_t len) { // inp
     if (ewah.clean) ewah.ref = (wah[0] & 15);
     assert(ewah.dirty + ewah.clean == 1);
 
-    uint32_t n_objs = 1;
-    uint32_t n_obs = 0;
-
     for (int i = 1; i < len; ++i) {
         // Build reference.
         wah_ref = (wah[i] & 15);
         wah_cmp = wah_ref;
         for (int j = 1; j < 8; ++j) wah_cmp |= wah_ref << (j*4);
-
-        // if (i == 136 || i == 338 || i == 386 || i == 522) {
-        //     std::cerr << "Debug@" << i << ": " << wah_ref << "," << wah_cmp << "," << std::bitset<32>(wah[i]) << std::endl;
-        //     std::cerr << "Equality test=" << (wah[i] == wah_cmp) << std::endl;
-        // }
 
         // Is dirty
         if (wah[i] != wah_cmp) {
@@ -1195,7 +1197,15 @@ int djn_ctx_model_container_t::EncodeWahRLE_nm(uint32_t ref, uint32_t len, std::
     // std::cerr << "nmRLE=" << (ref&15) << ",len=" << len << ",log=" << log_length << std::endl;
 
     if (log_length < 2) {
-        std::cerr << "single=" << len << "," << (ref & 15) << std::endl;
+        // std::cerr << "single=" << len << "," << (ref & 15) << std::endl;
+        // std::cerr << "ILLEGAL" << std::endl;
+        // exit(1);
+        assert(len < 256);
+        model->mrle->model_context = (ref & 15);
+        model->mrle->model_context <<= 5;
+        model->mrle->model_context |= log_length;
+        model->mrle->model_context &= model->mrle->model_ctx_mask;
+        model->mrle->EncodeSymbolNoUpdate(len & 255);
     }
     else if (log_length <= 8) {
         assert(len < 256);
@@ -1311,7 +1321,12 @@ int djn_ctx_model_container_t::DecodeWahRLE_nm(uint32_t& ref, uint32_t& len, std
     // std::cerr << "ref=" << ref << " log=" << log_length << std::endl;
 
     if (log_length < 2) {
-        std::cerr << "single=" << len << "," << (ref&15) << std::endl;
+        // std::cerr << "single=" << len << "," << (ref&15) << std::endl;
+        model->mrle->model_context = (ref & 15);
+        model->mrle->model_context <<= 5;
+        model->mrle->model_context |= log_length;
+        model->mrle->model_context &= model->mrle->model_ctx_mask;
+        len = model->mrle->DecodeSymbolNoUpdate();
     }
     else if (log_length <= 8) {
         model->mrle->model_context = (ref & 15);

@@ -77,6 +77,7 @@ public:
     }
 
     int GetCurrentSize() const {
+        if (range_coder.get() == nullptr) return -1;
         return range_coder->OutSize();
     }
     
@@ -123,9 +124,9 @@ public:
 
 public:
     PBWT pbwt;
-    std::shared_ptr<RangeCoder> range_coder; // shared range coder
+    std::shared_ptr<RangeCoder>   range_coder; // shared range coder
     std::shared_ptr<GeneralModel> mref; // reference symbol for RLE encoding
-    std::shared_ptr<GeneralModel> mlog_rle;  // log2(run length)
+    std::shared_ptr<GeneralModel> mlog_rle; // log2(run length)
     std::shared_ptr<GeneralModel> mrle, mrle2_1, mrle2_2, mrle4_1, mrle4_2, mrle4_3, mrle4_4; // rle models for 1-byte, 2-byte, or 4-byte run lengths
     std::shared_ptr<GeneralModel> dirty_wah; // Dirty bitmap words
     std::shared_ptr<GeneralModel> mtype; // Archetype encoding: either bitmap or RLE
@@ -140,8 +141,8 @@ public:
 // Container for haplotype context models
 struct djn_ctx_model_container_t {
 private:
-    // 00000000,00000001,00000010,00000011
-    // 00000100,00000101,00000110,00000111
+    // 0000,0001,0010,0011
+    // 0100,0101,0110,0111
     // etc.
     static constexpr const uint32_t ref_bits[16] = 
         {0,         16843009,  33686018,  50529027, 

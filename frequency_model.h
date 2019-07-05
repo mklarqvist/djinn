@@ -254,8 +254,8 @@ public:
     std::shared_ptr<RangeCoder> range_coder;
     std::vector < std::shared_ptr<FrequencyModel> > models;
     size_t n_additions; // number of updates performed
-    size_t n_buffer; // buffer size
-    uint8_t* buffer; // buffer. todo: fixme
+    // size_t n_buffer; // buffer size
+    // uint8_t* buffer; // buffer. todo: fixme
 };
 
 }

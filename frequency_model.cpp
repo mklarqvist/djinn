@@ -168,7 +168,7 @@ GeneralModel::GeneralModel() noexcept :
     max_model_symbols(0),
     model_context_shift(0),
     model_context(0), model_ctx_mask(0),
-    n_buffer(10000000), buffer(new uint8_t[n_buffer]),
+    // n_buffer(10000000), buffer(new uint8_t[n_buffer]),
     n_additions(0)
 {}
 
@@ -177,8 +177,8 @@ GeneralModel::GeneralModel(int n_symbols, int model_size) :
     model_context_shift(ceil(log2(n_symbols))),
     model_context(0), model_ctx_mask(model_size - 1),
     range_coder(std::make_shared<RangeCoder>()),
-    n_buffer(10000000),
-    buffer(new uint8_t[n_buffer]),
+    // n_buffer(10000000),
+    // buffer(new uint8_t[n_buffer]),
     n_additions(0)
 {
     assert(n_symbols > 1);
@@ -194,9 +194,9 @@ int GeneralModel::Initiate(int n_symbols, int model_size) {
     model_context = 0; 
     model_ctx_mask = model_size - 1;
     range_coder = std::make_shared<RangeCoder>();
-    delete[] buffer;
-    n_buffer = 10000000;
-    buffer = new uint8_t[n_buffer];
+    // delete[] buffer;
+    // n_buffer = 10000000;
+    // buffer = new uint8_t[n_buffer];
     n_additions = 0;
     models.clear();
 
@@ -214,8 +214,8 @@ GeneralModel::GeneralModel(int n_symbols, int model_size, std::shared_ptr<RangeC
     model_context_shift(ceil(log2(n_symbols))),
     model_context(0), model_ctx_mask(model_size - 1),
     range_coder(rc),
-    n_buffer(0),
-    buffer(nullptr),
+    // n_buffer(0),
+    // buffer(nullptr),
     n_additions(0)
 {
     assert(n_symbols > 1);
@@ -231,9 +231,9 @@ int GeneralModel::Initiate(int n_symbols, int model_size, std::shared_ptr<RangeC
     model_context = 0; 
     model_ctx_mask = model_size - 1;
     range_coder = rc;
-    delete[] buffer;
-    n_buffer = 0;
-    buffer = nullptr;
+    // delete[] buffer;
+    // n_buffer = 0;
+    // buffer = nullptr;
     n_additions = 0;
     models.clear();
 
@@ -250,8 +250,8 @@ GeneralModel::GeneralModel(int n_symbols, int model_size, int shift, int step) :
     model_context_shift(ceil(log2(n_symbols))),
     model_context(0), model_ctx_mask(model_size - 1),
     range_coder(std::make_shared<RangeCoder>()),
-    n_buffer(10000000),
-    buffer(new uint8_t[n_buffer]),
+    // n_buffer(10000000),
+    // buffer(new uint8_t[n_buffer]),
     n_additions(0)
 {
     assert(n_symbols > 1);
@@ -270,10 +270,11 @@ int GeneralModel::Initiate(int n_symbols, int model_size, int shift, int step) {
     model_context_shift = ceil(log2(n_symbols));
     model_context = 0; 
     model_ctx_mask = model_size - 1;
-    range_coder = std::make_shared<RangeCoder>();
-    delete[] buffer;
-    n_buffer = 10000000;
-    buffer = new uint8_t[n_buffer];
+    // range_coder = std::make_shared<RangeCoder>();
+    if (range_coder.get() == nullptr) range_coder = std::make_shared<RangeCoder>();
+    // delete[] buffer;
+    // n_buffer = 10000000;
+    // buffer = new uint8_t[n_buffer];
     n_additions = 0;
     models.clear();
 
@@ -294,8 +295,8 @@ GeneralModel::GeneralModel(int n_symbols, int model_size, int shift, int step, s
     model_context_shift(ceil(log2(n_symbols))),
     model_context(0), model_ctx_mask(model_size - 1),
     range_coder(rc),
-    n_buffer(0),
-    buffer(nullptr),
+    // n_buffer(0),
+    // buffer(nullptr),
     n_additions(0)
 {
     assert(n_symbols > 1);
@@ -315,9 +316,9 @@ int GeneralModel::Initiate(int n_symbols, int model_size, int shift, int step, s
     model_context = 0; 
     model_ctx_mask = model_size - 1;
     range_coder = rc;
-    delete[] buffer;
-    n_buffer = 0;
-    buffer = nullptr;
+    // delete[] buffer;
+    // n_buffer = 0;
+    // buffer = nullptr;
     n_additions = 0;
     models.clear();
 
@@ -334,26 +335,36 @@ int GeneralModel::Initiate(int n_symbols, int model_size, int shift, int step, s
 }
 
 GeneralModel::~GeneralModel() {
-    delete[] buffer;
+    // delete[] buffer;
 }
 
 void GeneralModel::Reset() {
     n_additions = 0;
+    std::cerr << "[GeneralModel::Reset] Resetting" << std::endl;
     ResetModels();
+    std::cerr << "post models" << std::endl;
     ResetContext();
+    std::cerr << "post context" << std::endl;
 }
 
 void GeneralModel::ResetModels() {
-    for (int i = 0; i < models.size(); ++i)
+    std::cerr << "[GeneralModel::ResetModels] #models=" << models.size() << std::endl;
+    for (int i = 0; i < models.size(); ++i) {
+        assert(models[i].get() != nullptr);
+        std::cerr << "reset model#" << i << "/" << models.size() << std::endl;
         models[i]->Initiate(max_model_symbols, max_model_symbols);
+    }
 }
 
 void GeneralModel::ResetContext() { model_context = 0; }
 
 int GeneralModel::FinishEncoding() {
-    range_coder->FinishEncode();
-    int ret = range_coder->OutSize();
-    return(ret);
+    std::cerr << "should not be used" << std::endl;
+    exit(1);
+    // range_coder->FinishEncode();
+    // int ret = range_coder->OutSize();
+    // return(ret);
+    return -1;
 }
 
 int GeneralModel::FinishDecoding() {
@@ -362,8 +373,10 @@ int GeneralModel::FinishDecoding() {
 }
 
 void GeneralModel::StartEncoding() {
-    range_coder->SetOutput(buffer);
-    range_coder->StartEncode();
+    std::cerr << "should not be used" << std::endl;
+    exit(1);
+    // range_coder->SetOutput(buffer);
+    // range_coder->StartEncode();
 }
 
 void GeneralModel::StartDecoding(uint8_t* data) {
