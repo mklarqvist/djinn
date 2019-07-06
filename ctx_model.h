@@ -157,8 +157,7 @@ public:
     // 3722304989 11011101110111011101110111011101
     // 4008636142 11101110111011101110111011101110
     // 4294967295 11111111111111111111111111111111
-
-    static constexpr uint32_t ref_bits[16] = 
+    static constexpr uint32_t nm_ref_bits[16] = 
         {0,          286331153,  572662306,  858993459, 
          1145324612, 1431655765, 1717986918, 2004318071, 
          2290649224, 2576980377, 2863311530, 3149642683, 
@@ -185,106 +184,12 @@ public:
     int DecodeNextRaw(uint8_t* data, uint32_t& len);
 
     // Read/write
-    int Serialize(uint8_t* dst) const {
-        // Serialize as (int,uint32_t,uint32_t,uint8_t*,ctx1,ctx2):
-        // ploidy,n_samples,n_variants,p_len,p,model_2mc,model_nm
-        uint32_t offset = 0;
-        *((int*)&dst[offset]) = ploidy; // ploidy
-        offset += sizeof(int);
-        *((uint32_t*)&dst[offset]) = n_samples; // number of samples
-        offset += sizeof(uint32_t);
-        *((uint32_t*)&dst[offset]) = n_variants; // number of variants
-        offset += sizeof(uint32_t);
-        *((uint32_t*)&dst[offset]) = p_len; // data length
-        offset += sizeof(uint32_t);
-        memcpy(&dst[offset], p, p_len); // data
-        offset += p_len;
-        offset += model_2mc->Serialize(&dst[offset]);
-        offset += model_nm->Serialize(&dst[offset]);
-        return offset;
-    }
-
-    int Serialize(std::ostream& stream) const {
-        // Serialize as (int,uint32_t,uint32_t,uint8_t*,ctx1,ctx2):
-        // ploidy,n_samples,n_variants,p_len,p,model_2mc,model_nm
-        stream.write((char*)&ploidy, sizeof(int));
-        stream.write((char*)&n_samples, sizeof(uint32_t));
-        stream.write((char*)&n_variants, sizeof(uint32_t));
-        stream.write((char*)&p_len, sizeof(uint32_t));
-        stream.write((char*)p, p_len);
-        model_2mc->Serialize(stream);
-        model_nm->Serialize(stream);
-        return stream.tellp();
-    }
-
-    int GetSerializedSize() const {
-        int ret = sizeof(int) + 3*sizeof(uint32_t) + p_len + model_2mc->GetSerializedSize() + model_nm->GetSerializedSize();
-        return ret;
-    }
-
-    int GetCurrentSize() const {
-        int ret = range_coder->OutSize();
-        ret += model_2mc->GetCurrentSize();
-        ret += model_nm->GetCurrentSize();
-        return ret;
-    }
-    
-    int Deserialize(uint8_t* dst) {
-        uint32_t offset = 0;
-        int pl = *((int*)&dst[offset]);
-        // std::cerr << "pl=" << pl << " ploidy=" << ploidy << std::endl;
-        assert(pl == ploidy);
-        offset += sizeof(int);
-        uint32_t n_s = *((uint32_t*)&dst[offset]);
-        assert(n_s == n_samples);
-        offset += sizeof(uint32_t);
-        n_variants = *((uint32_t*)&dst[offset]);
-        offset += sizeof(uint32_t);
-        p_len = *((uint32_t*)&dst[offset]);
-        offset += sizeof(uint32_t);
-
-        // initiate a buffer if there is none or it's too small
-        if (p_cap == 0 || p == nullptr || p_len > p_cap) {
-            // std::cerr << "[Deserialize] Limit. p_cap=" << p_cap << "," << "p is nullptr=" << (p == nullptr ? "yes" : "no") << ",p_len=" << p_len << "/" << p_cap << std::endl;
-            if (p_free) delete[] p;
-            p = new uint8_t[p_len + 65536];
-            p_cap = p_len + 65536;
-            p_free = true;
-        }
-
-        memcpy(p, &dst[offset], p_len); // data
-        offset += p_len;
-        // Todo objects
-        offset += model_2mc->Deserialize(&dst[offset]);
-        offset += model_nm->Deserialize(&dst[offset]);
-
-        return(offset);
-    }
-
-    int Deserialize(std::istream& stream) {
-        // #pl and #n_s read outside of this function in Deserialize() for
-        // the parent.
-        //
-        // stream.read((char*)&ploidy, sizeof(int));
-        // stream.read((char*)&n_samples, sizeof(uint32_t));
-
-        stream.read((char*)&n_variants, sizeof(uint32_t));
-        stream.read((char*)&p_len, sizeof(uint32_t));
-        
-        // initiate a buffer if there is none or it's too small
-        if (p_cap == 0 || p == nullptr || p_len > p_cap) {
-            // std::cerr << "[Deserialize] Limit. p_cap=" << p_cap << "," << "p is nullptr=" << (p == nullptr ? "yes" : "no") << ",p_len=" << p_len << "/" << p_cap << std::endl;
-            if (p_free) delete[] p;
-            p = new uint8_t[p_len + 65536];
-            p_cap = p_len + 65536;
-            p_free = true;
-        }
-
-        stream.read((char*)p, p_len);
-        model_2mc->Deserialize(stream);
-        model_nm->Deserialize(stream);
-        return stream.tellg();
-    }
+    int Serialize(uint8_t* dst) const;
+    int Serialize(std::ostream& stream) const;
+    int GetSerializedSize() const;
+    int GetCurrentSize() const;
+    int Deserialize(uint8_t* dst);
+    int Deserialize(std::istream& stream);
 
 public:
     int Encode2mc(uint8_t* data, uint32_t len);

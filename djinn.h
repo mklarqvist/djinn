@@ -93,6 +93,11 @@ constexpr const uint8_t DJN_MAP_NONE[256] = {
 #define BCF_UNPACK_GENOTYPE(A) TWK_BCF_GT_UNPACK[(A) >> 1]
 #define BCF_UNPACK_GENOTYPE_GENERAL(A) TWK_BCF_GT_UNPACK_GENERAL[(A) >> 1]
 
+//
+#define DJN_UN_NONE 0 // up to nothing
+#define DJN_UN_EWAH 1 // EWAH
+#define DJN_UN_IND  2 // Individual level
+
 // EWAH structure
 #pragma pack(push, 1)
 struct djinn_ewah_t {
@@ -103,11 +108,25 @@ struct djinn_ewah_t {
 };
 #pragma pack(pop)
 
+struct djn_variant_dec_t {
+    djn_variant_dec_t() : m_ewah(0), m_dirty(0), n_ewah(0), n_dirty(0), ewah(nullptr), dirty(nullptr) {}
+    ~djn_variant_dec_t() {
+        delete[] ewah;
+        delete[] dirty;
+    }
+
+    int m_ewah, m_dirty;
+    int n_ewah, n_dirty;
+    djinn_ewah_t **ewah;
+    uint32_t **dirty;
+};
+
 // Variant record
 struct djinn_variant_t {
-    djinn_variant_t() : ploidy(0), data(nullptr), data_len(0), data_alloc(0), data_free(false), errcode(0) {}
+    djinn_variant_t() : ploidy(0), data(nullptr), data_len(0), data_alloc(0), data_free(false), errcode(0), unpacked(0), d(nullptr) {}
     ~djinn_variant_t() {
         if (data_free) delete[] data;
+        delete d;
     }
 
     int ploidy;
@@ -115,6 +134,8 @@ struct djinn_variant_t {
     uint32_t data_len;
     uint32_t data_alloc: 31, data_free: 1;
     int errcode;
+    int unpacked; // one of DJN_UN_*
+    djn_variant_dec_t* d;
 };
 
 /**
@@ -174,6 +195,9 @@ public:
     virtual int Serialize(std::ostream& stream) const =0;
     virtual int Deserialize(uint8_t* dst) =0;
     virtual int Deserialize(std::istream& stream) =0;
+
+    // Todo:
+    // virtual int Merge(djinn_model* b1, djinn_model* b2);
 
 public:
     uint8_t use_pbwt: 1, 

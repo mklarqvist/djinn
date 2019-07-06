@@ -158,6 +158,61 @@ public:
     // reused.
     int Deserialize(std::istream& stream) override { return -1; };
 
+    // Todo: Merge EWAH data pairwise.
+    // If the data is PBWT-permuted then first unpermute and add
+    // raw data together.
+    int Merge(djinn_ewah_model& model1, djinn_ewah_model& model2) {
+        std::unordered_map<uint32_t, uint64_t> merge_map; // map ploidy -> new length
+        std::unordered_map<uint32_t, uint64_t> model_map; // map ploidy -> offset in tgt_containers
+        // Vector of vector of model containers to merge.
+        std::vector< std::vector< std::shared_ptr<djn_ewah_model_container_t> > > tgt_containers;
+
+        djinn_ewah_model* models[2] = {&model1, &model2};
+        
+        // Cycle over pairs of ploidy models in either container.
+        // Record the ploidy maps where ploidy in the (ploidy,len)-tuple are the same
+        // and add a new container with (ploidy,lenA + lenB).
+        for (int i = 0; i < 2; ++i) {
+            std::unordered_map<uint64_t, uint32_t>& target_map = models[i]->ploidy_map;
+            for (auto it = target_map.begin(); it != target_map.end(); ++it) {
+                // it->first  = (ploidy,len)-tuple
+                // it->second = offset into ploidy_models
+                // const uint64_t tuple = ((uint64_t)len_data << 32) | ploidy;
+                uint32_t ploidy = it->first & ((1L << 32) - 1);
+                uint32_t len = (it->first >> 32) & ((1L << 32) - 1);
+                std::cerr << it->first << "(" << ploidy << "," << len << ") -> " << it->second << std::endl;
+
+                auto search = merge_map.find(ploidy);
+                if (search != merge_map.end()) {
+                    // Already in map: increment by current length.
+                    search->second += len;
+                    tgt_containers.back().push_back(models[i]->ploidy_models[it->second]);
+                } else {
+                    // std::cerr << "Not found. Inserting: " << len_data << "," << ploidy << "(" << tuple << ") as " << ploidy_models.size() << std::endl;
+                    merge_map[ploidy] = len;
+                    model_map[ploidy] = tgt_containers.size();
+                    tgt_containers.push_back(std::vector< std::shared_ptr<djn_ewah_model_container_t> >());
+                    tgt_containers.back().push_back(models[i]->ploidy_models[it->second]);
+                }
+            }
+        }
+
+        for (auto it = merge_map.begin(); it != merge_map.end(); ++it) {
+            // it->first  = ploidy
+            // it->second = new len
+            const uint64_t tuple = ((uint64_t)it->second << 32) | it->first;
+            ploidy_map[tuple] = ploidy_models.size();
+
+            // Add new containers.
+            ploidy_models.push_back(std::make_shared<djn_ewah_model_container_t>(it->second, it->first, (bool)use_pbwt));
+            ploidy_models.back()->StartEncoding(use_pbwt, init);
+            // tgt_container = ploidy_models[ploidy_models.size() - 1];
+            // tgt_container->StartEncoding(use_pbwt, init);
+        }
+
+        return 1;
+    }
+
 public:
     int DecodeNext(djinn_variant_t*& variant) override;
     int DecodeNext(uint8_t* ewah_data, uint32_t& ret_ewah, uint8_t* ret_buffer, uint32_t& ret_len) override;

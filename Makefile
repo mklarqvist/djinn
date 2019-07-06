@@ -19,7 +19,7 @@
 OPTFLAGS  := -O3 -DLZ4_AVAIL -DZSTD_AVAIL
 CFLAGS     = -std=c99 $(OPTFLAGS) $(DEBUG_FLAGS) -g
 CPPFLAGS   = -std=c++0x $(OPTFLAGS) $(DEBUG_FLAGS) -g
-CPP_SOURCE = frequency_model.cpp main.cpp pbwt.cpp gt_compressor.cpp djinn.cpp ctx_model.cpp ewah_model.cpp
+CPP_SOURCE = frequency_model.cpp main.cpp pbwt.cpp djinn.cpp ctx_model.cpp ewah_model.cpp
 C_SOURCE   = 
 OBJECTS    = $(C_SOURCE:.c=.o) $(CPP_SOURCE:.cpp=.o)
 DEBUG_FLAGS =

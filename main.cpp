@@ -4,9 +4,6 @@
 #include "ctx_model.h"
 #include "ewah_model.h"
 
-#include "gt_compressor.h"
-#include "gt_decompressor.h"
-
 // temp
 #include <algorithm>//sort
 #include <fstream>
@@ -16,6 +13,12 @@
 
 // Definition for microsecond timer.
 typedef std::chrono::high_resolution_clock::time_point clockdef;
+
+std::string MicroPrettyString(uint32_t ms) {
+    std::string time;
+    if (ms < 1000) return time + std::to_string(ms) + "us";
+    else return time + std::to_string(ms/1000) + "ms";
+}
 
 int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
     std::unique_ptr<djinn::VcfReader> reader = djinn::VcfReader::FromFile(filename);
@@ -36,18 +39,22 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
     // While there are bcf records available.
     clockdef t1 = std::chrono::high_resolution_clock::now();
 
-#if 0
+#if 1
     // setup random
-    int64_t n_fake_samples = 300000;
-    uint32_t n_fake_sites = 250000000;
+    int64_t n_fake_samples = 50000000;
+    uint32_t n_fake_sites  = 25000000;
     std::random_device rd;  //Will be used to obtain a seed for the random number engine
     std::mt19937 gen(rd()); //Standard mersenne_twister_engine seeded with rd()
     std::uniform_int_distribution<uint32_t> dis(0, n_fake_samples-1);
-    std::uniform_int_distribution<uint32_t> freq_dis(0, 100);
+    std::uniform_int_distribution<uint32_t> freq_dis(0, 1000);
     uint8_t* rand_vec = new uint8_t[n_fake_samples];
+    uint8_t* decode_buf = new uint8_t[10000000];
 
-    bool reset_models = true;
-    djinn::djinn_ctx_model djn_ctx;
+    std::string temp_file = "/Users/Mivagallery/Downloads/djn_debug.bin";
+
+    bool reset_models = false;
+    // djinn::djinn_ctx_model djn_ctx;
+    djinn::djinn_ctx_model* djn_ctx = new djinn::djinn_ctx_model;
     djn_ctx->StartEncoding(permute, reset_models);
 
     uint64_t data_in = 0, data_in_vcf = 0;
@@ -59,7 +66,7 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
     uint64_t line_time = 0;
     
     for(int i = 0; i < n_fake_sites; ++i) {
-        // std::cerr << "i=" << i << "/" << 10000000 << std::endl;
+        // std::cerr << "i=" << i << "/" << n_fake_sites << std::endl;
         if (n_lines % nv_blocks == 0 && n_lines != 0) {
             djn_ctx->FinishEncoding();
             int decode_ret2 = djn_ctx->Serialize(std::cout);
@@ -93,8 +100,8 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
 
         ctx_out_progress = ctx_out + djn_ctx->GetCurrentSize();
         assert(ctx_out_progress >= 0);
-        // std::cerr << "line-" << (n_lines%nv_blocks) << " alts=" << n_alts << " time=" << time_span.count() << "us. VCF: " << data_in_vcf << "->" << ctx_out_progress 
-        //         << " (" << (double)data_in_vcf/ctx_out_progress << "-fold)" << std::endl;
+        std::cerr << "line-" << (n_lines%nv_blocks) << " alts=" << n_alts << " time=" << MicroPrettyString(time_span.count()) << ". VCF: " << data_in_vcf << "->" << ctx_out_progress 
+                << " (" << (double)data_in_vcf/ctx_out_progress << "-fold)" << std::endl;
     
     }
     delete[] rand_vec;
