@@ -217,6 +217,7 @@ public:
     int DecodeNext(djinn_variant_t*& variant) override;
     int DecodeNext(uint8_t* ewah_data, uint32_t& ret_ewah, uint8_t* ret_buffer, uint32_t& ret_len) override;
     int DecodeNextRaw(uint8_t* data, uint32_t& len) override;
+    int DecodeNextRaw(djinn_variant_t*& variant) override;
 
 public:
     CompressionStrategy codec; // Either ZSTD or LZ4 at the moment.

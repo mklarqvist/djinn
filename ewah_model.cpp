@@ -280,6 +280,12 @@ int djinn_ewah_model::DecodeNext(djinn_variant_t*& variant) {
     return(tgt_container->DecodeNext(q,q_len,variant->data,variant->data_len));
 }
 
+int djinn_ewah_model::DecodeNextRaw(djinn_variant_t*& variant) {
+    // if (data == nullptr) return -1;
+    
+    return 1;
+}
+
 int djinn_ewah_model::DecodeNextRaw(uint8_t* data, uint32_t& len) {
     if (data == nullptr) return -1;
     uint8_t type = ploidy_dict->DecodeSymbol();

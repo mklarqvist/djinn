@@ -182,6 +182,7 @@ public:
 
     int DecodeNext(uint8_t* ewah_data, uint32_t& ret_ewah, uint8_t* ret_buffer, uint32_t& ret_len);
     int DecodeNextRaw(uint8_t* data, uint32_t& len);
+    int DecodeNextRaw(djinn_variant_t*& variant);
 
     // Read/write
     int Serialize(uint8_t* dst) const;
@@ -298,6 +299,7 @@ public:
     int DecodeNext(djinn_variant_t*& variant) override;
     int DecodeNext(uint8_t* ewah_data, uint32_t& ret_ewah, uint8_t* ret_buffer, uint32_t& ret_len) override;
     int DecodeNextRaw(uint8_t* data, uint32_t& len) override;
+    int DecodeNextRaw(djinn_variant_t*& variant) override;
 
 public:
     uint8_t *p;     // data

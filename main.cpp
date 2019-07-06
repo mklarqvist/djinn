@@ -39,9 +39,9 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
     // While there are bcf records available.
     clockdef t1 = std::chrono::high_resolution_clock::now();
 
-#if 1
+#if 0
     // setup random
-    int64_t n_fake_samples = 50000000;
+    int64_t n_fake_samples = 50000;
     uint32_t n_fake_sites  = 25000000;
     std::random_device rd;  //Will be used to obtain a seed for the random number engine
     std::mt19937 gen(rd()); //Standard mersenne_twister_engine seeded with rd()
@@ -50,7 +50,8 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
     uint8_t* rand_vec = new uint8_t[n_fake_samples];
     uint8_t* decode_buf = new uint8_t[10000000];
 
-    std::string temp_file = "/Users/Mivagallery/Downloads/djn_debug.bin";
+    // std::string temp_file = "/Users/Mivagallery/Downloads/djn_debug.bin";
+    std::string temp_file = "/media/mdrk/08dcb478-5359-41f4-97c8-469190c8a034/djn_debug.bin";
 
     bool reset_models = false;
     // djinn::djinn_ctx_model djn_ctx;
@@ -116,8 +117,8 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
     djn_ewah.StartEncoding(permute, reset_models);
     // djn_ewah.codec = djinn::CompressionStrategy::LZ4;
     
-    // std::string temp_file = "/media/mdrk/08dcb478-5359-41f4-97c8-469190c8a034/djn_debug.bin";
-    std::string temp_file = "/Users/Mivagallery/Downloads/djn_debug.bin";
+    std::string temp_file = "/media/mdrk/08dcb478-5359-41f4-97c8-469190c8a034/djn_debug.bin";
+    // std::string temp_file = "/Users/Mivagallery/Downloads/djn_debug.bin";
     std::ofstream test_write(temp_file, std::ios::out | std::ios::binary);
     if (test_write.good() == false) {
         std::cerr << "could not open outfile handle" << std::endl;
@@ -244,7 +245,21 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
         // Cycle over variants in the block.
         for (int i = 0; i < djn_ctx_decode.n_variants; ++i) {
             // std::cerr << "Decoding " << i << "/" << djn_ctx_decode.n_variants << std::endl;
-            int objs = djn_ctx_decode.DecodeNext(variant);
+            int objs = djn_ctx_decode.DecodeNextRaw(variant);
+            
+            if (variant->d->dirty_type != 0) {
+                uint32_t of = 0;
+                for (int j = 0; j < variant->d->n_ewah; ++j) {
+                    std::cerr << variant->d->ewah[j]->clean << ":" << variant->d->ewah[j]->ref;
+                    for (int k = 0; k < variant->d->ewah[j]->dirty; ++k, ++of) {
+                        std::cerr << "," << std::bitset<32>(*variant->d->dirty[of]);
+                    }
+                    std::cerr << std::endl;
+                }
+            }
+            
+            /*
+            continue;
             assert(objs > 0);
 
             // Write Vcf-encoded data to a local buffer and then write to standard out.
@@ -261,6 +276,7 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
             std::cout.write((char*)vcf_out_buffer, len_vcf);
             // std::cout << std::endl;
             len_vcf = 0;
+            */
         }
         // Timings per block
         clockdef t2 = std::chrono::high_resolution_clock::now();

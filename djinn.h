@@ -95,8 +95,11 @@ constexpr const uint8_t DJN_MAP_NONE[256] = {
 
 //
 #define DJN_UN_NONE 0 // up to nothing
-#define DJN_UN_EWAH 1 // EWAH
+#define DJN_UN_EWAH 1 // EWAH level
 #define DJN_UN_IND  2 // Individual level
+
+#define DJN_DIRTY_2MC 0 // 1-bit or
+#define DJN_DIRTY_NM  1 // 4-bit encoding in dirty bitmaps
 
 // EWAH structure
 #pragma pack(push, 1)
@@ -109,14 +112,24 @@ struct djinn_ewah_t {
 #pragma pack(pop)
 
 struct djn_variant_dec_t {
-    djn_variant_dec_t() : m_ewah(0), m_dirty(0), n_ewah(0), n_dirty(0), ewah(nullptr), dirty(nullptr) {}
+    djn_variant_dec_t() : m_ewah(0), m_dirty(0), n_ewah(0), n_dirty(0), dirty_type(0), ewah(nullptr), dirty(nullptr) {}
     ~djn_variant_dec_t() {
         delete[] ewah;
         delete[] dirty;
     }
 
+    void Allocate(uint32_t n) {
+        delete[] ewah; delete[] dirty;
+        m_ewah = n;
+        m_dirty = n;
+        n_ewah = 0, n_dirty = 0;
+        ewah = new djinn_ewah_t*[m_ewah];
+        dirty = new uint32_t*[m_dirty];
+    }
+
     int m_ewah, m_dirty;
     int n_ewah, n_dirty;
+    int dirty_type; // one of DJN_DIRTY_*
     djinn_ewah_t **ewah;
     uint32_t **dirty;
 };
@@ -189,6 +202,7 @@ public:
     virtual int DecodeNext(uint8_t* ewah_data, uint32_t& ret_ewah, uint8_t* ret_buffer, uint32_t& ret_len) =0;
     virtual int DecodeNext(djinn_variant_t*& variant) =0;
     virtual int DecodeNextRaw(uint8_t* data, uint32_t& len) =0;
+    virtual int DecodeNextRaw(djinn_variant_t*& variant) =0;
 
     // Read write
     virtual int Serialize(uint8_t* dst) const =0;
