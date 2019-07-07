@@ -183,11 +183,8 @@ static uint32_t round_log2(uint32_t x) {
 
 class djinn_model {
 public:
-    djinn_model() : use_pbwt(true), init(true), unused(0), n_samples(0), n_variants(0) {}
-    djinn_model(uint64_t n_s) : use_pbwt(true), init(true), unused(0), n_samples(n_s), n_variants(0) {}
+    djinn_model() : use_pbwt(true), init(true), unused(0), n_variants(0) {}
     virtual ~djinn_model() {}
-
-    virtual void SetSamples(int64_t n_s) { n_samples = n_s; }
 
     virtual int EncodeBcf(uint8_t* data, size_t len_data, int ploidy, uint8_t alt_alleles) =0;
     virtual int Encode(uint8_t* data, size_t len_data, int ploidy, uint8_t alt_alleles) =0;
@@ -217,7 +214,6 @@ public:
     uint8_t use_pbwt: 1, 
             init: 1, 
             unused: 6;
-    int64_t n_samples; // number of samples or haplotypes
     uint32_t n_variants; // number of encoded variants
 
     // Supportive array for computing allele counts to determine the presence

@@ -56,6 +56,29 @@ public:
 
 struct djn_ewah_model_container_t {
 public:
+    // 0          00000000000000000000000000000000
+    // 286331153  00010001000100010001000100010001
+    // 572662306  00100010001000100010001000100010
+    // 858993459  00110011001100110011001100110011
+    // 1145324612 01000100010001000100010001000100
+    // 1431655765 01010101010101010101010101010101
+    // 1717986918 01100110011001100110011001100110
+    // 2004318071 01110111011101110111011101110111
+    // 2290649224 10001000100010001000100010001000
+    // 2576980377 10011001100110011001100110011001
+    // 2863311530 10101010101010101010101010101010
+    // 3149642683 10111011101110111011101110111011
+    // 3435973836 11001100110011001100110011001100
+    // 3722304989 11011101110111011101110111011101
+    // 4008636142 11101110111011101110111011101110
+    // 4294967295 11111111111111111111111111111111
+    static constexpr uint32_t nm_ref_bits[16] = 
+        {0,          286331153,  572662306,  858993459, 
+         1145324612, 1431655765, 1717986918, 2004318071, 
+         2290649224, 2576980377, 2863311530, 3149642683, 
+         3435973836, 3722304989, 4008636142, 4294967295};
+
+public:
     djn_ewah_model_container_t(int64_t n_s, int pl, bool use_pbwt);
     djn_ewah_model_container_t(int64_t n_s, int pl, bool use_pbwt, uint8_t* src, uint32_t src_len);
     ~djn_ewah_model_container_t();
@@ -89,9 +112,9 @@ public:
     int64_t n_variants;
 
     // Fields for constructing EWAH encodings from input data.
-    uint64_t n_wah; // Number of allocated 32-bit bitmaps
     int64_t n_samples_wah; // Number of samples rounded up to closes 32-bit boundary
     int64_t n_samples_wah_nm;
+    uint64_t n_wah; // Number of allocated 32-bit bitmaps
     uint32_t* wah_bitmaps; // Bitmaps
 
     uint8_t* p;     // data
@@ -231,7 +254,6 @@ public:
     uint32_t q_len; // data length
     uint32_t q_alloc:31, q_free:1; // allocated data length, ownership of data flag
 
-    std::shared_ptr<GeneralModel> ploidy_dict; // 0 for first dict encoding, 1 for second etc.
     std::unordered_map<uint64_t, uint32_t> ploidy_map; // maps (data length, ploidy) packed into a 64-bit word to model offsets
     std::vector< std::shared_ptr<djn_ewah_model_container_t> > ploidy_models;
 };

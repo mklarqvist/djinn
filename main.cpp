@@ -245,28 +245,26 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
         // Cycle over variants in the block.
         for (int i = 0; i < djn_ctx_decode.n_variants; ++i) {
             // std::cerr << "Decoding " << i << "/" << djn_ctx_decode.n_variants << std::endl;
-            int objs = djn_ctx_decode.DecodeNextRaw(variant);
-            
-            if (variant->d->dirty_type != 0) {
-                uint32_t of = 0;
-                for (int j = 0; j < variant->d->n_ewah; ++j) {
-                    std::cerr << variant->d->ewah[j]->clean << ":" << variant->d->ewah[j]->ref;
-                    for (int k = 0; k < variant->d->ewah[j]->dirty; ++k, ++of) {
-                        std::cerr << "," << std::bitset<32>(*variant->d->dirty[of]);
-                    }
-                    std::cerr << std::endl;
-                }
-            }
             
             /*
-            continue;
+            int objs = djn_ctx_decode.DecodeNextRaw(variant);
+            
+            uint32_t of = 0;
+            for (int j = 0; j < variant->d->n_ewah; ++j) {
+                std::cerr << variant->d->ewah[j]->clean << ":" << variant->d->ewah[j]->ref;
+                for (int k = 0; k < variant->d->ewah[j]->dirty; ++k, ++of) {
+                    std::cerr << "," << std::bitset<32>(*variant->d->dirty[of]);
+                }
+                std::cerr << std::endl;
+            }
+            */
+            
+            int objs = djn_ctx_decode.DecodeNext(variant);
             assert(objs > 0);
 
             // Write Vcf-encoded data to a local buffer and then write to standard out.
             for (int j = 0; j < variant->data_len; j += variant->ploidy) {
                 // Todo: phasing
-                // std::cout << std::bitset<8>(variant->data[j+0]) << "|" << std::bitset<8>(variant->data[j+1]) << "\t";
-
                 vcf_out_buffer[len_vcf++] = (char)variant->data[j+0] + '0';
                 vcf_out_buffer[len_vcf++] = '|';
                 vcf_out_buffer[len_vcf++] = (char)variant->data[j+1] + '0';
@@ -274,9 +272,7 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
             }
             vcf_out_buffer[len_vcf++] = '\n';
             std::cout.write((char*)vcf_out_buffer, len_vcf);
-            // std::cout << std::endl;
             len_vcf = 0;
-            */
         }
         // Timings per block
         clockdef t2 = std::chrono::high_resolution_clock::now();

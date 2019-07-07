@@ -555,6 +555,8 @@ int djinn_ctx_model::Deserialize(std::istream& stream) {
 
 /*======   Container   ======*/
 
+constexpr uint32_t djn_ctx_model_container_t::nm_ref_bits[16];
+
 djn_ctx_model_container_t::djn_ctx_model_container_t(int64_t n_s, int pl, bool use_pbwt) : 
     use_pbwt(use_pbwt),
     ploidy(pl), n_samples(n_s), n_variants(0),
@@ -879,8 +881,6 @@ int djn_ctx_model_container_t::EncodeWah(uint32_t* wah, uint32_t len) { // input
     ++n_variants;
     return 1;
 }
-
-constexpr uint32_t djn_ctx_model_container_t::nm_ref_bits[16];
 
 int djn_ctx_model_container_t::EncodeWahNm(uint32_t* wah, uint32_t len) { // input WAH-encoded data
     if (wah == nullptr) return -1;
