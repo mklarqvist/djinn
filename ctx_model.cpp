@@ -773,6 +773,9 @@ int djn_ctx_model_container_t::DecodeRaw_nm(uint8_t* data, uint32_t& len) {
     int64_t n_samples_obs = 0;
     int objects = 0;
 
+    // Compute als
+    memset(hist_alts, 0, 256*sizeof(uint32_t));
+
     // Emit empty EWAH marker.
     djinn_ewah_t* ewah = (djinn_ewah_t*)&data[len]; 
     ewah->reset();
@@ -784,8 +787,15 @@ int djn_ctx_model_container_t::DecodeRaw_nm(uint8_t* data, uint32_t& len) {
             ++ewah->dirty;
             uint32_t* t = (uint32_t*)&data[len];
             for (int i = 0; i < 4; ++i) {
-                data[len++] = model_nm->dirty_wah->DecodeSymbol();
+                data[len] = model_nm->dirty_wah->DecodeSymbol();
+                uint8_t r = data[len]; // copy
+                ++len;
+                for (int j = 0; j < 2; ++j) {
+                    ++hist_alts[r & 15];
+                    r >>= 4;
+                }
             }
+            
             n_samples_obs += 8;
 
         } else { // is RLE
@@ -800,8 +810,9 @@ int djn_ctx_model_container_t::DecodeRaw_nm(uint8_t* data, uint32_t& len) {
             // Decode an RLE
             uint32_t ref = 1; uint32_t len = 1;
             DecodeWahRLE_nm(ref, len, model_nm);
-            ewah->ref = ref & 15;
+            ewah->ref   = ref & 15;
             ewah->clean = len;
+            hist_alts[ref & 15] += len*8;
 
             n_samples_obs += ewah->clean*8;
         }
@@ -810,15 +821,25 @@ int djn_ctx_model_container_t::DecodeRaw_nm(uint8_t* data, uint32_t& len) {
             // std::cerr << "[djn_ctx_model_container_t::DecodeRaw_nm] obs=" << n_samples_obs << "/" << n_samples_wah_nm << std::endl;
             break;
         }
+        
         if (n_samples_obs > n_samples_wah_nm) {
             std::cerr << "[djn_ctx_model_container_t::DecodeRaw_nm] Decompression corruption: " << n_samples_obs << "/" << n_samples_wah_nm  << std::endl;
             exit(1);
         }
     }
 
-    if (ewah->clean > 0 || ewah->dirty > 0) {
+    if (ewah->clean || ewah->dirty) {
         ++objects;
     }
+
+    uint32_t n_alts_obs = 0;
+    // std::cerr << "alts=";
+    for (int i = 0; i < 256; ++i) {
+        if (hist_alts[i]) std::cerr << i << ":" << hist_alts[i] << ",";
+        n_alts_obs += hist_alts[i];
+    }
+    // std::cerr << " n_alts_obs=" << n_alts_obs << "/" << n_samples_wah_nm << std::endl;
+    assert(n_alts_obs == n_samples_wah_nm);
 
     return objects;
 }
@@ -1390,7 +1411,7 @@ int djn_ctx_model_container_t::DecodeNextRaw(djinn_variant_t*& variant) {
 
     int ret = 0;
     switch(type) {
-    case 0: ret = DecodeRaw(variant->data, variant->data_len); break;
+    case 0: ret = DecodeRaw(variant->data, variant->data_len);    break;
     case 1: ret = DecodeRaw_nm(variant->data, variant->data_len); break;
     default: std::cerr << "[djn_ctx_model_container_t::DecodeNextRaw] decoding error: " << (int)type << " (valid=[0,1])" << std::endl; return -1;
     }
@@ -1443,7 +1464,16 @@ int djn_ctx_model_container_t::DecodeNextRaw(djinn_variant_t*& variant) {
     }
     assert(ret_pos == n_samples);
 
-    return 1;
+    // Compute number of alleles.
+    uint32_t max_allele = 0;
+    for (int i = 0; i < 256; ++i) {
+        max_allele = hist_alts[i] != 0 ? i : max_allele;
+        // if (tgt_container->hist_alts[i]) std::cerr << i << ":" << tgt_container->hist_alts[i] << ",";
+    }
+    // std::cerr << " max=" << max_allele << std::endl;
+    variant->n_allele = max_allele + 1;
+
+    return ret;
 }
 
 // Return raw, potentially permuted, EWAH encoding
@@ -1469,6 +1499,7 @@ int djn_ctx_model_container_t::DecodeRaw(uint8_t* data, uint32_t& len) {
 
             for (int i = 0; i < 4; ++i) {
                 data[len] = model_2mc->dirty_wah->DecodeSymbol();
+                hist_alts[0] += __builtin_popcount(~data[len]);
                 hist_alts[1] += __builtin_popcount(data[len]);
                 ++len;
             }

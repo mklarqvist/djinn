@@ -297,13 +297,26 @@ int djinn_ewah_model::DecodeNext(djinn_variant_t*& variant) {
     variant->errcode  = 0;
     variant->unpacked = DJN_UN_IND;
 
-    return(tgt_container->DecodeNext(q,q_len,variant->data,variant->data_len));
+    int ret = tgt_container->DecodeNext(q,q_len,variant->data,variant->data_len);
+    
+    // Compute number of alleles.
+    uint32_t max_allele = 0;
+    for (int i = 0; i < 256; ++i) {
+        max_allele = tgt_container->hist_alts[i] != 0 ? i : max_allele;
+        // if (tgt_container->hist_alts[i]) std::cerr << i << ":" << tgt_container->hist_alts[i] << ",";
+    }
+    // std::cerr << " max=" << max_allele << std::endl;
+    variant->n_allele = max_allele + 1;
+
+    return ret;
 }
 
 int djinn_ewah_model::DecodeNextRaw(djinn_variant_t*& variant) {
-    // if (data == nullptr) return -1;
-    
-    return 1;
+    // Decode stream archetype.
+    uint8_t type = p[p_len];
+    ++p_len;
+    std::shared_ptr<djn_ewah_model_container_t> tgt_container = ploidy_models[type];
+    return tgt_container->DecodeNextRaw(variant);
 }
 
 int djinn_ewah_model::DecodeNextRaw(uint8_t* data, uint32_t& len) {
@@ -1288,9 +1301,97 @@ int djn_ewah_model_container_t::DecodeRaw(uint8_t* data, uint32_t& len) {
         }
     }
 
-    // std::cerr << "[decoded 2nm] " << hist_alts[0] << "," <<hist_alts[1] << std::endl;
+    std::cerr << "[decoded 2nm] " << hist_alts[0] << "," <<hist_alts[1] << std::endl;
 
     return objects;
+}
+
+int djn_ewah_model_container_t::DecodeNextRaw(djinn_variant_t*& variant) {
+    if (variant == nullptr) {
+        variant = new djinn_variant_t;
+        variant->data_alloc = n_samples + 65536;
+        variant->data = new uint8_t[variant->data_alloc];
+        variant->data_free = true;
+    } else if (n_samples >= variant->data_alloc) {
+        if (variant->data_free) delete[] variant->data;
+        variant->data_alloc = n_samples + 65536;
+        variant->data = new uint8_t[variant->data_alloc];
+        variant->data_free = true;
+    }
+
+    variant->ploidy   = ploidy;
+    variant->data_len = 0;
+    variant->errcode  = 0;
+    variant->unpacked = DJN_UN_EWAH;
+
+    // Decode stream archetype.
+    uint8_t type = p[p_len++];
+
+    int ret = 0;
+    switch(type) {
+    case 0: ret = DecodeRaw(variant->data, variant->data_len);    break;
+    case 1: ret = DecodeRaw_nm(variant->data, variant->data_len); break;
+    default: std::cerr << "[djn_ctx_model_container_t::DecodeNextRaw] decoding error: " << (int)type << " (valid=[0,1])" << std::endl; return -1;
+    }
+
+    if (ret <= 0) return ret;
+
+    if (variant->d == nullptr) {
+        variant->d = new djn_variant_dec_t;
+    }
+
+    if (ret >= variant->d->m_ewah) {
+        delete[] variant->d->ewah;
+        variant->d->ewah = new djinn_ewah_t*[ret + 512];
+        variant->d->m_ewah = ret + 512;
+    }
+
+    if (variant->d->m_dirty < n_samples_wah_nm) {
+        delete[] variant->d->dirty;
+        variant->d->dirty = new uint32_t*[n_samples_wah_nm];
+        variant->d->m_dirty = n_samples_wah_nm;
+    }
+
+    // Reset
+    variant->d->n_ewah  = 0;
+    variant->d->n_dirty = 0;
+    // Set bitmap type.
+    variant->d->dirty_type = type;
+
+    // Construct EWAH mapping
+    uint32_t local_offset = 0;
+    uint32_t ret_pos = 0;
+
+    for (int j = 0; j < ret; ++j) {
+        djinn_ewah_t* ewah = (djinn_ewah_t*)&variant->data[local_offset];
+        variant->d->ewah[variant->d->n_ewah++] = (djinn_ewah_t*)&variant->data[local_offset];
+        local_offset += sizeof(djinn_ewah_t);
+    
+        // Clean words.
+        uint32_t to = ret_pos + ewah->clean*32 > n_samples ? n_samples : ret_pos + ewah->clean*32;
+        ret_pos = to;
+
+        for (int i = 0; i < ewah->dirty; ++i) {
+            variant->d->dirty[variant->d->n_dirty++] = (uint32_t*)(&variant->data[local_offset]);
+            to = ret_pos + 32 > n_samples ? n_samples : ret_pos + 32;
+            local_offset += sizeof(uint32_t);
+            ret_pos = to;
+        }
+        assert(ret_pos <= n_samples);
+        assert(local_offset <= variant->data_len);
+    }
+    assert(ret_pos == n_samples);
+
+    // Compute number of alleles.
+    uint32_t max_allele = 0;
+    for (int i = 0; i < 256; ++i) {
+        max_allele = hist_alts[i] != 0 ? i : max_allele;
+        // if (tgt_container->hist_alts[i]) std::cerr << i << ":" << tgt_container->hist_alts[i] << ",";
+    }
+    // std::cerr << " max=" << max_allele << std::endl;
+    variant->n_allele = max_allele + 1;
+
+    return 1;
 }
 
 int djn_ewah_model_container_t::Serialize(uint8_t* dst) const {

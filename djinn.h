@@ -37,17 +37,11 @@ const int32_t DJINN_VERSION_PATCH = 0;
 const int32_t DJINN_VERSION_NUMBER  = (DJINN_VERSION_MAJOR *100*100 + DJINN_VERSION_MINOR *100 + DJINN_VERSION_PATCH);
 const std::string DJINN_LIB_VERSION = std::to_string(DJINN_VERSION_MAJOR) + '.' + std::to_string(DJINN_VERSION_MINOR) + '.' + std::to_string(DJINN_VERSION_PATCH);
 
-/*------   Basics   ------*/
-const std::string DJINN_PROGRAM_NAME  = "djinn";
-
 // Map missing to 2, 1->0, 2->1, and EOV -> 3.
 constexpr const uint8_t TWK_BCF_GT_UNPACK[65] = 
 {2,0,1,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,
 4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,
 4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,3};
-
-constexpr const char DJN_UNPACK_2M_VCF[4] = {'0', '1', '.', 'x'}; // position 3 is the EOV marker
-// const char DJN_UNPACK_VCF[16] = {}
 
 // MISSING -> 14, EOV -> 15, other values as normal
 // Note that currently we can only store up to 14 ALT
@@ -71,17 +65,8 @@ constexpr const uint8_t TWK_BCF_GT_UNPACK_GENERAL[256] =
 233,234,235,236,237,238,239,240,241,242,243,244,245,246,247,248,
 249,250,251,252,253,254,255};
 
-constexpr const uint8_t TWK_BCF_GT_UNPACK_GENERAL_REV[131] = 
-{0,1,2,3,4,5,6,7,8,9,10,11,12,13,0,15,16,17,18,19,20,21,22,
-23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,
-43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,
-63,15,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,
-83,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98,99,100,101,102,
-103,104,105,106,107,108,109,110,111,112,113,114,115,116,117,
-118,119,120,121,122,123,124,125,126,127,128,129};
-
-constexpr const uint8_t DJN_MAP_NONE[256] = {
-0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,
+constexpr const uint8_t DJN_MAP_NONE[256] = 
+{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,
 21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,
 41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,
 61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,
@@ -96,9 +81,7 @@ constexpr const uint8_t DJN_MAP_NONE[256] = {
 206,207,208,209,210,211,212,213,214,215,216,217,218,219,220,
 221,222,223,224,225,226,227,228,229,230,231,232,233,234,235,
 236,237,238,239,240,241,242,243,244,245,246,247,248,249,250,
-251,252,253,254,255
-};
-
+251,252,253,254,255};
 
 #define BCF_UNPACK_GENOTYPE(A) TWK_BCF_GT_UNPACK[(A) >> 1]
 #define BCF_UNPACK_GENOTYPE_GENERAL(A) TWK_BCF_GT_UNPACK_GENERAL[(A) >> 1]
@@ -146,13 +129,13 @@ struct djn_variant_dec_t {
 
 // Variant record
 struct djinn_variant_t {
-    djinn_variant_t() : ploidy(0), data(nullptr), data_len(0), data_alloc(0), data_free(false), errcode(0), unpacked(0), d(nullptr) {}
+    djinn_variant_t() : ploidy(0), n_allele(0), data(nullptr), data_len(0), data_alloc(0), data_free(false), errcode(0), unpacked(0), d(nullptr) {}
     ~djinn_variant_t() {
         if (data_free) delete[] data;
         delete d;
     }
 
-    int ploidy;
+    int ploidy, n_allele; // ploidy: data stride size for unpacked data, n_allele: number of alleles including ref
     uint8_t* data;
     uint32_t data_len;
     uint32_t data_alloc: 31, data_free: 1;

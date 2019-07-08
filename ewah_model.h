@@ -163,9 +163,9 @@ public:
 
     inline void ResetBitmaps() { memset(wah_bitmaps, 0, n_wah*sizeof(uint32_t)); }
 
-    int DecodeNext(uint8_t* data, uint32_t& len);
     int DecodeNext(uint8_t* ewah_data, uint32_t& ret_ewah, uint8_t* ret_buffer, uint32_t& ret_len);
     int DecodeNextRaw(uint8_t* data, uint32_t& len);
+    int DecodeNextRaw(djinn_variant_t*& variant);
 
     // Read/write
     int Serialize(uint8_t* dst) const;

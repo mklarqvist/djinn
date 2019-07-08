@@ -234,7 +234,6 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
         // and constructing directly from a file stream.
         // int decode_ctx_ret = djn_ctx_decode.Deserialize(decode_buf);
         int decode_ctx_ret = djn_decode->Deserialize(test_read);
-        // std::cerr << "#n_v=" << djn_ewah_decode.n_variants << std::endl;
 
         // Initiate decoding.
         djn_decode->StartDecoding();
@@ -242,7 +241,7 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
         clockdef t1 = std::chrono::high_resolution_clock::now();
         // Cycle over variants in the block.
         for (int i = 0; i < djn_decode->n_variants; ++i) {
-            // std::cerr << "Decoding " << i << "/" << djn_ewah_decode.n_variants << std::endl;
+            // std::cerr << "Decoding " << i << "/" << djn_decode->n_variants << std::endl;
             
             /*
             int objs = djn_decode->DecodeNextRaw(variant);
@@ -257,20 +256,27 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
             }
             */
             
-            int objs = djn_decode->DecodeNext(variant);
+            // int objs = djn_decode->DecodeNext(variant);
+            int objs = djn_decode->DecodeNextRaw(variant);
             assert(objs > 0);
 
-            // Write Vcf-encoded data to a local buffer and then write to standard out.
-            for (int j = 0; j < variant->data_len; j += variant->ploidy) {
-                // Todo: phasing
-                vcf_out_buffer[len_vcf++] = (char)variant->data[j+0] + '0';
-                vcf_out_buffer[len_vcf++] = '|';
-                vcf_out_buffer[len_vcf++] = (char)variant->data[j+1] + '0';
-                vcf_out_buffer[len_vcf++] = '\t';
+            std::cerr << variant->ploidy << "," << variant->n_allele << "," << variant->data_len << "," << variant->errcode << "," << variant->unpacked << ": data=";
+            for (int i = 0; i < variant->d->n_ewah; ++i) {
+                std::cerr << variant->d->ewah[i]->clean << ":" << variant->d->ewah[i]->ref << "+" << variant->d->ewah[i]->dirty << ", ";
             }
-            vcf_out_buffer[len_vcf++] = '\n';
-            std::cout.write((char*)vcf_out_buffer, len_vcf);
-            len_vcf = 0;
+            std::cerr << std::endl;
+
+            // Write Vcf-encoded data to a local buffer and then write to standard out.
+            // for (int j = 0; j < variant->data_len; j += variant->ploidy) {
+            //     // Todo: phasing
+            //     vcf_out_buffer[len_vcf++] = (char)variant->data[j+0] + '0';
+            //     vcf_out_buffer[len_vcf++] = '|';
+            //     vcf_out_buffer[len_vcf++] = (char)variant->data[j+1] + '0';
+            //     vcf_out_buffer[len_vcf++] = '\t';
+            // }
+            // vcf_out_buffer[len_vcf++] = '\n';
+            // std::cout.write((char*)vcf_out_buffer, len_vcf);
+            // len_vcf = 0;
         }
         // Timings per block
         clockdef t2 = std::chrono::high_resolution_clock::now();
