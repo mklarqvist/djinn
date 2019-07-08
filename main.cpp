@@ -117,8 +117,8 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
     djn_ewah.StartEncoding(permute, reset_models);
     // djn_ewah.codec = djinn::CompressionStrategy::LZ4;
     
-    // std::string temp_file = "/media/mdrk/08dcb478-5359-41f4-97c8-469190c8a034/djn_debug.bin";
-    std::string temp_file = "/Users/Mivagallery/Downloads/djn_debug.bin";
+    std::string temp_file = "/media/mdrk/08dcb478-5359-41f4-97c8-469190c8a034/djn_debug.bin";
+    // std::string temp_file = "/Users/Mivagallery/Downloads/djn_debug.bin";
     std::ofstream test_write(temp_file, std::ios::out | std::ios::binary);
     if (test_write.good() == false) {
         std::cerr << "could not open outfile handle" << std::endl;
@@ -135,7 +135,7 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
             int decode_ret = djn_ctx->Serialize(decode_buf);
             // int decode_ret2 = djn_ctx->Serialize(std::cout);
             std::cerr << "[WRITING CTX] " << decode_ret << "b" << std::endl;
-            // test_write.write((char*)decode_buf, decode_ret);
+            test_write.write((char*)decode_buf, decode_ret);
             ++n_blocks;
             ctx_out += decode_ret;
             // ctx_out += decode_ret2;
@@ -143,9 +143,8 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
             // EWAH
             int ret_ewah = djn_ewah.FinishEncoding();
             decode_ret = djn_ewah.Serialize(decode_buf);
-            std::cerr << "[WRITING EWAH] " << ret_ewah << "b" << std::endl;
-            djn_ewah.StartEncoding(permute, reset_models);
-            test_write.write((char*)decode_buf, decode_ret);
+            std::cerr << "[WRITING EWAH] " << decode_ret << "b" << std::endl;
+            // test_write.write((char*)decode_buf, decode_ret);
 
             ewah_out += decode_ret;
             std::cerr << "[PROGRESS][CTX] In uBCF: " << data_in << "->" << ctx_out 
@@ -155,6 +154,7 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
                 << " (" << (double)data_in/ewah_out << "-fold) In VCF: " << data_in_vcf << "->" << ewah_out 
                 << " (" << (double)data_in_vcf/ewah_out << "-fold)" << std::endl;
 
+            djn_ewah.StartEncoding(permute, reset_models);
             djn_ctx->StartEncoding(permute, reset_models);
         }
 
@@ -178,8 +178,9 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
     djn_ctx->FinishEncoding();
     int decode_ret = djn_ctx->Serialize(decode_buf);
     // int decode_ret2 = djn_ctx->Serialize(std::cout);
+    std::cerr << "[WRITING CTX] " << decode_ret << "b" << std::endl;
     assert(decode_ret > 0);
-    // test_write.write((char*)decode_buf, decode_ret);
+    test_write.write((char*)decode_buf, decode_ret);
     ++n_blocks;
     ctx_out += decode_ret;
     // ctx_out += decode_ret2;
@@ -190,7 +191,7 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
     decode_ret = djn_ewah.Serialize(decode_buf);
     std::cerr << "[WRITING EWAH] " << decode_ret << "b" << std::endl;
     // djn_ewah.StartEncoding(permute, reset_models);
-    test_write.write((char*)decode_buf, decode_ret);
+    // test_write.write((char*)decode_buf, decode_ret);
     ewah_out += decode_ret;
 
     std::cerr << "[PROGRESS][CTX] In uBCF: " << data_in << "->" << ctx_out 
@@ -217,7 +218,8 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
     uint64_t filesize = test_read.tellg();
     test_read.seekg(0);
 
-    djinn::djinn_ctx_model djn_ctx_decode;
+    djinn::djinn_model* djn_decode = new djinn::djinn_ctx_model;
+    // djinn::djinn_ctx_model djn_ctx_decode;
     uint8_t* vcf_out_buffer = new uint8_t[4*reader->n_samples_+65536];
     uint32_t len_vcf = 0;
     djinn::djinn_ewah_model djn_ewah_decode;
@@ -227,37 +229,23 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
     clockdef t1_decode = std::chrono::high_resolution_clock::now();
     for (int i = 0; i < n_blocks; ++i) {
         std::cerr << "============== BLOCK-" << i << "===============" << std::endl;
-        std::cerr << "pre io_pos=" << test_read.tellg() << "/" << filesize << std::endl;
-        
-        // uint32_t block_len = 0;
-         // Look at first integer. This corresponds to the length of the data block.
-        // test_read.read((char*)&block_len, sizeof(uint32_t));
-        // *(uint32_t*)(&decode_buf[0]) = block_len;
-        // // Read data block into pre-allocated buffer.
-        // test_read.read((char*)&decode_buf[sizeof(uint32_t)], block_len-sizeof(uint32_t));
-        // std::cerr << "[READ DECODE] post io_pos=" << test_read.tellg() << "/" << filesize 
-        //     << " read=" << block_len << "b" << std::endl;
-
         // Deserialize data and construct the djinn_ctx_model instance. This approach
         // involves copying the data internally and can be slower compared to reading
         // and constructing directly from a file stream.
         // int decode_ctx_ret = djn_ctx_decode.Deserialize(decode_buf);
-        
-        int decode_ctx_ret = djn_ewah_decode.Deserialize(test_read);
-        std::cerr << "deserialized done: " << decode_ctx_ret << std::endl;
-        std::cerr << "#n_v=" << djn_ewah_decode.n_variants << std::endl;
+        int decode_ctx_ret = djn_decode->Deserialize(test_read);
+        // std::cerr << "#n_v=" << djn_ewah_decode.n_variants << std::endl;
 
         // Initiate decoding.
-        djn_ewah_decode.StartDecoding();
-        std::cerr << "startdecoing done" << std::endl;
+        djn_decode->StartDecoding();
 
         clockdef t1 = std::chrono::high_resolution_clock::now();
         // Cycle over variants in the block.
-        for (int i = 0; i < djn_ewah_decode.n_variants; ++i) {
-            std::cerr << "Decoding " << i << "/" << djn_ewah_decode.n_variants << std::endl;
+        for (int i = 0; i < djn_decode->n_variants; ++i) {
+            // std::cerr << "Decoding " << i << "/" << djn_ewah_decode.n_variants << std::endl;
             
             /*
-            int objs = djn_ctx_decode.DecodeNextRaw(variant);
+            int objs = djn_decode->DecodeNextRaw(variant);
             
             uint32_t of = 0;
             for (int j = 0; j < variant->d->n_ewah; ++j) {
@@ -269,7 +257,7 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
             }
             */
             
-            int objs = djn_ewah_decode.DecodeNext(variant);
+            int objs = djn_decode->DecodeNext(variant);
             assert(objs > 0);
 
             // Write Vcf-encoded data to a local buffer and then write to standard out.
@@ -287,8 +275,8 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
         // Timings per block
         clockdef t2 = std::chrono::high_resolution_clock::now();
         auto time_span = std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1);
-        std::cerr << "[Decode] Decoded " << djn_ewah_decode.n_variants << " records in " 
-            << time_span.count() << "us (" << (double)time_span.count()/djn_ewah_decode.n_variants << "us/record)" << std::endl;
+        std::cerr << "[Decode] Decoded " << djn_decode->n_variants << " records in " 
+            << time_span.count() << "us (" << (double)time_span.count()/djn_decode->n_variants << "us/record)" << std::endl;
     }
     // Timings total
     clockdef t2_decode = std::chrono::high_resolution_clock::now();
@@ -299,129 +287,9 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
     delete[] decode_buf;
     delete[] vcf_out_buffer;
     delete variant;
+    delete djn_decode;
 
     return n_lines;
-}
-
-int DecompressExample(const std::string& file, int type) {
-    std::ifstream f(file, std::ios::in | std::ios::binary | std::ios::ate);
-    if (f.good() == false) {
-        std::cerr << "Failed to open" << std::endl;
-        return 1;
-    }
-    uint64_t filesize = f.tellg();
-    f.seekg(0);
-
-    return 1;
-
-    /*
-    // std::cerr << "filesize=" << filesize << "@" << f.tellg() << std::endl;
-
-    djinn::djinn_hdr_t hdr;
-    f.read((char*)hdr.version, sizeof(uint8_t)*3);
-    f.read((char*)&hdr.base_ploidy, sizeof(uint8_t));
-    f.read((char*)&hdr.n_samples, sizeof(int64_t)); 
-
-    std::cerr << hdr.n_samples << std::endl;
-
-    size_t dest_capacity = 10000000;
-
-    uint8_t** buffers = new uint8_t*[6];
-    for (int i = 0; i < 6; ++i) {
-        buffers[i] = new uint8_t[dest_capacity];
-    }
-    uint8_t* line = new uint8_t[hdr.n_samples*2];
-    uint8_t* vcf_buffer = new uint8_t[hdr.n_samples*8];
-
-    while (f.good()) {
-        djinn::djinn_block_t block;
-        // std::cerr << f.tellg() << "/" << filesize << std::endl;
-        int ret = block.Deserialize(f);
-        if (block.type == djinn::djinn_block_t::BlockType::WAH) {
-            djinn::djinn_wah_block_t* bl = (djinn::djinn_wah_block_t*)&block;
-            djinn::djinn_wah_t* d = (djinn::djinn_wah_t*)bl->data;
-            for (int i = 0; i < 6; ++i) {
-                if (d->wah_models[i].vptr_len) {
-                    int ret = 0;
-                    if ((type >> 1) & 1)
-                        ret = djinn::Lz4Decompress(d->wah_models[i].vptr, d->wah_models[i].vptr_len, buffers[i], dest_capacity);
-                    else if ((type >> 2) & 1)
-                        ret = djinn::ZstdDecompress(d->wah_models[i].vptr, d->wah_models[i].vptr_len, buffers[i], dest_capacity);
-                    // std::cerr << "ret=" << ret << std::endl;
-                }
-            }
-            djinn::djinn_wah_ctrl_t* ctrl = (djinn::djinn_wah_ctrl_t*)&bl->ctrl;
-            std::cerr << "using pbwt=" << ctrl->pbwt << " " << f.tellg() << "/" << filesize << std::endl;
-            
-            // Unpack WAH 2N2MC
-            std::shared_ptr<djinn::GenotypeDecompressorRLEBitmap> debug1 = 
-                std::make_shared<djinn::GenotypeDecompressorRLEBitmap>(
-                    buffers[0], d->wah_models[0].n, 
-                    d->wah_models[0].n_v, hdr.n_samples);
-
-            std::shared_ptr<djinn::GenotypeDecompressorRLEBitmap> debug2 = 
-                std::make_shared<djinn::GenotypeDecompressorRLEBitmap>(
-                    buffers[1], d->wah_models[1].n, 
-                    d->wah_models[1].n_v, hdr.n_samples);
-
-            if (ctrl->pbwt) { // PBWT
-                debug1->InitPbwt(2);
-                debug2->InitPbwt(2);
-
-                 assert(d->wah_models[0].n_v == d->wah_models[1].n_v);
-                for (int i = 0; i < d->wah_models[0].n_v; ++i) {
-                    int ret1 = debug1->Decode2N2MC(line);
-                    // debug1->pbwt->ReverseUpdate(line);
-                    int ret2 = debug2->Decode2N2MC(line);
-                    // debug2->pbwt->ReverseUpdate(line);
-                    std::cout << "AC=" << ret1 + ret2 << std::endl;
-                }
-                
-            } 
-            else { // no PBWT
-                assert(d->wah_models[0].n_v == d->wah_models[1].n_v);
-                for (int i = 0; i < d->wah_models[0].n_v; ++i) {
-                    debug1->Decode2N2MC(&line[0], 2);
-                    debug2->Decode2N2MC(&line[1], 2);
-                    // 'line' is now the correct output string
-                    // encoded as 0, 1, ..., n_alts with 14 and 15 encoding
-                    // for missing and EOV, respectively.
-                    //
-                    // Emit VCF line. Ignores missing and EOV in this example.
-                    // To cover these cases then map 14->'.' and 15->EOV
-                    vcf_buffer[0] = line[0] + '0';
-                    vcf_buffer[1] = '|';
-                    vcf_buffer[2] = line[1] + '0';
-                    
-                    int j = 3;
-                    for (int i = 2; i < 2*hdr.n_samples; i += 2, j += 4) {
-                        vcf_buffer[j+0] = '\t';
-                        vcf_buffer[j+1] = line[i+0] + '0';
-                        vcf_buffer[j+2] = '|';
-                        vcf_buffer[j+3] = line[i+1] + '0';
-                    }
-                    vcf_buffer[j++] = '\n';
-                    std::cout.write((char*)vcf_buffer, j);
-                }
-            } // no PBWT
-
-        } // end type WAH
-
-        std::cerr << "[AFTER] " << f.tellg() << "/" << filesize << std::endl;
-        if (ret <= 0) exit(1);
-        // exit(1);
-
-
-        if (f.tellg() == filesize) break;
-    }
-
-    for (int i = 0; i < 6; ++i) delete[] buffers[i];
-    delete[] buffers;
-    delete[] line;
-    delete[] vcf_buffer;
-
-    return 1;
-    */
 }
 
 void usage() {
@@ -504,7 +372,8 @@ int main(int argc, char** argv) {
     }
 
     if (decompress) {
-        return(DecompressExample(input, type));
+        // return(DecompressExample(input, type));
+        return EXIT_FAILURE;
     }
 
     return EXIT_FAILURE;

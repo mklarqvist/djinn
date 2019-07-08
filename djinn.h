@@ -30,6 +30,16 @@
 
 namespace djinn {
 
+/*------   Version   ------*/
+const int32_t DJINN_VERSION_MAJOR = 0;
+const int32_t DJINN_VERSION_MINOR = 1;
+const int32_t DJINN_VERSION_PATCH = 0;
+const int32_t DJINN_VERSION_NUMBER  = (DJINN_VERSION_MAJOR *100*100 + DJINN_VERSION_MINOR *100 + DJINN_VERSION_PATCH);
+const std::string DJINN_LIB_VERSION = std::to_string(DJINN_VERSION_MAJOR) + '.' + std::to_string(DJINN_VERSION_MINOR) + '.' + std::to_string(DJINN_VERSION_PATCH);
+
+/*------   Basics   ------*/
+const std::string DJINN_PROGRAM_NAME  = "djinn";
+
 // Map missing to 2, 1->0, 2->1, and EOV -> 3.
 constexpr const uint8_t TWK_BCF_GT_UNPACK[65] = 
 {2,0,1,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,

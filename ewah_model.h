@@ -17,6 +17,7 @@
 */
 #ifndef DJINN_EWAH_MODEL_H_
 #define DJINN_EWAH_MODEL_H_
+
 #include <unordered_map> //std::unordered_map
 #include <limits> //std::numeric_limit
 
