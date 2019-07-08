@@ -117,8 +117,8 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
     djn_ewah.StartEncoding(permute, reset_models);
     // djn_ewah.codec = djinn::CompressionStrategy::LZ4;
     
-    std::string temp_file = "/media/mdrk/08dcb478-5359-41f4-97c8-469190c8a034/djn_debug.bin";
-    // std::string temp_file = "/Users/Mivagallery/Downloads/djn_debug.bin";
+    // std::string temp_file = "/media/mdrk/08dcb478-5359-41f4-97c8-469190c8a034/djn_debug.bin";
+    std::string temp_file = "/Users/Mivagallery/Downloads/djn_debug.bin";
     std::ofstream test_write(temp_file, std::ios::out | std::ios::binary);
     if (test_write.good() == false) {
         std::cerr << "could not open outfile handle" << std::endl;
@@ -135,16 +135,19 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
             int decode_ret = djn_ctx->Serialize(decode_buf);
             // int decode_ret2 = djn_ctx->Serialize(std::cout);
             std::cerr << "[WRITING CTX] " << decode_ret << "b" << std::endl;
-            test_write.write((char*)decode_buf, decode_ret);
+            // test_write.write((char*)decode_buf, decode_ret);
             ++n_blocks;
             ctx_out += decode_ret;
             // ctx_out += decode_ret2;
 
             // EWAH
             int ret_ewah = djn_ewah.FinishEncoding();
+            decode_ret = djn_ewah.Serialize(decode_buf);
             std::cerr << "[WRITING EWAH] " << ret_ewah << "b" << std::endl;
             djn_ewah.StartEncoding(permute, reset_models);
-            ewah_out += ret_ewah;
+            test_write.write((char*)decode_buf, decode_ret);
+
+            ewah_out += decode_ret;
             std::cerr << "[PROGRESS][CTX] In uBCF: " << data_in << "->" << ctx_out 
                 << " (" << (double)data_in/ctx_out << "-fold) In VCF: " << data_in_vcf << "->" << ctx_out 
                 << " (" << (double)data_in_vcf/ctx_out << "-fold)" << std::endl;
@@ -176,7 +179,7 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
     int decode_ret = djn_ctx->Serialize(decode_buf);
     // int decode_ret2 = djn_ctx->Serialize(std::cout);
     assert(decode_ret > 0);
-    test_write.write((char*)decode_buf, decode_ret);
+    // test_write.write((char*)decode_buf, decode_ret);
     ++n_blocks;
     ctx_out += decode_ret;
     // ctx_out += decode_ret2;
@@ -184,8 +187,11 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
      // EWAH
     int ret_ewah = djn_ewah.FinishEncoding();
     assert(ret_ewah > 0);
-    std::cerr << "[WRITING EWAH] " << ret_ewah << "b" << std::endl;
-    ewah_out += ret_ewah;
+    decode_ret = djn_ewah.Serialize(decode_buf);
+    std::cerr << "[WRITING EWAH] " << decode_ret << "b" << std::endl;
+    // djn_ewah.StartEncoding(permute, reset_models);
+    test_write.write((char*)decode_buf, decode_ret);
+    ewah_out += decode_ret;
 
     std::cerr << "[PROGRESS][CTX] In uBCF: " << data_in << "->" << ctx_out 
         << " (" << (double)data_in/ctx_out << "-fold) In VCF: " << data_in_vcf << "->" << ctx_out 
@@ -214,6 +220,7 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
     djinn::djinn_ctx_model djn_ctx_decode;
     uint8_t* vcf_out_buffer = new uint8_t[4*reader->n_samples_+65536];
     uint32_t len_vcf = 0;
+    djinn::djinn_ewah_model djn_ewah_decode;
 
     djinn::djinn_variant_t* variant = nullptr;
 
@@ -236,15 +243,18 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
         // and constructing directly from a file stream.
         // int decode_ctx_ret = djn_ctx_decode.Deserialize(decode_buf);
         
-        int decode_ctx_ret = djn_ctx_decode.Deserialize(test_read);
-        
+        int decode_ctx_ret = djn_ewah_decode.Deserialize(test_read);
+        std::cerr << "deserialized done: " << decode_ctx_ret << std::endl;
+        std::cerr << "#n_v=" << djn_ewah_decode.n_variants << std::endl;
+
         // Initiate decoding.
-        djn_ctx_decode.StartDecoding();
+        djn_ewah_decode.StartDecoding();
+        std::cerr << "startdecoing done" << std::endl;
 
         clockdef t1 = std::chrono::high_resolution_clock::now();
         // Cycle over variants in the block.
-        for (int i = 0; i < djn_ctx_decode.n_variants; ++i) {
-            // std::cerr << "Decoding " << i << "/" << djn_ctx_decode.n_variants << std::endl;
+        for (int i = 0; i < djn_ewah_decode.n_variants; ++i) {
+            std::cerr << "Decoding " << i << "/" << djn_ewah_decode.n_variants << std::endl;
             
             /*
             int objs = djn_ctx_decode.DecodeNextRaw(variant);
@@ -259,7 +269,7 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
             }
             */
             
-            int objs = djn_ctx_decode.DecodeNext(variant);
+            int objs = djn_ewah_decode.DecodeNext(variant);
             assert(objs > 0);
 
             // Write Vcf-encoded data to a local buffer and then write to standard out.
@@ -277,8 +287,8 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
         // Timings per block
         clockdef t2 = std::chrono::high_resolution_clock::now();
         auto time_span = std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1);
-        std::cerr << "[Decode] Decoded " << djn_ctx_decode.n_variants << " records in " 
-            << time_span.count() << "us (" << (double)time_span.count()/djn_ctx_decode.n_variants << "us/record)" << std::endl;
+        std::cerr << "[Decode] Decoded " << djn_ewah_decode.n_variants << " records in " 
+            << time_span.count() << "us (" << (double)time_span.count()/djn_ewah_decode.n_variants << "us/record)" << std::endl;
     }
     // Timings total
     clockdef t2_decode = std::chrono::high_resolution_clock::now();

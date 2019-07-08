@@ -35,21 +35,94 @@ public:
 
     int StartEncoding(bool use_pbwt, bool reset = false);
     size_t FinishEncoding(uint8_t* support_buffer, uint32_t support_cap, CompressionStrategy strat);
-    int StartDecoding(bool use_pbwt, bool reset = false);
+    int StartDecoding(uint8_t* support_buffer, uint32_t support_cap, CompressionStrategy strat, bool use_pbwt, bool reset = false);
     size_t FinishDecoding() { return 0; } // no effect
     
     void reset();
 
     // Read/write
-    int Serialize(uint8_t* dst) const;
-    int Serialize(std::ostream& stream) const;
-    int Deserialize(uint8_t* dst);
-    int Deserialize(std::istream& stream);
+    int Serialize(uint8_t* dst) const {
+        // Serialize as (uint32_t,uint32_t,uint8_t*):
+        // p_len, n_variants, p
+        uint32_t offset = 0;
+        *((uint32_t*)&dst[offset]) = p_len; // data length
+        offset += sizeof(uint32_t);
+        *((uint32_t*)&dst[offset]) = u_len; // data length
+        offset += sizeof(uint32_t);
+        *((uint32_t*)&dst[offset]) = n_variants; // number of variants
+        offset += sizeof(uint32_t);
+        memcpy(&dst[offset], p, p_len); // data
+        offset += p_len;
+
+        // assert(range_coder->OutSize() == p_len);
+        return offset;
+    }
+
+    int Serialize(std::ostream& stream) const {
+        // Serialize as (uint32_t,uint32_t,uint8_t*):
+        // p_len, n_variants, p
+        stream.write((char*)&p_len, sizeof(uint32_t));
+        stream.write((char*)&u_len, sizeof(uint32_t));
+        stream.write((char*)&n_variants, sizeof(uint32_t));
+        stream.write((char*)p, p_len);
+        return stream.tellp();
+    }
+    
+    int GetSerializedSize() const {
+        int ret = sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint32_t) + p_len;
+        return ret;
+    }
+    
+    int Deserialize(uint8_t* dst) {
+        uint32_t offset = 0;
+        p_len = *((uint32_t*)&dst[offset]);
+        offset += sizeof(uint32_t);
+        u_len = *((uint32_t*)&dst[offset]);
+        offset += sizeof(uint32_t);
+        n_variants = *((uint32_t*)&dst[offset]);
+        offset += sizeof(uint32_t);
+
+        // initiate a buffer if there is none or it's too small
+        if (p_cap == 0 || p == nullptr || u_len > p_cap) {
+            std::cerr << "[Deserialize] Limit. p_cap=" << p_cap << "," << "p is nullptr=" << (p == nullptr ? "yes" : "no") << ",p_len=" << p_len << "/" << p_cap << std::endl;
+            if (p_free) delete[] p;
+            p_cap = (u_len > p_len ? u_len : p_len) + 65536;
+            p = new uint8_t[p_cap + 65536];
+            p_free = true;
+            std::cerr << "now=" << p_cap << " and need " << u_len << std::endl;
+        }
+
+        memcpy(p, &dst[offset], p_len); // data
+        offset += p_len;
+        
+        return offset;
+    }
+
+    int Deserialize(std::istream& stream) {
+        // Serialize as (uint32_t,uint32_t,uint8_t*):
+        // p_len, n_variants, p
+        stream.read((char*)&p_len, sizeof(uint32_t));
+        stream.read((char*)&u_len, sizeof(uint32_t));
+        stream.read((char*)&n_variants, sizeof(uint32_t));
+
+        // initiate a buffer if there is none or it's too small
+        if (p_cap == 0 || p == nullptr || u_len > p_cap) {
+            std::cerr << "[Deserialize] Limit. p_cap=" << p_cap << "," << "p is nullptr=" << (p == nullptr ? "yes" : "no") << ",p_len=" << p_len << "/" << p_cap << std::endl;
+            if (p_free) delete[] p;
+            p_cap = (u_len > p_len ? u_len : p_len) + 65536;
+            p = new uint8_t[p_cap];
+            p_free = true;
+            std::cerr << "now=" << p_cap << " and need " << u_len << std::endl;
+        }
+
+        stream.read((char*)p, p_len);
+        return stream.tellg();
+    }
 
 public:
     PBWT pbwt;
     uint8_t *p;     // data
-    uint32_t p_len; // data length
+    uint32_t p_len, u_len; // data length
     uint32_t p_cap:31, p_free:1; // capacity (memory allocated), flag for data ownership
     uint32_t n_variants; // number of variants encoded
 };
@@ -85,13 +158,21 @@ public:
 
     void StartEncoding(bool use_pbwt, bool reset = false);
     size_t FinishEncoding(uint8_t* support_buffer, uint32_t support_cap, CompressionStrategy strat);
-    void StartDecoding(bool use_pbwt, bool reset = false);
+    void StartDecoding(uint8_t* support_buffer, uint32_t support_cap, CompressionStrategy strat, bool use_pbwt, bool reset = false);
 
     inline void ResetBitmaps() { memset(wah_bitmaps, 0, n_wah*sizeof(uint32_t)); }
 
     int DecodeNext(uint8_t* data, uint32_t& len);
     int DecodeNext(uint8_t* ewah_data, uint32_t& ret_ewah, uint8_t* ret_buffer, uint32_t& ret_len);
     int DecodeNextRaw(uint8_t* data, uint32_t& len);
+
+    // Read/write
+    int Serialize(uint8_t* dst) const;
+    int Serialize(std::ostream& stream) const;
+    int GetSerializedSize() const;
+    int GetCurrentSize() const;
+    int Deserialize(uint8_t* dst);
+    int Deserialize(std::istream& stream);
 
 public:
     int Encode2mc(uint8_t* data, uint32_t len);
@@ -173,13 +254,16 @@ public:
     int StartDecoding() override;
 
     // Read/write
-    int Serialize(uint8_t* dst) const override { return -1; };
-    int Serialize(std::ostream& stream) const override { return -1; };
-    int Deserialize(uint8_t* src) override { return -1; };
+    int Serialize(uint8_t* dst) const override;
+    int Serialize(std::ostream& stream) const override;
+    int GetSerializedSize() const;
+    int GetCurrentSize() const;
+
+    int Deserialize(uint8_t* src) override;
     // Deserialize data from a IO stream. This approach is more efficient
     // as data does NOT have to be copied and the current model can be
     // reused.
-    int Deserialize(std::istream& stream) override { return -1; };
+    int Deserialize(std::istream& stream) override;
 
     // Todo: Merge EWAH data pairwise.
     // If the data is PBWT-permuted then first unpermute and add

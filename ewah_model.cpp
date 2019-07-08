@@ -4,11 +4,11 @@
 
 namespace djinn {
 
-/*======   Context container   ======*/
+/*======   EWAH container   ======*/
 
 djn_ewah_model_t::djn_ewah_model_t() :
     p(nullptr),
-    p_len(0), p_cap(0), p_free(false),
+    p_len(0), u_len(0), p_cap(0), p_free(false),
     n_variants(0)
 {
     
@@ -33,6 +33,7 @@ int djn_ewah_model_t::StartEncoding(bool use_pbwt, bool reset) {
     }
     if (reset) this->reset();
     p_len = 0;
+    u_len = 0;
 
     return 1;
 }
@@ -44,22 +45,36 @@ size_t djn_ewah_model_t::FinishEncoding(uint8_t* support_buffer, uint32_t suppor
         case (CompressionStrategy::ZSTD): comp = &ZstdCompress; break;
         case (CompressionStrategy::LZ4):  comp = &Lz4Compress;  break;
     }
-    int ret = (*comp)(p, p_len, support_buffer, support_cap, 21);
+    u_len = p_len;
+    int ret = (*comp)(p, p_len, support_buffer, support_cap, 1);
     memcpy(p, support_buffer, ret); // copy data back to p
     p_len = ret;
-    // std::cerr << "[djn_ewah_model_t::FinishEncoding] debug=" << p_len << "->" << ret << std::endl;
+    std::cerr << "[djn_ewah_model_t::FinishEncoding] debug=" << u_len << "->" << p_len << "->" << ret << std::endl;
     // return p_len;
     return ret;
 }
 
-int djn_ewah_model_t::StartDecoding(bool use_pbwt, bool reset) {
+int djn_ewah_model_t::StartDecoding(uint8_t* support_buffer, uint32_t support_cap, CompressionStrategy strat, bool use_pbwt, bool reset) {
     if (reset) this->reset();
-    if (p == nullptr) return -2; // or result in corruption as range coder immediately loads data
+    if (p == nullptr) return -2;
+
+    GeneralDecompressor dec;
+    switch(strat) {
+        case (CompressionStrategy::ZSTD): dec = &ZstdDecompress; break;
+        case (CompressionStrategy::LZ4):  dec = &Lz4Decompress;  break;
+    }
+    // int ZstdDecompress(const uint8_t* in, uint32_t n_in, uint8_t* out, uint32_t out_capacity)
+    std::cerr << "[model decode]" << p_len << std::endl;
+    int ret = (*dec)(p, p_len, support_buffer, support_cap);
+    std::cerr << "[model decode]" << p_len << "->" << ret << " capacity=" << p_cap << std::endl;
+    memcpy(p, support_buffer, ret); // copy data back to p
+    p_len = 0;
+    std::cerr << "return model decode" << std::endl;
 
     return 1;
 }
 
-/*======   Varaint context model   ======*/
+/*======   Variant EWAH model   ======*/
 
 djinn_ewah_model::djinn_ewah_model() : 
     codec(CompressionStrategy::ZSTD),
@@ -236,22 +251,19 @@ int djinn_ewah_model::DecodeNext(uint8_t* ewah_data, uint32_t& ret_ewah, uint8_t
     if (ret_buffer == nullptr) return -1;
 
     // Decode stream archetype.
-    // uint8_t type = ploidy_dict->DecodeSymbol();
     uint8_t type = p[p_len];
     ++p_len;
+    assert(type < ploidy_models.size());
 
-    // std::cerr << "[Decode model] Stream=" << (int)type << std::endl;
     std::shared_ptr<djn_ewah_model_container_t> tgt_container = ploidy_models[type];
 
     return(tgt_container->DecodeNext(ewah_data,ret_ewah,ret_buffer,ret_len));
 }
 
 int djinn_ewah_model::DecodeNext(djinn_variant_t*& variant) {
-    // Decode stream archetype.
-    // uint8_t type = ploidy_dict->DecodeSymbol();
+     // Decode stream archetype.
     uint8_t type = p[p_len];
     ++p_len;
-    // std::cerr << "[Decode model] Stream=" << (int)type << std::endl;
     std::shared_ptr<djn_ewah_model_container_t> tgt_container = ploidy_models[type];
 
     if (variant == nullptr) {
@@ -280,9 +292,10 @@ int djinn_ewah_model::DecodeNext(djinn_variant_t*& variant) {
     }
     q_len = 0; // Reset q_len for next iteration.
 
-    variant->ploidy = tgt_container->ploidy;
+    variant->ploidy   = tgt_container->ploidy;
     variant->data_len = 0;
-    variant->errcode = 0;
+    variant->errcode  = 0;
+    variant->unpacked = DJN_UN_IND;
 
     return(tgt_container->DecodeNext(q,q_len,variant->data,variant->data_len));
 }
@@ -328,17 +341,12 @@ size_t djinn_ewah_model::FinishEncoding() {
     GeneralCompressor comp;
     switch(codec) {
         case (CompressionStrategy::ZSTD): comp = &ZstdCompress; break;
-        case (CompressionStrategy::LZ4): comp = &Lz4Compress; break;
+        case (CompressionStrategy::LZ4):  comp = &Lz4Compress;  break;
     }
 
-    int ret = (*comp)(p, p_len, q, q_alloc, 21);
+    int ret = (*comp)(p, p_len, q, q_alloc, 1);
     memcpy(p, q, ret); // copy data back to p
     p_len = ret;
-
-    // int ZstdCompress(const uint8_t* in, uint32_t n_in, uint8_t* out, uint32_t out_capacity, const int32_t c_level = 1) {
-    // GeneralCompressor comp = &ZstdCompress;
-    // int ret = (*comp)(p, p_len, q, q_alloc, 21);
-    
     // std::cerr << "[djinn_ewah_model::FinishEncoding] p_len=" << p_len << "->" << ret << std::endl;
 
     size_t s_models = 0;
@@ -346,8 +354,6 @@ size_t djinn_ewah_model::FinishEncoding() {
         int ret = ploidy_models[i]->FinishEncoding(q, q_alloc, codec); // use q as support buffer
         s_models += ret;
     }
-
-    // std::cerr << "Model sizes=" << ret << " and models=" << s_models << std::endl;
     
     return ret + s_models;
 }
@@ -356,11 +362,249 @@ int djinn_ewah_model::StartDecoding() {
     assert(p != nullptr);
     assert(ploidy_models.size() != 0);
 
+    if (q == nullptr) {
+        q = new uint8_t[10000000];
+        q_free = true;
+        q_alloc = 10000000;
+        q_len = 0;
+    }
+    q_len = 0;
+
+    GeneralDecompressor dec;
+    switch(codec) {
+        case (CompressionStrategy::ZSTD): dec = &ZstdDecompress; break;
+        case (CompressionStrategy::LZ4):  dec = &Lz4Decompress;  break;
+    }
+    // int ZstdDecompress(const uint8_t* in, uint32_t n_in, uint8_t* out, uint32_t out_capacity)
+    std::cerr << "before decompress: " << (int)codec << std::endl;
+    int ret = (*dec)(p, p_len, q, q_alloc);
+    std::cerr << "after decompress=" << p_len << "->" << ret << std::endl;
+    memcpy(p, q, ret); // copy data back to p
+    p_len = 0;
+    std::cerr << "p_len now=" << p_len << std::endl;
+    std::cerr << "q_alloc=" << q_alloc << std::endl;
+
     for (int i = 0; i <ploidy_models.size(); ++i) {
-        ploidy_models[i]->StartDecoding(use_pbwt, init);
+        ploidy_models[i]->StartDecoding(q,q_alloc,codec,use_pbwt, init);
     }
 
     return 1;
+}
+
+int djinn_ewah_model::Serialize(uint8_t* dst) const {
+    // Serialize as (int,uint32_t,uint32_t,uint8_t*,ctx1,ctx2):
+    // #models,p_len,p,[models...]
+    uint32_t offset = 0;
+
+    // Reserve space for offset
+    offset += sizeof(uint32_t);
+
+    // Add
+    *((int*)&dst[offset]) = (int)codec; // codec used
+    offset += sizeof(int);
+    *((int*)&dst[offset]) = (int)ploidy_models.size(); // number of models
+    offset += sizeof(int);
+    *((uint32_t*)&dst[offset]) = n_variants; // number of variants
+    offset += sizeof(uint32_t);
+
+    // Serialize bit-packed controller.
+    uint8_t pack = (use_pbwt << 7) | (init << 6) | (unused << 0);
+    dst[offset] = pack;
+    offset += sizeof(uint8_t);
+
+    *((uint32_t*)&dst[offset]) = p_len; // data length
+    offset += sizeof(uint32_t);
+    
+    // Store model selection data.
+    memcpy(&dst[offset], p, p_len); // data
+    offset += p_len;
+
+    // Serialize each model.
+    for (int i = 0; i < ploidy_models.size(); ++i) {
+        offset += ploidy_models[i]->Serialize(&dst[offset]);    
+    }
+    *((uint32_t*)&dst[0]) = offset;
+    
+    return offset;
+}
+
+int djinn_ewah_model::Serialize(std::ostream& stream) const {
+    // Serialize as (int,uint32_t,uint32_t,uint8_t*,ctx1,ctx2):
+    // #models,p_len,p,[models...]
+    uint32_t out_len = GetSerializedSize();
+    stream.write((char*)&out_len, sizeof(uint32_t));
+
+    int out_codec = (int)codec;
+    stream.write((char*)&out_codec, sizeof(int));
+
+    int n_models = ploidy_models.size();
+    stream.write((char*)&n_models, sizeof(int));
+    stream.write((char*)&n_variants, sizeof(uint32_t));
+
+    // Serialize bit-packed controller.
+    uint8_t pack = (use_pbwt << 7) | (init << 6) | (unused << 0);
+    stream.write((char*)&pack, sizeof(uint8_t));
+    stream.write((char*)&p_len, sizeof(uint32_t));
+    stream.write((char*)p, p_len);
+
+    // Serialize each model.
+    for (int i = 0; i < ploidy_models.size(); ++i)
+        ploidy_models[i]->Serialize(stream);
+
+    return out_len;
+}
+
+int djinn_ewah_model::GetSerializedSize() const {
+    int ret = sizeof(uint32_t) + 2*sizeof(int) + sizeof(uint32_t) + sizeof(uint8_t) + sizeof(uint32_t) + p_len;
+    for (int i = 0; i < ploidy_models.size(); ++i) {
+        ret += ploidy_models[i]->GetSerializedSize();
+    }
+    return ret;
+}
+
+int djinn_ewah_model::GetCurrentSize() const {
+    int ret = p_len;
+    for (int i = 0; i < ploidy_models.size(); ++i) {
+        ret += ploidy_models[i]->GetCurrentSize();
+    }
+    return ret;
+}
+
+// Deserialize data from an external buffer.
+int djinn_ewah_model::Deserialize(uint8_t* src) {
+    // Reset.
+    // ploidy_remap.clear();
+
+    uint32_t offset = 0;
+
+    // Read total offset.
+    uint32_t tot_offset = *((uint32_t*)&src[offset]);
+    offset += sizeof(uint32_t);
+
+    // Codec
+    codec = CompressionStrategy(*((int*)&src[offset]));
+    offset += sizeof(int);
+
+    // Read #models,#variants,packed bools
+    int n_models = *((int*)&src[offset]);
+    offset += sizeof(int);
+    n_variants = *((uint32_t*)&src[offset]);
+    offset += sizeof(uint32_t);
+    uint8_t pack = src[offset];
+    use_pbwt = (pack >> 7) & 1;
+    init = (pack >> 6) & 1;
+    unused = 0;
+    offset += sizeof(uint8_t);
+
+    // Read p_len,p
+    p_len = *((uint32_t*)&src[offset]);
+    offset += sizeof(uint32_t);
+
+    if (p_cap == 0 || p == nullptr || p_len > p_cap) {
+        // std::cerr << "[Deserialize] Limit. p_cap=" << p_cap << "," << "p is nullptr=" << (p == nullptr ? "yes" : "no") << ",p_len=" << p_len << "/" << p_cap << std::endl;
+        if (p_free) delete[] p;
+        p = new uint8_t[p_len + 65536];
+        p_cap = p_len + 65536;
+        p_free = true;
+    }    
+    
+    // Store model selection data.
+    memcpy(p, &src[offset], p_len);
+    offset += p_len;
+    
+    // Read each model.
+    for (int i = 0; i < n_models; ++i) {
+        // First peek at their content to invoke the correct constructor as it
+        // requires #samples, #ploidy, use_pbwt
+        int pl = *((int*)&src[offset]);
+        uint32_t n_s = *((uint32_t*)&src[offset+sizeof(int)]);
+
+        // Update ploidy map and insert data in the correct position relative
+        // the encoding order.
+        const uint64_t tuple = ((uint64_t)n_s << 32) | pl;
+        auto search = ploidy_map.find(tuple);
+        if (search != ploidy_map.end()) {
+            offset += ploidy_models[search->second]->Deserialize(&src[offset]);
+        } else {
+            ploidy_map[tuple] = ploidy_models.size();
+            ploidy_models.push_back(std::make_shared<djinn::djn_ewah_model_container_t>(n_s, pl, (bool)use_pbwt));
+            offset += ploidy_models.back()->Deserialize(&src[offset]);
+        }
+    }
+    // std::cerr << "[Deserialize] Decoded=" << offset << "/" << tot_offset << std::endl;
+    assert(offset == tot_offset);
+    return offset;
+}
+
+// Deserialize data from a IO stream. This approach is more efficient
+// as data does NOT have to be copied and the current model can be
+// reused.
+int djinn_ewah_model::Deserialize(std::istream& stream) {
+    // uint32_t out_len = GetSerializedSize();
+    uint32_t out_len = 0;
+    stream.read((char*)&out_len, sizeof(uint32_t));
+
+    // Codec
+    int in_codec = 0;
+    stream.read((char*)&in_codec, sizeof(int));
+    codec = CompressionStrategy(in_codec);
+
+    std::cerr << "codec:" << (int)codec << std::endl;
+
+    // n_models,n_variants
+    int n_models = 0;
+    stream.read((char*)&n_models, sizeof(int));
+    stream.read((char*)&n_variants, sizeof(uint32_t));
+
+    // Deserialize bit-packed controller.
+    uint8_t pack = 0;
+    stream.read((char*)&pack, sizeof(uint8_t));
+    use_pbwt = (pack >> 7) & 1;
+    init = (pack >> 6) & 1;
+    unused = 0;
+
+    stream.read((char*)&p_len, sizeof(uint32_t));
+    if (p_cap == 0 || p == nullptr || p_len > p_cap) {
+        // std::cerr << "[Deserialize] Limit. p_cap=" << p_cap << "," << "p is nullptr=" << (p == nullptr ? "yes" : "no") << ",p_len=" << p_len << "/" << p_cap << std::endl;
+        if (p_free) delete[] p;
+        p = new uint8_t[p_len + 65536];
+        p_cap = p_len + 65536;
+        p_free = true;
+    }
+
+    std::cerr << "[Deserialize] Limit. p_cap=" << p_cap << "," << "p is nullptr=" << (p == nullptr ? "yes" : "no") << ",p_len=" << p_len << "/" << p_cap << std::endl;
+    
+
+    // std::cerr << "p_cap=" << p_cap << " p_len=" << p_len << std::endl;
+    stream.read((char*)p, p_len);
+
+    // Serialize each model.
+    for (int i = 0; i < n_models; ++i) {
+        // First peek at their content to invoke the correct constructor as it
+        // requires #samples, #ploidy, use_pbwt
+        int pl = 0; 
+        uint32_t n_s = 0; 
+        stream.read((char*)&pl,  sizeof(int));
+        stream.read((char*)&n_s, sizeof(uint32_t));
+
+        std::cerr << "[Deserialize] #pl=" << pl << ", #n_s=" << n_s << std::endl;
+
+        // Update ploidy map and insert data in the correct position relative
+        // the encoding order.
+        const uint64_t tuple = ((uint64_t)n_s << 32) | pl;
+        auto search = ploidy_map.find(tuple);
+        if (search != ploidy_map.end()) {
+            ploidy_models[search->second]->Deserialize(stream);
+        } else {
+            std::cerr << "[Deserialize] Adding map [" << tuple << "] for [" << n_s << "," << pl << "]" << std::endl; 
+            ploidy_map[tuple] = ploidy_models.size();
+            ploidy_models.push_back(std::make_shared<djinn::djn_ewah_model_container_t>(n_s, pl, (bool)use_pbwt));
+            std::cerr << "before deserialize: " << ploidy_models.size() << std::endl;
+            ploidy_models.back()->Deserialize(stream);
+        }
+    }
+
+    return stream.tellg();
 }
 
 /*======   Container   ======*/
@@ -453,19 +697,17 @@ size_t djn_ewah_model_container_t::FinishEncoding(uint8_t* support_buffer, uint3
         case (CompressionStrategy::LZ4):  comp = &Lz4Compress; break;
     }
 
-    int ret = (*comp)(p, p_len, support_buffer, support_cap, 21);
+    int ret = (*comp)(p, p_len, support_buffer, support_cap, 1);
     memcpy(p, support_buffer, ret); // copy data back to p
     p_len = ret;
 
     size_t s_rc  = ret;
-    // size_t s_2mc = model_2mc->p_len;
-    // size_t s_nm  = model_nm->p_len;
     std::cerr << "container finish=" << s_rc << " and " << s_2mc << " and " << s_nm << std::endl; 
     
     return s_rc + s_2mc + s_nm;
 }
 
-void djn_ewah_model_container_t::StartDecoding(bool use_pbwt, bool reset) {
+void djn_ewah_model_container_t::StartDecoding(uint8_t* support_buffer, uint32_t support_cap, CompressionStrategy strat, bool use_pbwt, bool reset) {
     if (model_2mc.get() == nullptr) return;
     if (model_nm.get() == nullptr) return;
 
@@ -500,8 +742,20 @@ void djn_ewah_model_container_t::StartDecoding(bool use_pbwt, bool reset) {
 
     this->use_pbwt = use_pbwt;
 
-    model_2mc->StartDecoding(use_pbwt, reset);
-    model_nm->StartDecoding(use_pbwt, reset);
+    GeneralDecompressor dec;
+    switch(strat) {
+        case (CompressionStrategy::ZSTD): dec = &ZstdDecompress; break;
+        case (CompressionStrategy::LZ4):  dec = &Lz4Decompress;  break;
+    }
+    // int ZstdDecompress(const uint8_t* in, uint32_t n_in, uint8_t* out, uint32_t out_capacity)
+    std::cerr << "[cont]" << p_len << "," << support_cap << std::endl;
+    int ret = (*dec)(p, p_len, support_buffer, support_cap);
+    std::cerr << "inflated=" << p_len << "->" << ret << std::endl;
+    memcpy(p, support_buffer, ret); // copy data back to p
+    p_len = 0;
+
+    model_2mc->StartDecoding(support_buffer, support_cap, strat, use_pbwt, reset);
+    model_nm->StartDecoding(support_buffer, support_cap, strat, use_pbwt, reset);
 }
 
 int djn_ewah_model_container_t::Encode2mc(uint8_t* data, uint32_t len) {
@@ -619,13 +873,71 @@ int djn_ewah_model_container_t::EncodeNm(uint8_t* data, uint32_t len, const uint
 }
 
 int djn_ewah_model_container_t::DecodeRaw_nm(uint8_t* data, uint32_t& len) {
-    return 1;
+    int64_t n_samples_obs = 0;
+    int objects = 0;
+
+    // Emit empty EWAH marker.
+    djinn_ewah_t* ewah = (djinn_ewah_t*)&data[len]; 
+    ewah->reset();
+    len += sizeof(djinn_ewah_t);
+
+    while(true) {
+        uint8_t type = model_nm->p[model_nm->p_len++];
+        // ++p_len;
+
+        if (type == 0) { // bitmaps
+            ++ewah->dirty;
+            *((uint32_t*)&data[len]) = *((uint32_t*)&model_nm->p[model_nm->p_len]);
+            len += sizeof(uint32_t);
+            // uint32_t* t = (uint32_t*)&data[len];
+            // for (int i = 0; i < 4; ++i) {
+            //     data[len++] = model_nm->dirty_wah->DecodeSymbol();
+            // }
+            n_samples_obs += 8;
+
+        } else { // is RLE
+            // Emit new EWAH marker
+            if (ewah->clean > 0 || ewah->dirty > 0) {
+                ewah = (djinn_ewah_t*)&data[len];
+                ewah->reset();
+                len += sizeof(djinn_ewah_t);
+                ++objects;
+            }
+
+            djinn_ewah_t* e = (djinn_ewah_t*)&model_nm->p[model_nm->p_len]; 
+            ewah->ref = e->ref;
+            ewah->clean = e->clean;
+            model_nm->p_len += sizeof(djinn_ewah_t);
+
+            // Decode an RLE
+            // uint32_t ref = 1; uint32_t len = 1;
+            // DecodeWahRLE_nm(ref, len, model_nm);
+            // ewah->ref = ref & 15;
+            // ewah->clean = len;
+
+            n_samples_obs += ewah->clean*8;
+        }
+
+        if (n_samples_obs == n_samples_wah_nm) {
+            // std::cerr << "[djn_ctx_model_container_t::DecodeRaw_nm] obs=" << n_samples_obs << "/" << n_samples_wah_nm << std::endl;
+            break;
+        }
+        if (n_samples_obs > n_samples_wah_nm) {
+            std::cerr << "[djn_ctx_model_container_t::DecodeRaw_nm] Decompression corruption: " << n_samples_obs << "/" << n_samples_wah_nm  << std::endl;
+            exit(1);
+        }
+    }
+
+    if (ewah->clean > 0 || ewah->dirty > 0) {
+        ++objects;
+    }
+
+    return objects;
 }
 
 int djn_ewah_model_container_t::EncodeWah(uint32_t* wah, uint32_t len) { // input WAH-encoded data
     if (wah == nullptr) return -1;
     if (model_2mc.get() == nullptr) return -1;
-    ++model_2mc->n_variants;
 
     // Resize if necessary.
     if (model_2mc->p_len + n_samples + 65536 > model_2mc->p_cap) {
@@ -651,7 +963,8 @@ int djn_ewah_model_container_t::EncodeWah(uint32_t* wah, uint32_t len) { // inpu
 
     for (int i = 0; i < len; ++i) {
         // Is dirty
-        if (wah[i] != 0 || wah[i] != std::numeric_limits<uint32_t>::max()) {
+        if (wah[i] != 0 && wah[i] != std::numeric_limits<uint32_t>::max()) {
+            // if (model_2mc->n_variants == 524) std::cerr << "dirty: " << std::bitset<32>(wah[i]) << std::endl;
             ++ewah->dirty;
             *((uint32_t*)&model_2mc->p[model_2mc->p_len]) = wah[i];
             model_2mc->p_len += sizeof(uint32_t);
@@ -661,10 +974,15 @@ int djn_ewah_model_container_t::EncodeWah(uint32_t* wah, uint32_t len) { // inpu
         else {
             // Dirty have been set then make new EWAH
             if (ewah->dirty) {
+                // Only make a new EWAH if anything is set
                 n_obs += ewah->clean;
-                ewah = (djinn_ewah_t*)&model_2mc->p[model_2mc->p_len];
-                ewah->reset();
-                model_2mc->p_len += sizeof(djinn_ewah_t);
+                if (ewah->clean) {
+                    // if (model_2mc->n_variants == 524) std::cerr << "ewah: ref=" << ewah->ref << ",clean=" << ewah->clean << ",dirty=" << ewah->dirty << std::endl;
+                    assert(ewah->clean + ewah->dirty > 0);
+                    ewah = (djinn_ewah_t*)&model_2mc->p[model_2mc->p_len];
+                    ewah->reset();
+                    model_2mc->p_len += sizeof(djinn_ewah_t);
+                }
                 ++ewah->clean;
                 ewah->ref = (wah[i] & 1);
                 ++n_objs;
@@ -674,9 +992,13 @@ int djn_ewah_model_container_t::EncodeWah(uint32_t* wah, uint32_t len) { // inpu
                 if (ewah->ref == (wah[i] & 1)) ++ewah->clean;
                 else { // Different clean word
                     n_obs += ewah->clean;
-                    ewah = (djinn_ewah_t*)&model_2mc->p[model_2mc->p_len];
-                    ewah->reset();
-                    model_2mc->p_len += sizeof(djinn_ewah_t);
+                    if (ewah->clean) {
+                        assert(ewah->clean + ewah->dirty > 0);
+                        // if (model_2mc->n_variants == 524) std::cerr << "ewah: ref=" << ewah->ref << ",clean=" << ewah->clean << ",dirty=" << ewah->dirty << std::endl;
+                        ewah = (djinn_ewah_t*)&model_2mc->p[model_2mc->p_len];
+                        ewah->reset();
+                        model_2mc->p_len += sizeof(djinn_ewah_t);
+                    }
                     ++ewah->clean;
                     ewah->ref = (wah[i] & 1);
                     ++n_objs;
@@ -684,10 +1006,12 @@ int djn_ewah_model_container_t::EncodeWah(uint32_t* wah, uint32_t len) { // inpu
             }
         }
     }
+    // if (model_2mc->n_variants == 524 && ewah->clean) std::cerr << "ewah: ref=" << ewah->ref << ",clean=" << ewah->clean << ",dirty=" << ewah->dirty << std::endl;
     n_obs += ewah->clean;
     // std::cerr << "n_obs=" << n_obs << "/" << len << std::endl;
     assert(n_obs == len);
 
+    ++model_2mc->n_variants;
     ++n_variants;
     return n_objs;
 }
@@ -731,10 +1055,14 @@ int djn_ewah_model_container_t::EncodeWahNm(uint32_t* wah, uint32_t len) { // in
         else {
             // Dirty have been set then make new EWAH
             if (ewah->dirty) {
-                n_obs += ewah->clean;
-                ewah = (djinn_ewah_t*)&model_nm->p[model_nm->p_len];
-                ewah->reset();
-                model_nm->p_len += sizeof(djinn_ewah_t);
+                if (ewah->clean) {
+                    // if (model_2mc->n_variants == 524) std::cerr << "ewah: ref=" << ewah->ref << ",clean=" << ewah->clean << ",dirty=" << ewah->dirty << std::endl;
+                    assert(ewah->clean + ewah->dirty > 0);
+                    n_obs += ewah->clean;
+                    ewah = (djinn_ewah_t*)&model_nm->p[model_nm->p_len];
+                    ewah->reset();
+                    model_nm->p_len += sizeof(djinn_ewah_t);
+                }
                 ++ewah->clean;
                 ewah->ref = (wah[i] & 15);
                 ++n_objs;
@@ -743,10 +1071,14 @@ int djn_ewah_model_container_t::EncodeWahNm(uint32_t* wah, uint32_t len) { // in
             else {
                 if (ewah->ref == (wah[i] & 15)) ++ewah->clean;
                 else { // Different clean word
-                    n_obs += ewah->clean;
-                    ewah = (djinn_ewah_t*)&model_nm->p[model_nm->p_len];
-                    ewah->reset();
-                    model_nm->p_len += sizeof(djinn_ewah_t);
+                    if (ewah->clean) {
+                        // if (model_2mc->n_variants == 524) std::cerr << "ewah: ref=" << ewah->ref << ",clean=" << ewah->clean << ",dirty=" << ewah->dirty << std::endl;
+                        assert(ewah->clean + ewah->dirty > 0);
+                        n_obs += ewah->clean;
+                        ewah = (djinn_ewah_t*)&model_nm->p[model_nm->p_len];
+                        ewah->reset();
+                        model_nm->p_len += sizeof(djinn_ewah_t);
+                    }
                     ++ewah->clean;
                     ewah->ref = (wah[i] & 15);
                     ++n_objs;
@@ -768,7 +1100,138 @@ int djn_ewah_model_container_t::DecodeNext(uint8_t* ewah_data, uint32_t& ret_ewa
     if (model_2mc.get() == nullptr) return -1;
     if (model_nm.get() == nullptr) return -1;
 
-    return 0;
+    // Decode stream archetype.
+    uint8_t type = p[p_len];
+    ++p_len;
+
+    size_t ret_ewah_init = ret_ewah;
+    int objs = 0;
+    switch(type) {
+    case 0: objs = DecodeRaw(ewah_data, ret_ewah); break;
+    case 1: objs = DecodeRaw_nm(ewah_data, ret_ewah); break;
+    default: std::cerr << "[djn_ewah_model_container_t::DecodeNext] decoding error: " << (int)type << " (valid=[0,1])" << std::endl; return -1;
+    }
+
+    if (objs <= 0) return -1;
+
+    if (use_pbwt) {
+        if (type == 0) {
+            for (int i = 0; i < 256; ++i) {
+                if (hist_alts[i]) std::cerr << "," << i << ":" << hist_alts[i];
+            }
+            std::cerr << std::endl;
+
+            if (hist_alts[1] >= 10) {
+                std::cerr << "[2nm usepbwt]" << std::endl;
+                model_2mc->pbwt.ReverseUpdateEWAH(ewah_data, ret_ewah, ret_buffer); 
+                ret_len = n_samples;
+            } else {
+                std::cerr << "[2nm NOpbwt]" << std::endl;
+                // Unpack EWAH into literals according to current PPA
+                uint32_t local_offset = ret_ewah_init;
+                uint32_t ret_pos = 0;
+                for (int j = 0; j < objs; ++j) {
+                    djinn_ewah_t* ewah = (djinn_ewah_t*)&ewah_data[local_offset];
+                    local_offset += sizeof(djinn_ewah_t);
+
+                    // Clean words.
+                    uint32_t to = ret_pos + ewah->clean*32 > n_samples ? n_samples : ret_pos + ewah->clean*32;
+                    for (int i = ret_pos; i < to; ++i) {
+                        ret_buffer[model_2mc->pbwt.ppa[i]] = (ewah->ref & 1);
+                    }
+                    ret_pos = to;
+
+                    for (int i = 0; i < ewah->dirty; ++i) {
+                        to = ret_pos + 32 > n_samples ? n_samples : ret_pos + 32;
+                        
+                        uint32_t dirty = *((uint32_t*)(&ewah_data[local_offset])); // copy
+                        for (int j = ret_pos; j < to; ++j) {
+                            ret_buffer[model_2mc->pbwt.ppa[j]] = (dirty & 1);
+                            dirty >>= 1;
+                        }
+                        local_offset += sizeof(uint32_t);
+                        ret_pos = to;
+                    }
+                    assert(ret_pos <= n_samples);
+                    assert(local_offset <= ret_ewah);
+                }
+                assert(ret_pos == n_samples);
+                ret_len = n_samples;
+            }
+        } else { // is NM
+            model_nm->pbwt.ReverseUpdateEWAHNm(ewah_data, ret_ewah, ret_buffer);
+            ret_len = n_samples;
+        }
+    } else { // not using PBWT
+        if (type == 0) {
+            // Unpack EWAH into literals
+            uint32_t local_offset = ret_ewah_init;
+            uint32_t ret_pos = 0;
+            for (int j = 0; j < objs; ++j) {
+                djinn_ewah_t* ewah = (djinn_ewah_t*)&ewah_data[local_offset];
+                local_offset += sizeof(djinn_ewah_t);
+                
+                // Clean words.
+                uint32_t to = ret_pos + ewah->clean*32 > n_samples ? n_samples : ret_pos + ewah->clean*32;
+                for (int i = ret_pos; i < to; ++i) {
+                    ret_buffer[i] = (ewah->ref & 1);
+                }
+                ret_pos = to;
+
+                for (int i = 0; i < ewah->dirty; ++i) {
+                    to = ret_pos + 32 > n_samples ? n_samples : ret_pos + 32;
+                    
+                    uint32_t dirty = *((uint32_t*)(&ewah_data[local_offset])); // copy
+                    for (int j = ret_pos; j < to; ++j) {
+                        ret_buffer[j] = (dirty & 1);
+                        dirty >>= 1;
+                    }
+                    local_offset += sizeof(uint32_t);
+                    ret_pos = to;
+                }
+                assert(ret_pos <= n_samples);
+                assert(local_offset <= ret_ewah);
+            }
+            assert(ret_pos == n_samples);
+            ret_len = n_samples;
+        } else {
+            // Unpack EWAH into literals
+            uint32_t local_offset = ret_ewah_init;
+            uint32_t n_s_obs = 0;
+
+            for (int j = 0; j < objs; ++j) {
+                djinn_ewah_t* ewah = (djinn_ewah_t*)&ewah_data[local_offset];
+                local_offset += sizeof(djinn_ewah_t);
+
+                // Clean words.
+                uint64_t to = n_s_obs + ewah->clean * 8 > n_samples ? n_samples : n_s_obs + ewah->clean * 8;
+                for (int i = n_s_obs; i < to; ++i) {
+                    ret_buffer[i] = (ewah->ref & 15); // update prev when non-zero
+                }
+                n_s_obs = to;
+
+                // Loop over dirty bitmaps.
+                for (int i = 0; i < ewah->dirty; ++i) {
+                    to = n_s_obs + 8 > n_samples ? n_samples : n_s_obs + 8;
+                    assert(n_s_obs < n_samples);
+                    assert(to <= n_samples);
+                    
+                    uint32_t dirty = *((uint32_t*)(&ewah_data[local_offset])); // copy
+                    for (int j = n_s_obs; j < to; ++j) {
+                        ret_buffer[j] = (dirty & 15);
+                        dirty >>= 4;
+                    }
+                    local_offset += sizeof(uint32_t);
+                    n_s_obs = to;
+                }
+                assert(local_offset <= ret_ewah);
+            }
+            assert(n_s_obs == n_samples);
+            ret_len = n_samples;
+        }
+    }
+
+    return objs;
 }
 
 int djn_ewah_model_container_t::DecodeNextRaw(uint8_t* data, uint32_t& len) {
@@ -776,16 +1239,169 @@ int djn_ewah_model_container_t::DecodeNextRaw(uint8_t* data, uint32_t& len) {
     if (model_2mc.get() == nullptr) return -1;
     if (model_nm.get() == nullptr) return -1;
     
-    return 1;
+    // Decode stream archetype.
+    uint8_t type = p[p_len];
+    ++p_len;
+
+    switch(type) {
+    case 0: return(DecodeRaw(data, len)); break;
+    case 1: return(DecodeRaw_nm(data, len)); break;
+    default: std::cerr << "[djn_ewah_model_container_t::DecodeNextRaw] decoding error: " << (int)type << " (valid=[0,1])" << std::endl; return -1;
+    }
+
+    // Never reached.
+    return -3;
 }
 
 // Return raw, potentially permuted, EWAH encoding
 int djn_ewah_model_container_t::DecodeRaw(uint8_t* data, uint32_t& len) {
     if (data == nullptr) return -1;
-    if (model_2mc.get() == nullptr) return -1;
-    if (model_nm.get() == nullptr) return -1;
+    if (model_2mc.get() == nullptr) return -2;
 
-    return 1;
+    int64_t n_samples_obs = 0;
+    int objects = 0;
+
+    // Compute als
+    memset(hist_alts, 0, 256*sizeof(uint32_t));
+
+    while(true) {
+        // Emit empty EWAH marker.
+        djinn_ewah_t* ewah = (djinn_ewah_t*)&data[len]; 
+        ewah->reset();
+        len += sizeof(djinn_ewah_t);
+        
+        djinn_ewah_t* e = (djinn_ewah_t*)&model_2mc->p[model_2mc->p_len]; 
+        std::cerr << "EWAH: ref=" << e->ref << ",clean=" << e->clean << ",dirty=" << e->dirty << " offset=" << model_2mc->p_len << "/" << model_2mc->p_cap << std::endl;
+        assert(e->clean + e->dirty > 0);
+        ewah->ref   = e->ref;
+        ewah->clean = e->clean;
+        ewah->dirty = e->dirty;
+        model_2mc->p_len += sizeof(djinn_ewah_t);
+        n_samples_obs += ewah->clean*32;
+        n_samples_obs += ewah->dirty*32;
+        hist_alts[ewah->ref & 1] += 32*ewah->clean;
+
+        for (int i = 0; i < ewah->dirty; ++i) {
+            *((uint32_t*)&data[len]) = *((uint32_t*)&model_2mc->p[model_2mc->p_len]);
+            hist_alts[1] += __builtin_popcount(*((uint32_t*)&data[len]));
+            len += sizeof(uint32_t);
+            model_2mc->p_len += sizeof(uint32_t);
+        }
+        ++objects;
+
+        if (n_samples_obs == n_samples_wah) {
+            // std::cerr << "obs=" << n_samples_obs << "/" << n_samples_wah << std::endl;
+            break;
+        }
+        if (n_samples_obs > n_samples_wah) {
+            std::cerr << "[djn_ewah_model_container_t::DecodeRaw] Decompression corruption: " << n_samples_obs << "/" << n_samples_wah  << std::endl;
+            exit(1);
+        }
+    }
+
+    return objects;
 }
+
+int djn_ewah_model_container_t::Serialize(uint8_t* dst) const {
+    // Serialize as (int,uint32_t,uint32_t,uint8_t*,ctx1,ctx2):
+    // ploidy,n_samples,n_variants,p_len,p,model_2mc,model_nm
+    uint32_t offset = 0;
+    *((int*)&dst[offset]) = ploidy; // ploidy
+    offset += sizeof(int);
+    *((uint32_t*)&dst[offset]) = n_samples; // number of samples
+    offset += sizeof(uint32_t);
+    *((uint32_t*)&dst[offset]) = n_variants; // number of variants
+    offset += sizeof(uint32_t);
+    *((uint32_t*)&dst[offset]) = p_len; // data length
+    offset += sizeof(uint32_t);
+    memcpy(&dst[offset], p, p_len); // data
+    offset += p_len;
+    offset += model_2mc->Serialize(&dst[offset]);
+    offset += model_nm->Serialize(&dst[offset]);
+    return offset;
+}
+
+int djn_ewah_model_container_t::Serialize(std::ostream& stream) const {
+    // Serialize as (int,uint32_t,uint32_t,uint8_t*,ctx1,ctx2):
+    // ploidy,n_samples,n_variants,p_len,p,model_2mc,model_nm
+    stream.write((char*)&ploidy, sizeof(int));
+    stream.write((char*)&n_samples, sizeof(uint32_t));
+    stream.write((char*)&n_variants, sizeof(uint32_t));
+    stream.write((char*)&p_len, sizeof(uint32_t));
+    stream.write((char*)p, p_len);
+    model_2mc->Serialize(stream);
+    model_nm->Serialize(stream);
+    return stream.tellp();
+}
+
+int djn_ewah_model_container_t::GetSerializedSize() const {
+    int ret = sizeof(int) + 3*sizeof(uint32_t) + p_len + model_2mc->GetSerializedSize() + model_nm->GetSerializedSize();
+    return ret;
+}
+
+int djn_ewah_model_container_t::GetCurrentSize() const {
+    // int ret = range_coder->OutSize();
+    int ret = p_len;
+    ret += model_2mc->p_len;
+    ret += model_nm->p_len;
+    return ret;
+}
+
+int djn_ewah_model_container_t::Deserialize(uint8_t* dst) {
+    uint32_t offset = 0;
+    int pl = *((int*)&dst[offset]);
+    // std::cerr << "pl=" << pl << " ploidy=" << ploidy << std::endl;
+    assert(pl == ploidy);
+    offset += sizeof(int);
+    uint32_t n_s = *((uint32_t*)&dst[offset]);
+    assert(n_s == n_samples);
+    offset += sizeof(uint32_t);
+    n_variants = *((uint32_t*)&dst[offset]);
+    offset += sizeof(uint32_t);
+    p_len = *((uint32_t*)&dst[offset]);
+    offset += sizeof(uint32_t);
+
+    // initiate a buffer if there is none or it's too small
+    if (p_cap == 0 || p == nullptr || p_len > p_cap) {
+        // std::cerr << "[Deserialize] Limit. p_cap=" << p_cap << "," << "p is nullptr=" << (p == nullptr ? "yes" : "no") << ",p_len=" << p_len << "/" << p_cap << std::endl;
+        if (p_free) delete[] p;
+        p = new uint8_t[p_len + 65536];
+        p_cap = p_len + 65536;
+        p_free = true;
+    }
+
+    memcpy(p, &dst[offset], p_len); // data
+    offset += p_len;
+    // Todo objects
+    offset += model_2mc->Deserialize(&dst[offset]);
+    offset += model_nm->Deserialize(&dst[offset]);
+
+    return(offset);
+}
+
+int djn_ewah_model_container_t::Deserialize(std::istream& stream) {
+    // #pl and #n_s read outside of this function in Deserialize() for
+    // the parent.
+    //
+    // stream.read((char*)&ploidy, sizeof(int));
+    // stream.read((char*)&n_samples, sizeof(uint32_t));
+    stream.read((char*)&n_variants, sizeof(uint32_t));
+    stream.read((char*)&p_len, sizeof(uint32_t));
+    
+    // initiate a buffer if there is none or it's too small
+    if (p_cap == 0 || p == nullptr || p_len > p_cap) {
+        // std::cerr << "[Deserialize] Limit. p_cap=" << p_cap << "," << "p is nullptr=" << (p == nullptr ? "yes" : "no") << ",p_len=" << p_len << "/" << p_cap << std::endl;
+        if (p_free) delete[] p;
+        p = new uint8_t[p_len + 65536];
+        p_cap = p_len + 65536;
+        p_free = true;
+    }
+
+    stream.read((char*)p, p_len);
+    model_2mc->Deserialize(stream);
+    model_nm->Deserialize(stream);
+    return stream.tellg();
+}
+
 
 }
