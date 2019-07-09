@@ -92,7 +92,7 @@ int PBWT::UpdateBcf(const uint8_t* arr, uint32_t stride) {
     memset(n_queue, 0, sizeof(uint32_t)*n_symbols);
 
     for (int i = 0; i < n_samples; ++i) {
-        const uint8_t& gt = BCF_UNPACK_GENOTYPE(arr[ppa[i] * stride]);
+        const uint8_t& gt = DJN_BCF_UNPACK_GENOTYPE(arr[ppa[i] * stride]);
         // if (gt >= n_symbols) {
         //     std::cerr << "error=" << (int)arr[ppa[i]*stride] << "->" << (int)gt << ">=" << n_symbols << std::endl;
         // }
@@ -115,7 +115,7 @@ int PBWT::UpdateBcf(const uint8_t* arr, uint32_t stride) {
     // std::cerr << ToPrettyString() << std::endl;
     // std::cerr << "Alts=" << n_queue[1] << std::endl;
     // for (int i = 0; i < n_samples; ++i) {
-    //   std::cerr << " " << (int)BCF_UNPACK_GENOTYPE(arr[ppa[i]*stride]);
+    //   std::cerr << " " << (int)DJN_BCF_UNPACK_GENOTYPE(arr[ppa[i]*stride]);
     // }
     // std::cerr << std::endl;
     ++n_steps;
@@ -128,7 +128,7 @@ int PBWT::UpdateBcfGeneral(const uint8_t* arr, uint32_t stride) {
     memset(n_queue, 0, sizeof(uint32_t)*n_symbols);
 
     for (int i = 0; i < n_samples; ++i) {
-        const uint8_t& gt = BCF_UNPACK_GENOTYPE_GENERAL(arr[ppa[i] * stride]);
+        const uint8_t& gt = DJN_BCF_UNPACK_GENOTYPE_GENERAL(arr[ppa[i] * stride]);
         if (gt >= n_symbols) {
             std::cerr << "error=" << (int)gt << "/" << n_symbols << std::endl;
         }

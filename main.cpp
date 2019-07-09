@@ -1,8 +1,9 @@
 #include "getopt.h"
 
 #include "vcf_reader.h"
-#include "ctx_model.h"
-#include "ewah_model.h"
+// #include "ctx_model.h"
+// #include "ewah_model.h"
+#include "djinn.h"
 
 // temp
 #include <algorithm>//sort
@@ -19,6 +20,13 @@ std::string MicroPrettyString(uint32_t ms) {
     if (ms < 1000) return time + std::to_string(ms) + "us";
     else return time + std::to_string(ms/1000) + "ms";
 }
+
+int ReadHtslib();
+int ReadRaw();
+int WriteToStream();
+int WriteToFile();
+int Decode();
+int DecodeRaw();
 
 int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
     std::unique_ptr<djinn::VcfReader> reader = djinn::VcfReader::FromFile(filename);
@@ -113,7 +121,7 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
     djinn::djinn_model* djn_ctx = new djinn::djinn_ctx_model;
     djn_ctx->StartEncoding(permute, reset_models);
 
-    djinn::djinn_ewah_model djn_ewah;
+    djinn::djinn_ewah_model djn_ewah(djinn::CompressionStrategy::LZ4, 1);
     djn_ewah.StartEncoding(permute, reset_models);
     // djn_ewah.codec = djinn::CompressionStrategy::LZ4;
     
@@ -222,7 +230,7 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
     // djinn::djinn_ctx_model djn_ctx_decode;
     char* vcf_out_buffer = new char[4*reader->n_samples_+65536];
     uint32_t len_vcf = 0;
-    djinn::djinn_ewah_model djn_ewah_decode;
+    uint64_t b_out_vcf = 0;
 
     djinn::djinn_variant_t* variant = nullptr;
 
@@ -270,21 +278,11 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
             // }
             // std::cerr << std::endl;
 
-            len_vcf = variant->ToVcfDebug(vcf_out_buffer);
-            assert(len_vcf > 0);
-            std::cout.write(vcf_out_buffer, len_vcf);
-            len_vcf = 0;
-
             // Write Vcf-encoded data to a local buffer and then write to standard out.
-            // for (int j = 0; j < variant->data_len; j += variant->ploidy) {
-            //     // Todo: phasing
-            //     vcf_out_buffer[len_vcf++] = (char)variant->data[j+0] + '0';
-            //     vcf_out_buffer[len_vcf++] = '|';
-            //     vcf_out_buffer[len_vcf++] = (char)variant->data[j+1] + '0';
-            //     vcf_out_buffer[len_vcf++] = '\t';
-            // }
-            // vcf_out_buffer[len_vcf++] = '\n';
-            // std::cout.write((char*)vcf_out_buffer, len_vcf);
+            // len_vcf = variant->ToVcfDebug(vcf_out_buffer);
+            // assert(len_vcf > 0);
+            // std::cout.write(vcf_out_buffer, len_vcf);
+            // b_out_vcf += len_vcf;
             // len_vcf = 0;
         }
         // Timings per block
@@ -298,6 +296,8 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
     auto time_span_decode = std::chrono::duration_cast<std::chrono::milliseconds>(t2_decode - t1_decode);
     std::cerr << "[Decode] Decoded " << n_lines << " records in " << time_span_decode.count() 
         << "ms (" << (double)time_span_decode.count()/n_lines << "ms/record)" << std::endl;
+
+    std::cerr << "Decompression speed: Out=" << data_in_vcf << "->" << (double)(data_in_vcf/1000000.0f)/(time_span_decode.count()/1000.0f) << "MB/s" << std::endl;
 
     delete[] decode_buf;
     delete[] vcf_out_buffer;

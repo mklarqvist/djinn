@@ -1,5 +1,9 @@
 #include <cstring> //memcpy
-#include "ctx_model.h"
+
+// #include "ctx_model.h"
+#include "djinn.h"
+#include "frequency_model.h" // RangeCoder and FrequencyModel
+#include "pbwt.h" // PBWT algorithms
 
 namespace djinn {
 
@@ -18,6 +22,7 @@ djn_ctx_model_t::~djn_ctx_model_t() {
 }
 
 void djn_ctx_model_t::Initiate2mc() {
+    pbwt       = std::make_shared<PBWT>();
     range_coder= std::make_shared<RangeCoder>();
     mref       = std::make_shared<GeneralModel>(2,   512, 18, 32, range_coder);
     mlog_rle   = std::make_shared<GeneralModel>(16,  32,  18, 16, range_coder); // 2^32 max -> log2() = 5
@@ -33,6 +38,7 @@ void djn_ctx_model_t::Initiate2mc() {
 }
 
 void djn_ctx_model_t::InitiateNm() {
+    pbwt       = std::make_shared<PBWT>();
     range_coder= std::make_shared<RangeCoder>();
     mref       = std::make_shared<GeneralModel>(16,  4096,18, 32, range_coder);
     mlog_rle   = std::make_shared<GeneralModel>(64,  32,  18, 16, range_coder); // 4 bit ref, log2(32) = 5 bit -> 2^9 = 512
@@ -62,7 +68,7 @@ void djn_ctx_model_t::reset() {
     if (dirty_wah.get() != nullptr) dirty_wah->Reset();
     if (mtype.get() != nullptr)     mtype->Reset();
     if (mref.get() != nullptr)      mref->Reset();
-    pbwt.Reset();
+    if (pbwt.get() != nullptr)      pbwt->Reset();
     n_variants = 0; p_len = 0;
 }
 
@@ -99,6 +105,81 @@ int djn_ctx_model_t::StartDecoding(bool use_pbwt, bool reset) {
     range_coder->SetInput(p);
     range_coder->StartDecode();
     return 1;
+}
+
+int djn_ctx_model_t::Serialize(uint8_t* dst) const {
+    // Serialize as (uint32_t,uint32_t,uint8_t*):
+    // p_len, n_variants, p
+    uint32_t offset = 0;
+    *((uint32_t*)&dst[offset]) = p_len; // data length
+    offset += sizeof(uint32_t);
+    *((uint32_t*)&dst[offset]) = n_variants; // number of variants
+    offset += sizeof(uint32_t);
+    memcpy(&dst[offset], p, p_len); // data
+    offset += p_len;
+
+    // assert(range_coder->OutSize() == p_len);
+    return offset;
+}
+
+int djn_ctx_model_t::Serialize(std::ostream& stream) const {
+    // Serialize as (uint32_t,uint32_t,uint8_t*):
+    // p_len, n_variants, p
+    stream.write((char*)&p_len, sizeof(uint32_t));
+    stream.write((char*)&n_variants, sizeof(uint32_t));
+    stream.write((char*)p, p_len);
+    return stream.tellp();
+}
+
+int djn_ctx_model_t::GetSerializedSize() const {
+    int ret = sizeof(uint32_t) + sizeof(uint32_t) + p_len;
+    return ret;
+}
+
+int djn_ctx_model_t::GetCurrentSize() const {
+    if (range_coder.get() == nullptr) return -1;
+    return range_coder->OutSize();
+}
+
+int djn_ctx_model_t::Deserialize(uint8_t* dst) {
+    uint32_t offset = 0;
+    p_len = *((uint32_t*)&dst[offset]);
+    offset += sizeof(uint32_t);
+    n_variants = *((uint32_t*)&dst[offset]);
+    offset += sizeof(uint32_t);
+
+    // initiate a buffer if there is none or it's too small
+    if (p_cap == 0 || p == nullptr || p_len > p_cap) {
+        // std::cerr << "[Deserialize] Limit. p_cap=" << p_cap << "," << "p is nullptr=" << (p == nullptr ? "yes" : "no") << ",p_len=" << p_len << "/" << p_cap << std::endl;
+        if (p_free) delete[] p;
+        p = new uint8_t[p_len + 65536];
+        p_cap = p_len + 65536;
+        p_free = true;
+    }
+
+    memcpy(p, &dst[offset], p_len); // data
+    offset += p_len;
+    
+    return offset;
+}
+
+int djn_ctx_model_t::Deserialize(std::istream& stream) {
+    // Serialize as (uint32_t,uint32_t,uint8_t*):
+    // p_len, n_variants, p
+    stream.read((char*)&p_len, sizeof(uint32_t));
+    stream.read((char*)&n_variants, sizeof(uint32_t));
+
+    // initiate a buffer if there is none or it's too small
+    if (p_cap == 0 || p == nullptr || p_len > p_cap) {
+        // std::cerr << "[Deserialize] Limit. p_cap=" << p_cap << "," << "p is nullptr=" << (p == nullptr ? "yes" : "no") << ",p_len=" << p_len << "/" << p_cap << std::endl;
+        if (p_free) delete[] p;
+        p = new uint8_t[p_len + 65536];
+        p_cap = p_len + 65536;
+        p_free = true;
+    }
+
+    stream.read((char*)p, p_len);
+    return stream.tellg();
 }
 
 /*======   Variant context model   ======*/
@@ -144,7 +225,7 @@ int djinn_ctx_model::EncodeBcf(uint8_t* data, size_t len_data, int ploidy, uint8
     // Compute allele counts.
     memset(hist_alts, 0, 256*sizeof(uint32_t));
     for (int i = 0; i < len_data; ++i) {
-        ++hist_alts[BCF_UNPACK_GENOTYPE_GENERAL(data[i])];
+        ++hist_alts[DJN_BCF_UNPACK_GENOTYPE_GENERAL(data[i])];
     }
     // Check.
     assert(tgt_container->marchetype.get() != nullptr);
@@ -163,15 +244,15 @@ int djinn_ctx_model::EncodeBcf(uint8_t* data, size_t len_data, int ploidy, uint8
             // Todo: add lower limit to stored parameters during serialization
             if (hist_alts[1] < 10) { // dont update if < 10 alts
                 for (int i = 0; i < len_data; ++i) {
-                    tgt_container->model_2mc->pbwt.prev[i] = BCF_UNPACK_GENOTYPE(data[tgt_container->model_2mc->pbwt.ppa[i]]);
+                    tgt_container->model_2mc->pbwt->prev[i] = DJN_BCF_UNPACK_GENOTYPE(data[tgt_container->model_2mc->pbwt->ppa[i]]);
                 }
             } else {
-                tgt_container->model_2mc->pbwt.UpdateBcf(data, 1);
+                tgt_container->model_2mc->pbwt->UpdateBcf(data, 1);
             }
 
-            ret = (tgt_container->Encode2mc(tgt_container->model_2mc->pbwt.prev, len_data));
+            ret = (tgt_container->Encode2mc(tgt_container->model_2mc->pbwt->prev, len_data));
         } else {
-            ret = (tgt_container->Encode2mc(data, len_data, TWK_BCF_GT_UNPACK, 1));
+            ret = (tgt_container->Encode2mc(data, len_data, DJN_BCF_GT_UNPACK, 1));
         }
 
         if (ret > 0) ++n_variants;
@@ -181,10 +262,10 @@ int djinn_ctx_model::EncodeBcf(uint8_t* data, size_t len_data, int ploidy, uint8
         
         int ret = -1;
         if (use_pbwt) {
-            tgt_container->model_nm->pbwt.UpdateBcfGeneral(data, 1); // otherwise
-            ret = (tgt_container->EncodeNm(tgt_container->model_nm->pbwt.prev, len_data));
+            tgt_container->model_nm->pbwt->UpdateBcfGeneral(data, 1); // otherwise
+            ret = (tgt_container->EncodeNm(tgt_container->model_nm->pbwt->prev, len_data));
         } else {
-            ret = (tgt_container->EncodeNm(data, len_data, TWK_BCF_GT_UNPACK_GENERAL, 1));
+            ret = (tgt_container->EncodeNm(data, len_data, DJN_BCF_GT_UNPACK_GENERAL, 1));
         }
         if (ret > 0) ++n_variants;
         return ret;
@@ -237,13 +318,13 @@ int djinn_ctx_model::Encode(uint8_t* data, size_t len_data, int ploidy, uint8_t 
             // Todo: add lower limit to stored parameters during serialization
             if (hist_alts[1] < 10) { // dont update if < 10 alts
                 for (int i = 0; i < len_data; ++i) {
-                    tgt_container->model_2mc->pbwt.prev[i] = data[tgt_container->model_2mc->pbwt.ppa[i]];
+                    tgt_container->model_2mc->pbwt->prev[i] = data[tgt_container->model_2mc->pbwt->ppa[i]];
                 }
             } else {
-                tgt_container->model_2mc->pbwt.Update(data, 1);
+                tgt_container->model_2mc->pbwt->Update(data, 1);
             }
 
-            ret = (tgt_container->Encode2mc(tgt_container->model_2mc->pbwt.prev, len_data));
+            ret = (tgt_container->Encode2mc(tgt_container->model_2mc->pbwt->prev, len_data));
         } else {
             ret = (tgt_container->Encode2mc(data, len_data, DJN_MAP_NONE, 0));
         }
@@ -255,8 +336,8 @@ int djinn_ctx_model::Encode(uint8_t* data, size_t len_data, int ploidy, uint8_t 
         
         int ret = -1;
         if (use_pbwt) {
-            tgt_container->model_nm->pbwt.Update(data, 1);
-            ret = (tgt_container->EncodeNm(tgt_container->model_nm->pbwt.prev, len_data));
+            tgt_container->model_nm->pbwt->Update(data, 1);
+            ret = (tgt_container->EncodeNm(tgt_container->model_nm->pbwt->prev, len_data));
         } else {
             ret = (tgt_container->EncodeNm(data, len_data, DJN_MAP_NONE, 0));
         }
@@ -620,18 +701,18 @@ void djn_ctx_model_container_t::StartEncoding(bool use_pbwt, bool reset) {
     assert(model_nm.get() != nullptr);
 
     if (use_pbwt) {
-        if (model_2mc->pbwt.n_symbols == 0) {
+        if (model_2mc->pbwt->n_symbols == 0) {
             if (n_samples == 0) {
                 std::cerr << "illegal: no sample number set!" << std::endl;
             }
-            model_2mc->pbwt.Initiate(n_samples, 2);
+            model_2mc->pbwt->Initiate(n_samples, 2);
         }
 
-        if (model_nm->pbwt.n_symbols == 0) {
+        if (model_nm->pbwt->n_symbols == 0) {
             if (n_samples == 0) {
                 std::cerr << "illegal: no sample number set!" << std::endl;
             }
-            model_nm->pbwt.Initiate(n_samples, 16);
+            model_nm->pbwt->Initiate(n_samples, 16);
         }
     }
     this->use_pbwt = use_pbwt;
@@ -661,18 +742,18 @@ size_t djn_ctx_model_container_t::FinishEncoding() {
 
 void djn_ctx_model_container_t::StartDecoding(bool use_pbwt, bool reset) {
     if (use_pbwt) {
-        if (model_2mc->pbwt.n_symbols == 0) {
+        if (model_2mc->pbwt->n_symbols == 0) {
             if (n_samples == 0) {
                 std::cerr << "illegal: no sample number set!" << std::endl;
             }
-            model_2mc->pbwt.Initiate(n_samples, 2);
+            model_2mc->pbwt->Initiate(n_samples, 2);
         }
 
-        if (model_nm->pbwt.n_symbols == 0) {
+        if (model_nm->pbwt->n_symbols == 0) {
             if (n_samples == 0) {
                 std::cerr << "illegal: no sample number set!" << std::endl;
             }
-            model_nm->pbwt.Initiate(n_samples, 16);
+            model_nm->pbwt->Initiate(n_samples, 16);
         }
     }
 
@@ -1278,7 +1359,7 @@ int djn_ctx_model_container_t::DecodeNext(uint8_t* ewah_data, uint32_t& ret_ewah
     if (use_pbwt) {
         if (type == 0) {
             if (hist_alts[1] >= 10) {
-                model_2mc->pbwt.ReverseUpdateEWAH(ewah_data, ret_ewah, ret_buffer); 
+                model_2mc->pbwt->ReverseUpdateEWAH(ewah_data, ret_ewah, ret_buffer); 
                 ret_len = n_samples;
             } else {
                 // Unpack EWAH into literals according to current PPA
@@ -1291,7 +1372,7 @@ int djn_ctx_model_container_t::DecodeNext(uint8_t* ewah_data, uint32_t& ret_ewah
                     // Clean words.
                     uint32_t to = ret_pos + ewah->clean*32 > n_samples ? n_samples : ret_pos + ewah->clean*32;
                     for (int i = ret_pos; i < to; ++i) {
-                        ret_buffer[model_2mc->pbwt.ppa[i]] = (ewah->ref & 1);
+                        ret_buffer[model_2mc->pbwt->ppa[i]] = (ewah->ref & 1);
                     }
                     ret_pos = to;
 
@@ -1300,7 +1381,7 @@ int djn_ctx_model_container_t::DecodeNext(uint8_t* ewah_data, uint32_t& ret_ewah
                         
                         uint32_t dirty = *((uint32_t*)(&ewah_data[local_offset])); // copy
                         for (int j = ret_pos; j < to; ++j) {
-                            ret_buffer[model_2mc->pbwt.ppa[j]] = (dirty & 1);
+                            ret_buffer[model_2mc->pbwt->ppa[j]] = (dirty & 1);
                             dirty >>= 1;
                         }
                         local_offset += sizeof(uint32_t);
@@ -1313,7 +1394,7 @@ int djn_ctx_model_container_t::DecodeNext(uint8_t* ewah_data, uint32_t& ret_ewah
                 ret_len = n_samples;
             }
         } else { // is NM
-            model_nm->pbwt.ReverseUpdateEWAHNm(ewah_data, ret_ewah, ret_buffer);
+            model_nm->pbwt->ReverseUpdateEWAHNm(ewah_data, ret_ewah, ret_buffer);
             ret_len = n_samples;
         }
     } else { // not using PBWT

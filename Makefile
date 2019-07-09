@@ -17,19 +17,19 @@
 ###################################################################
 
 # Version numbers slices from the source header
-LIBVER_MAJOR_SCRIPT:=`sed -n '/const int32_t DJINN_VERSION_MAJOR = /s/.*[[:blank:]]\([0-9][0-9]*\).*/\1/p' < djinn.h`
-LIBVER_MINOR_SCRIPT:=`sed -n '/const int32_t DJINN_VERSION_MINOR = /s/.*[[:blank:]]\([0-9][0-9]*\).*/\1/p' < djinn.h`
-LIBVER_PATCH_SCRIPT:=`sed -n '/const int32_t DJINN_VERSION_PATCH = /s/.*[[:blank:]]\([0-9][0-9]*\).*/\1/p' < djinn.h`
+LIBVER_MAJOR_SCRIPT:=`sed -n '/const int32_t DJINN_VERSION_MAJOR = /s/.*[[:blank:]]\([0-9][0-9]*\).*/\1/p' < lib/djinn.h`
+LIBVER_MINOR_SCRIPT:=`sed -n '/const int32_t DJINN_VERSION_MINOR = /s/.*[[:blank:]]\([0-9][0-9]*\).*/\1/p' < lib/djinn.h`
+LIBVER_PATCH_SCRIPT:=`sed -n '/const int32_t DJINN_VERSION_PATCH = /s/.*[[:blank:]]\([0-9][0-9]*\).*/\1/p' < lib/djinn.h`
 LIBVER_SCRIPT:= $(LIBVER_MAJOR_SCRIPT).$(LIBVER_MINOR_SCRIPT).$(LIBVER_PATCH_SCRIPT)
 LIBVER_MAJOR := $(shell echo $(LIBVER_MAJOR_SCRIPT))
 LIBVER_MINOR := $(shell echo $(LIBVER_MINOR_SCRIPT))
 LIBVER_PATCH := $(shell echo $(LIBVER_PATCH_SCRIPT))
 LIBVER := $(shell echo $(LIBVER_SCRIPT))
 
-OPTFLAGS  := -O3 -DLZ4_AVAIL -DZSTD_AVAIL
+OPTFLAGS  := -O3 -DHAVE_ZLIB -DHAVE_ZSTD -DHAVE_LZ4
 CFLAGS     = -std=c99   $(OPTFLAGS) $(DEBUG_FLAGS) -g
 CXXFLAGS   = -std=c++0x $(OPTFLAGS) $(DEBUG_FLAGS) -g
-CXX_SOURCE = frequency_model.cpp pbwt.cpp djinn.cpp ctx_model.cpp ewah_model.cpp
+CXX_SOURCE = lib/frequency_model.cpp lib/pbwt.cpp lib/djinn.cpp lib/ctx_model.cpp lib/ewah_model.cpp
 C_SOURCE   = 
 OBJECTS    = $(C_SOURCE:.c=.o) $(CXX_SOURCE:.cpp=.o)
 DEBUG_FLAGS =
@@ -73,9 +73,9 @@ library: $(OBJECTS)
 	ln -sf libdjinn.$(SHARED_EXT).$(LIBVER) libdjinn.$(SHARED_EXT)
 
 djinn: library
-	$(CXX) $(CXXFLAGS) main.cpp -L$(PWD) -pthread $(LIBS) -lhts -ldjinn '-Wl,-rpath,$$ORIGIN/,-rpath,$(PWD)' -o djinn
+	$(CXX) $(CXXFLAGS) main.cpp -Ilib/ -L$(PWD) -pthread $(LIBS) -lhts -ldjinn '-Wl,-rpath,$$ORIGIN/,-rpath,$(PWD)' -o djinn
 
 clean:
-	rm -f *.o *.a *.$(SHARED_EXT).* *.$(SHARED_EXT) djinn
+	rm -f *.o lib/*.o *.a *.$(SHARED_EXT).* *.$(SHARED_EXT) djinn
 
 .PHONY: all library clean debug debug_size

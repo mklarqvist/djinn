@@ -63,6 +63,7 @@
 #include <vector> // vector
 #include <memory> // shared_ptr
 #include <cmath> // log2
+#include <iostream> // debug
 
 namespace djinn {
 

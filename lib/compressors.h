@@ -1,11 +1,11 @@
-#if defined ZSTD_AVAIL
+#if defined HAVE_ZSTD
 #include <zstd.h>
 #include <zstd_errors.h>
 #endif
 
-#if defined LZ4_AVAIL
-#include "lz4.h" // lz4
-#include "lz4hc.h"
+#if defined HAVE_LZ4
+#include <lz4.h> // lz4
+#include <lz4hc.h> // lz4hc
 #endif
 
 namespace djinn {
@@ -15,7 +15,7 @@ typedef int (*GeneralDecompressor)(const uint8_t*, uint32_t, uint8_t*, uint32_t)
 
 static
 int ZstdCompress(const uint8_t* in, uint32_t n_in, uint8_t* out, uint32_t out_capacity, const int32_t c_level = 1) {
-#if defined ZSTD_AVAIL
+#if defined HAVE_ZSTD
     int ret = ZSTD_compress(out, out_capacity, in, n_in, c_level);
     return(ret);
 #else
@@ -26,7 +26,7 @@ int ZstdCompress(const uint8_t* in, uint32_t n_in, uint8_t* out, uint32_t out_ca
 
 static
 int ZstdDecompress(const uint8_t* in, uint32_t n_in, uint8_t* out, uint32_t out_capacity) {
-#if defined ZSTD_AVAIL
+#if defined HAVE_ZSTD
     int compressed_data_size = ZSTD_decompress(out, out_capacity, in, n_in);
     if (compressed_data_size < 0) {
         std::cerr << "A negative result from ZSTD_decompress indicates a failure trying to compress the data.  See exit code (echo $?) for value returned." << std::endl;
@@ -41,7 +41,7 @@ int ZstdDecompress(const uint8_t* in, uint32_t n_in, uint8_t* out, uint32_t out_
 
 static
 int Lz4Compress(const uint8_t* in, uint32_t n_in, uint8_t* out, uint32_t out_capacity, const int32_t c_level = 1) {
-#if defined LZ4_AVAIL
+#if defined HAVE_LZ4
     int compressed_data_size = LZ4_compress_HC((const char*)in, (char*)out, n_in, out_capacity, c_level);
 
     if (compressed_data_size < 0) {
@@ -63,7 +63,7 @@ int Lz4Compress(const uint8_t* in, uint32_t n_in, uint8_t* out, uint32_t out_cap
 
 static
 int Lz4Decompress(const uint8_t* in, uint32_t n_in, uint8_t* out, uint32_t out_capacity) {
-#if defined LZ4_AVAIL
+#if defined HAVE_LZ4
     int32_t decompressed_size = LZ4_decompress_safe((char*)in, (char*)out, n_in, out_capacity);
     // int decompressed_data_size = LZ4_decompress((const char*)in, (char*)out, n_in, out_capacity);
     if (decompressed_size < 0) {
