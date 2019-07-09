@@ -28,10 +28,12 @@ static
 int ZstdDecompress(const uint8_t* in, uint32_t n_in, uint8_t* out, uint32_t out_capacity) {
 #if defined HAVE_ZSTD
     int compressed_data_size = ZSTD_decompress(out, out_capacity, in, n_in);
+    
     if (compressed_data_size < 0) {
         std::cerr << "A negative result from ZSTD_decompress indicates a failure trying to compress the data.  See exit code (echo $?) for value returned." << std::endl;
         exit(1);
     }
+
     return(compressed_data_size);
 #else
     std::cerr << "Program was not compiled with Zstd support!" << std::endl;
@@ -46,12 +48,12 @@ int Lz4Compress(const uint8_t* in, uint32_t n_in, uint8_t* out, uint32_t out_cap
 
     if (compressed_data_size < 0) {
         std::cerr << "A negative result from LZ4_compress_default indicates a failure trying to compress the data.  See exit code (echo $?) for value returned." << std::endl;
-        exit(1);
+        exit(compressed_data_size);
     }
         
     if (compressed_data_size == 0) {
         std::cerr << "A result of 0 means compression worked, but was stopped because the destination buffer couldn't hold all the information." << std::endl;
-        exit(1);
+        exit(compressed_data_size);
     }
 
     return(compressed_data_size);
@@ -64,15 +66,16 @@ int Lz4Compress(const uint8_t* in, uint32_t n_in, uint8_t* out, uint32_t out_cap
 static
 int Lz4Decompress(const uint8_t* in, uint32_t n_in, uint8_t* out, uint32_t out_capacity) {
 #if defined HAVE_LZ4
-    int32_t decompressed_size = LZ4_decompress_safe((char*)in, (char*)out, n_in, out_capacity);
-    // int decompressed_data_size = LZ4_decompress((const char*)in, (char*)out, n_in, out_capacity);
+    int32_t decompressed_size = LZ4_decompress_safe((const char*)in, (char*)out, n_in, out_capacity);
+    
     if (decompressed_size < 0) {
         std::cerr << "A negative result from LZ4_decompress_safe indicates a failure trying to decompress the data.  See exit code (echo $?) for value returned." << std::endl;
-        exit(1);
+        exit(decompressed_size);
     }
+
     if (decompressed_size == 0) {
-        std::cerr << "I'm not sure this function can ever return 0.  Documentation in lz4.h doesn't indicate so.";
-        exit(1);
+        std::cerr << "I'm not sure this function can ever return 0. Documentation in lz4.h doesn't indicate so.";
+        exit(decompressed_size);
     }
 
     return(decompressed_size);
