@@ -311,8 +311,24 @@ int djinn_ctx_model::DecodeNext(djinn_variant_t*& variant) {
     variant->data_len = 0;
     variant->errcode  = 0;
     variant->unpacked = DJN_UN_IND;
+    variant->n_allele = 0;
 
-    return(tgt_container->DecodeNext(q,q_len,variant->data,variant->data_len));
+    int ret = tgt_container->DecodeNext(q,q_len,variant->data,variant->data_len);
+    if (ret <= 0) {
+        variant->errcode = 1;
+        return ret;
+    }
+
+    // Compute number of alleles.
+    uint32_t max_allele = 0;
+    for (int i = 0; i < 256; ++i) {
+        max_allele = tgt_container->hist_alts[i] != 0 ? i : max_allele;
+        // if (tgt_container->hist_alts[i]) std::cerr << i << ":" << tgt_container->hist_alts[i] << ",";
+    }
+    // std::cerr << " max=" << max_allele << std::endl;
+    variant->n_allele = max_allele + 1;
+
+    return 1;
 }
 
 int djinn_ctx_model::DecodeNextRaw(uint8_t* data, uint32_t& len) {
@@ -835,7 +851,7 @@ int djn_ctx_model_container_t::DecodeRaw_nm(uint8_t* data, uint32_t& len) {
     uint32_t n_alts_obs = 0;
     // std::cerr << "alts=";
     for (int i = 0; i < 256; ++i) {
-        if (hist_alts[i]) std::cerr << i << ":" << hist_alts[i] << ",";
+        // if (hist_alts[i]) std::cerr << i << ":" << hist_alts[i] << ",";
         n_alts_obs += hist_alts[i];
     }
     // std::cerr << " n_alts_obs=" << n_alts_obs << "/" << n_samples_wah_nm << std::endl;
@@ -1405,6 +1421,7 @@ int djn_ctx_model_container_t::DecodeNextRaw(djinn_variant_t*& variant) {
     variant->data_len = 0;
     variant->errcode  = 0;
     variant->unpacked = DJN_UN_EWAH;
+    variant->n_allele = 0;
 
     // Decode stream archetype.
     uint8_t type = marchetype->DecodeSymbol();
@@ -1416,7 +1433,10 @@ int djn_ctx_model_container_t::DecodeNextRaw(djinn_variant_t*& variant) {
     default: std::cerr << "[djn_ctx_model_container_t::DecodeNextRaw] decoding error: " << (int)type << " (valid=[0,1])" << std::endl; return -1;
     }
 
-    if (ret <= 0) return ret;
+    if (ret <= 0) {
+        variant->errcode = 1;
+        return ret;
+    }
 
     if (variant->d == nullptr) {
         variant->d = new djn_variant_dec_t;
@@ -1439,6 +1459,7 @@ int djn_ctx_model_container_t::DecodeNextRaw(djinn_variant_t*& variant) {
     variant->d->n_dirty = 0;
     // Set bitmap type.
     variant->d->dirty_type = type;
+    variant->d->n_samples  = n_samples;
 
     // Construct EWAH mapping
     uint32_t local_offset = 0;
@@ -1453,8 +1474,11 @@ int djn_ctx_model_container_t::DecodeNextRaw(djinn_variant_t*& variant) {
         uint32_t to = ret_pos + ewah->clean*32 > n_samples ? n_samples : ret_pos + ewah->clean*32;
         ret_pos = to;
 
+        // Store first dirty pointer only.
+        variant->d->dirty[variant->d->n_dirty++] = (uint32_t*)(&variant->data[local_offset]);
+
         for (int i = 0; i < ewah->dirty; ++i) {
-            variant->d->dirty[variant->d->n_dirty++] = (uint32_t*)(&variant->data[local_offset]);
+            // variant->d->dirty[variant->d->n_dirty++] = (uint32_t*)(&variant->data[local_offset]);
             to = ret_pos + 32 > n_samples ? n_samples : ret_pos + 32;
             local_offset += sizeof(uint32_t);
             ret_pos = to;
@@ -1497,12 +1521,13 @@ int djn_ctx_model_container_t::DecodeRaw(uint8_t* data, uint32_t& len) {
         if (type == 0) { // bitmaps
             ++ewah->dirty;
 
+            uint32_t* c = (uint32_t*)&data[len]; // pointer to data
             for (int i = 0; i < 4; ++i) {
                 data[len] = model_2mc->dirty_wah->DecodeSymbol();
-                hist_alts[0] += __builtin_popcount(~data[len]);
-                hist_alts[1] += __builtin_popcount(data[len]);
                 ++len;
             }
+            hist_alts[0] += __builtin_popcount(~(*c));
+            hist_alts[1] += __builtin_popcount(*c);
             n_samples_obs += 32;
 
         } else { // is RLE
@@ -1528,6 +1553,7 @@ int djn_ctx_model_container_t::DecodeRaw(uint8_t* data, uint32_t& len) {
             // std::cerr << "obs=" << n_samples_obs << "/" << n_samples_wah << std::endl;
             break;
         }
+
         if (n_samples_obs > n_samples_wah) {
             std::cerr << "[djn_ctx_model_container_t::DecodeNextRaw] Decompression corruption: " << n_samples_obs << "/" << n_samples_wah  << std::endl;
             exit(1);
@@ -1536,8 +1562,17 @@ int djn_ctx_model_container_t::DecodeRaw(uint8_t* data, uint32_t& len) {
 
     if (ewah->clean > 0 || ewah->dirty > 0) {
         ++objects;
-        hist_alts[ewah->ref] += ewah->clean * 32;
+        // hist_alts[ewah->ref] += ewah->clean * 32;
     }
+
+    uint32_t n_alts_obs = 0;
+    // std::cerr << "alts=";
+    for (int i = 0; i < 256; ++i) {
+        // if (hist_alts[i]) std::cerr << i << ":" << hist_alts[i] << ",";
+        n_alts_obs += hist_alts[i];
+    }
+    // std::cerr << " n_alts_obs=" << n_alts_obs << "/" << n_samples_wah << std::endl;
+    assert(n_alts_obs == n_samples_wah);
 
     return objects;
 }

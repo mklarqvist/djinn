@@ -27,7 +27,7 @@ LIBVER_PATCH := $(shell echo $(LIBVER_PATCH_SCRIPT))
 LIBVER := $(shell echo $(LIBVER_SCRIPT))
 
 OPTFLAGS  := -O3 -DLZ4_AVAIL -DZSTD_AVAIL
-CFLAGS     = -std=c99 $(OPTFLAGS) $(DEBUG_FLAGS) -g
+CFLAGS     = -std=c99   $(OPTFLAGS) $(DEBUG_FLAGS) -g
 CXXFLAGS   = -std=c++0x $(OPTFLAGS) $(DEBUG_FLAGS) -g
 CXX_SOURCE = frequency_model.cpp pbwt.cpp djinn.cpp ctx_model.cpp ewah_model.cpp
 C_SOURCE   = 
@@ -36,7 +36,7 @@ DEBUG_FLAGS =
 DEBUG_LIBS  =
 OPENSSL_PATH = 
 
-LIBS := -lzstd -llz4 -lhts
+LIBS := -lzstd -llz4
 
 # OS X linker doesn't support -soname, and use different extension
 # see : https://developer.apple.com/library/mac/documentation/DeveloperTools/Conceptual/DynamicLibraries/100-Articles/DynamicLibraryDesignGuidelines.html
@@ -73,9 +73,9 @@ library: $(OBJECTS)
 	ln -sf libdjinn.$(SHARED_EXT).$(LIBVER) libdjinn.$(SHARED_EXT)
 
 djinn: library
-	$(CXX) main.cpp -L$(PWD) -pthread $(LIBS) -ldjinn '-Wl,-rpath,$$ORIGIN/,-rpath,$(PWD)' -o djinn
+	$(CXX) $(CXXFLAGS) main.cpp -L$(PWD) -pthread $(LIBS) -lhts -ldjinn '-Wl,-rpath,$$ORIGIN/,-rpath,$(PWD)' -o djinn
 
 clean:
-	rm -f *.o *.a *.so.* *.so djinn
+	rm -f *.o *.a *.$(SHARED_EXT).* *.$(SHARED_EXT) djinn
 
 .PHONY: all library clean debug debug_size

@@ -296,8 +296,13 @@ int djinn_ewah_model::DecodeNext(djinn_variant_t*& variant) {
     variant->data_len = 0;
     variant->errcode  = 0;
     variant->unpacked = DJN_UN_IND;
+    variant->n_allele = 0;
 
     int ret = tgt_container->DecodeNext(q,q_len,variant->data,variant->data_len);
+    if (ret <= 0) {
+        variant->errcode = 1;
+        return ret;
+    }
     
     // Compute number of alleles.
     uint32_t max_allele = 0;
@@ -937,6 +942,13 @@ int djn_ewah_model_container_t::DecodeRaw_nm(uint8_t* data, uint32_t& len) {
     }
 
     // std::cerr << "[decoded nm] " << hist_alts[0] << "," <<hist_alts[1] << std::endl;
+    uint32_t n_alts_obs = 0;
+    for (int i = 0; i < 256; ++i) {
+        n_alts_obs += hist_alts[i];
+    }
+    // std::cerr << "alts=" << n_alts_obs << "/" << n_samples_wah_nm << std::endl;
+    assert(n_alts_obs == n_samples_wah_nm);
+
     return objects;
 }
 
@@ -1301,7 +1313,7 @@ int djn_ewah_model_container_t::DecodeRaw(uint8_t* data, uint32_t& len) {
         }
     }
 
-    std::cerr << "[decoded 2nm] " << hist_alts[0] << "," <<hist_alts[1] << std::endl;
+    // std::cerr << "[decoded 2nm] " << hist_alts[0] << "," <<hist_alts[1] << std::endl;
 
     return objects;
 }
@@ -1323,6 +1335,7 @@ int djn_ewah_model_container_t::DecodeNextRaw(djinn_variant_t*& variant) {
     variant->data_len = 0;
     variant->errcode  = 0;
     variant->unpacked = DJN_UN_EWAH;
+    variant->n_allele = 0;
 
     // Decode stream archetype.
     uint8_t type = p[p_len++];
@@ -1334,7 +1347,10 @@ int djn_ewah_model_container_t::DecodeNextRaw(djinn_variant_t*& variant) {
     default: std::cerr << "[djn_ctx_model_container_t::DecodeNextRaw] decoding error: " << (int)type << " (valid=[0,1])" << std::endl; return -1;
     }
 
-    if (ret <= 0) return ret;
+    if (ret <= 0) {
+        variant->errcode = 1;
+        return ret;
+    }
 
     if (variant->d == nullptr) {
         variant->d = new djn_variant_dec_t;
@@ -1357,6 +1373,7 @@ int djn_ewah_model_container_t::DecodeNextRaw(djinn_variant_t*& variant) {
     variant->d->n_dirty = 0;
     // Set bitmap type.
     variant->d->dirty_type = type;
+    variant->d->n_samples  = n_samples;
 
     // Construct EWAH mapping
     uint32_t local_offset = 0;
@@ -1371,8 +1388,11 @@ int djn_ewah_model_container_t::DecodeNextRaw(djinn_variant_t*& variant) {
         uint32_t to = ret_pos + ewah->clean*32 > n_samples ? n_samples : ret_pos + ewah->clean*32;
         ret_pos = to;
 
+        // Store first dirty pointer only.
+        variant->d->dirty[variant->d->n_dirty++] = (uint32_t*)(&variant->data[local_offset]);
+
         for (int i = 0; i < ewah->dirty; ++i) {
-            variant->d->dirty[variant->d->n_dirty++] = (uint32_t*)(&variant->data[local_offset]);
+            // variant->d->dirty[variant->d->n_dirty++] = (uint32_t*)(&variant->data[local_offset]);
             to = ret_pos + 32 > n_samples ? n_samples : ret_pos + 32;
             local_offset += sizeof(uint32_t);
             ret_pos = to;

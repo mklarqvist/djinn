@@ -117,8 +117,8 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
     djn_ewah.StartEncoding(permute, reset_models);
     // djn_ewah.codec = djinn::CompressionStrategy::LZ4;
     
-    std::string temp_file = "/media/mdrk/08dcb478-5359-41f4-97c8-469190c8a034/djn_debug.bin";
-    // std::string temp_file = "/Users/Mivagallery/Downloads/djn_debug.bin";
+    // std::string temp_file = "/media/mdrk/08dcb478-5359-41f4-97c8-469190c8a034/djn_debug.bin";
+    std::string temp_file = "/Users/Mivagallery/Downloads/djn_debug.bin";
     std::ofstream test_write(temp_file, std::ios::out | std::ios::binary);
     if (test_write.good() == false) {
         std::cerr << "could not open outfile handle" << std::endl;
@@ -220,7 +220,7 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
 
     djinn::djinn_model* djn_decode = new djinn::djinn_ctx_model;
     // djinn::djinn_ctx_model djn_ctx_decode;
-    uint8_t* vcf_out_buffer = new uint8_t[4*reader->n_samples_+65536];
+    char* vcf_out_buffer = new char[4*reader->n_samples_+65536];
     uint32_t len_vcf = 0;
     djinn::djinn_ewah_model djn_ewah_decode;
 
@@ -260,11 +260,20 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
             int objs = djn_decode->DecodeNextRaw(variant);
             assert(objs > 0);
 
-            std::cerr << variant->ploidy << "," << variant->n_allele << "," << variant->data_len << "," << variant->errcode << "," << variant->unpacked << ": data=";
-            for (int i = 0; i < variant->d->n_ewah; ++i) {
-                std::cerr << variant->d->ewah[i]->clean << ":" << variant->d->ewah[i]->ref << "+" << variant->d->ewah[i]->dirty << ", ";
-            }
-            std::cerr << std::endl;
+            // std::cerr << variant->ploidy << "," << variant->n_allele << "," << variant->data_len << "," << variant->errcode << "," << variant->unpacked << ": data=";
+            // for (int i = 0; i < variant->d->n_ewah; ++i) {
+            //     std::cerr << variant->d->ewah[i]->clean << ":" << variant->d->ewah[i]->ref << "+" << variant->d->ewah[i]->dirty << ", ";
+            //     for (int j = 0; j < variant->d->ewah[i]->dirty; ++j) {
+            //         std::cerr << std::bitset<32>(*variant->d->dirty[i+j]);
+            //     }
+            //     std::cerr << " ";
+            // }
+            // std::cerr << std::endl;
+
+            len_vcf = variant->ToVcfDebug(vcf_out_buffer);
+            assert(len_vcf > 0);
+            std::cout.write(vcf_out_buffer, len_vcf);
+            len_vcf = 0;
 
             // Write Vcf-encoded data to a local buffer and then write to standard out.
             // for (int j = 0; j < variant->data_len; j += variant->ploidy) {
