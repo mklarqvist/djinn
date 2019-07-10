@@ -14,16 +14,17 @@ Implemented algorithms:
 
 For reference, our proposed compression algorithms were tested and compared against each other and against the incumbent standard Vcf and Bcf formats using a disk-based benchmark. The host architecture used is a 10 nm Cannon Lake Core i3-8121U with gcc (GCC) 7.3.1 20180303 (Red Hat 7.3.1-5).
 
-| Method                   | File size (MB) | Comp. Time (s) | Ratio (VCF) | Ratio (BCF) | Decompress (MB/s) | Inflate (MB/s) | Output VCF (s) |
+| Method                   | File size (MB) | Comp. Time (s) | Ratio (VCF) | Ratio (BCF) | Decompress* (MB/s) | Inflate** (MB/s) | Output VCF (s) |
 |--------------------------|----------------|----------------|------------------|------------------|-------------------|----------------|----------------|
 | djinn PBWT+EWAH+ZSTD-19  | 21.36          | 119.9        | 814.2          | 10.7           | 24119           | 1140        | 31.0         |
-| djinn PBWT+EWAH+LZ4-HC-9 | 26.48          | 93.9         | 656.7          | 8.6            | 25917           | 1143        | 28.2         |
-| djinn PBWT+CTX           | 16.19          | 83.0         | 1074.1          | 14.2             | 3757           | 907         | 34.1         |
-| djinn EWAH+LZ4-HC-9      | 57.05          | 84.9         | 304.8          | 4.0             | 15241           | 2827         | 19.0          |
+| djinn PBWT+EWAH+LZ4-HC-9 | 26.48          | 93.9         | 656.7          | 8.6            | **25917**           | 1143        | 28.2         |
+| djinn PBWT+CTX           | **16.19**          | **83.0**         | **1074.1**          | **14.2**             | 3757           | 907         | 34.1         |
+| djinn EWAH+LZ4-HC-9      | 57.05          | 84.9         | 304.8          | 4.0             | 15241           | **2827**         | **19.0**          |
 | djinn EWAH+ZSTD-19       | 41.84          | 207.4        | 415.6          | 5.4            | 12853           | 2667        | 19.9         |
 | djinn CTX                | 86.7           | 73.6         | 200.5          | 2.6            | 1118           | 858        | 33.2         |
 | BCF                      | 229.9          | NA             | 80.5            | 1                | NA                | NA             | 148.3        |
 | VCF.gz                   | 281.34         | NA             | 65.8            | 0.82             | NA                | NA             | 457.6         |
+\* Decompress: decompressing into the succinct EWAH data structure. \*\*Inflate: decompress and inflate into byte arrays of length N (as in uBcf).
 
 Djinn can offer strong compression with slower decompression speeds using statistical models (CTX). Reversely, the EWAH-based algorithms provide stronger decompression and query speeds with lower compression rates. The optimal algorithm dependends on its application context: whether query speeds or compression matters the most.
 
@@ -95,3 +96,7 @@ We are actively developing Djinn and are always interested in improving its qual
 ### Note
 
 This is a collaborative effort between Marcus D. R. Klarqvist ([@klarqvist](https://github.com/mklarqvist/)) and James Bonfield ([@jkbonfield](https://github.com/jkbonfield)).
+
+### License
+
+Djinn is licensed under [MIT](LICENSE)
