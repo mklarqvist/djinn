@@ -560,8 +560,8 @@ public:
     ~djn_ewah_model_t();
 
     int StartEncoding(bool use_pbwt, bool reset = false);
-    size_t FinishEncoding(uint8_t* support_buffer, uint32_t support_cap, CompressionStrategy strat, int c_level);
-    int StartDecoding(uint8_t* support_buffer, uint32_t support_cap, CompressionStrategy strat, bool use_pbwt, bool reset = false);
+    size_t FinishEncoding(uint8_t*& support_buffer, uint32_t& support_cap, CompressionStrategy strat, int c_level);
+    int StartDecoding(uint8_t*& support_buffer, uint32_t& support_cap, CompressionStrategy strat, bool use_pbwt, bool reset = false);
     size_t FinishDecoding() { return 0; } // no effect
     
     void reset();
@@ -588,8 +588,8 @@ public:
     ~djn_ewah_model_container_t();
 
     void StartEncoding(bool use_pbwt, bool reset = false);
-    size_t FinishEncoding(uint8_t* support_buffer, uint32_t support_cap, CompressionStrategy strat, int c_level);
-    void StartDecoding(uint8_t* support_buffer, uint32_t support_cap, CompressionStrategy strat, bool use_pbwt, bool reset = false);
+    size_t FinishEncoding(uint8_t*& support_buffer, uint32_t& support_cap, CompressionStrategy strat, int c_level);
+    void StartDecoding(uint8_t*& support_buffer, uint32_t& support_cap, CompressionStrategy strat, bool use_pbwt, bool reset = false);
 
     inline void ResetBitmaps() { memset(wah_bitmaps, 0, n_wah*sizeof(uint32_t)); }
 

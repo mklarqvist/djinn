@@ -41,21 +41,23 @@ int djn_ewah_model_t::StartEncoding(bool use_pbwt, bool reset) {
     return 1;
 }
 
-size_t djn_ewah_model_t::FinishEncoding(uint8_t* support_buffer, uint32_t support_cap, CompressionStrategy strat, int c_level) {
+size_t djn_ewah_model_t::FinishEncoding(uint8_t*& support_buffer, uint32_t& support_cap, CompressionStrategy strat, int c_level) {
     GeneralCompressor comp;
     switch(strat) {
         case (CompressionStrategy::ZSTD): comp = &ZstdCompress; break;
         case (CompressionStrategy::LZ4):  comp = &Lz4Compress;  break;
     }
     u_len = p_len;
-    int ret = (*comp)(p, p_len, support_buffer, support_cap, c_level);
-    memcpy(p, support_buffer, ret); // copy data back to p
-    p_len = ret;
+    if (p_len != 0) {
+        int ret = (*comp)(p, p_len, support_buffer, support_cap, c_level);
+        memcpy(p, support_buffer, ret); // copy data back to p
+        p_len = ret;
+    }
     // std::cerr << "[djn_ewah_model_t::FinishEncoding] debug=" << u_len << "->" << p_len << "->" << ret << std::endl;
-    return ret;
+    return p_len;
 }
 
-int djn_ewah_model_t::StartDecoding(uint8_t* support_buffer, uint32_t support_cap, CompressionStrategy strat, bool use_pbwt, bool reset) {
+int djn_ewah_model_t::StartDecoding(uint8_t*& support_buffer, uint32_t& support_cap, CompressionStrategy strat, bool use_pbwt, bool reset) {
     if (reset) this->reset();
     if (p == nullptr) return -2;
 
@@ -64,8 +66,19 @@ int djn_ewah_model_t::StartDecoding(uint8_t* support_buffer, uint32_t support_ca
         case (CompressionStrategy::ZSTD): dec = &ZstdDecompress; break;
         case (CompressionStrategy::LZ4):  dec = &Lz4Decompress;  break;
     }
-    int ret = (*dec)(p, p_len, support_buffer, support_cap);
-    memcpy(p, support_buffer, ret); // copy data back to p
+
+    if (support_cap < u_len) {
+        uint8_t* old = support_buffer;
+        support_buffer = new uint8_t[u_len + 65536];
+        memcpy(support_buffer, old, support_cap);
+        delete[] old;
+        support_cap = u_len + 65536;
+    }
+
+    if (p_len != 0) {
+        int ret = (*dec)(p, p_len, support_buffer, support_cap);
+        memcpy(p, support_buffer, ret); // copy data back to p
+    }
     p_len = 0;
 
     return 1;
@@ -133,6 +146,7 @@ int djn_ewah_model_t::Deserialize(std::istream& stream) {
     stream.read((char*)&n_variants, sizeof(uint32_t));
 
     // initiate a buffer if there is none or it's too small
+    // std::cerr << "[Deserialize] " << p_len << "," << u_len << std::endl;
     if (p_cap == 0 || p == nullptr || u_len > p_cap) {
         // std::cerr << "[Deserialize] Limit. p_cap=" << p_cap << "," << "p is nullptr=" << (p == nullptr ? "yes" : "no") << ",p_len=" << p_len << "/" << p_cap << std::endl;
         if (p_free) delete[] p;
@@ -428,17 +442,21 @@ size_t djinn_ewah_model::FinishEncoding() {
         case (CompressionStrategy::LZ4):  comp = &Lz4Compress;  break;
     }
 
-    int ret = (*comp)(p, p_len, q, q_alloc, compression_level);
-    memcpy(p, q, ret); // copy data back to p
-    p_len = ret;
+    if (p_len != 0) {
+        int ret = (*comp)(p, p_len, q, q_alloc, compression_level);
+        memcpy(p, q, ret); // copy data back to p
+        p_len = ret;
+    }
 
     size_t s_models = 0;
     for (int i = 0; i < ploidy_models.size(); ++i) {
-        int ret = ploidy_models[i]->FinishEncoding(q, q_alloc, codec, compression_level); // use q as support buffer
+        uint32_t qa = q_alloc; // workaround for not being able to pass bit-field by reference
+        int ret = ploidy_models[i]->FinishEncoding(q, qa, codec, compression_level); // use q as support buffer
+        q_alloc = qa;
         s_models += ret;
     }
     
-    return ret + s_models;
+    return p_len + s_models;
 }
 
 int djinn_ewah_model::StartDecoding() {
@@ -446,10 +464,10 @@ int djinn_ewah_model::StartDecoding() {
     assert(ploidy_models.size() != 0);
 
     if (q == nullptr) {
-        q = new uint8_t[10000000];
-        q_free = true;
         q_alloc = 10000000;
-        q_len = 0;
+        q = new uint8_t[q_alloc];
+        q_free = true;
+        q_len  = 0;
     }
     q_len = 0;
 
@@ -458,12 +476,16 @@ int djinn_ewah_model::StartDecoding() {
         case (CompressionStrategy::ZSTD): dec = &ZstdDecompress; break;
         case (CompressionStrategy::LZ4):  dec = &Lz4Decompress;  break;
     }
-    int ret = (*dec)(p, p_len, q, q_alloc);
-    memcpy(p, q, ret); // copy data back to p
+    if (p_len != 0) {
+        int ret = (*dec)(p, p_len, q, q_alloc);
+        memcpy(p, q, ret); // copy data back to p
+    }
     p_len = 0;
 
     for (int i = 0; i <ploidy_models.size(); ++i) {
-        ploidy_models[i]->StartDecoding(q,q_alloc,codec,use_pbwt, init);
+        uint32_t qa = q_alloc; // workaround for not being able to pass bit-field by reference
+        ploidy_models[i]->StartDecoding(q,qa,codec,use_pbwt,init);
+        q_alloc = qa;
     }
 
     return 1;
@@ -628,7 +650,7 @@ int djinn_ewah_model::Deserialize(std::istream& stream) {
 
     // n_models,n_variants
     int n_models = 0;
-    stream.read((char*)&n_models, sizeof(int));
+    stream.read((char*)&n_models,   sizeof(int));
     stream.read((char*)&n_variants, sizeof(uint32_t));
 
     // Deserialize bit-packed controller.
@@ -751,7 +773,7 @@ void djn_ewah_model_container_t::StartEncoding(bool use_pbwt, bool reset) {
     model_nm->StartEncoding(use_pbwt, reset);
 }
 
-size_t djn_ewah_model_container_t::FinishEncoding(uint8_t* support_buffer, uint32_t support_cap, CompressionStrategy strat, int c_level) {
+size_t djn_ewah_model_container_t::FinishEncoding(uint8_t*& support_buffer, uint32_t& support_cap, CompressionStrategy strat, int c_level) {
     if (model_2mc.get() == nullptr) return -1;
     if (model_nm.get() == nullptr) return -1;
 
@@ -764,15 +786,17 @@ size_t djn_ewah_model_container_t::FinishEncoding(uint8_t* support_buffer, uint3
         case (CompressionStrategy::LZ4):  comp = &Lz4Compress; break;
     }
 
-    int ret = (*comp)(p, p_len, support_buffer, support_cap, c_level);
-    memcpy(p, support_buffer, ret); // copy data back to p
-    p_len = ret;
+    if (p_len != 0) {
+        int ret = (*comp)(p, p_len, support_buffer, support_cap, c_level);
+        memcpy(p, support_buffer, ret); // copy data back to p
+        p_len = ret;
+    }
 
-    size_t s_rc  = ret;
+    size_t s_rc  = p_len;
     return s_rc + s_2mc + s_nm;
 }
 
-void djn_ewah_model_container_t::StartDecoding(uint8_t* support_buffer, uint32_t support_cap, CompressionStrategy strat, bool use_pbwt, bool reset) {
+void djn_ewah_model_container_t::StartDecoding(uint8_t*& support_buffer, uint32_t& support_cap, CompressionStrategy strat, bool use_pbwt, bool reset) {
     if (model_2mc.get() == nullptr) return;
     if (model_nm.get() == nullptr) return;
 
@@ -809,8 +833,10 @@ void djn_ewah_model_container_t::StartDecoding(uint8_t* support_buffer, uint32_t
         case (CompressionStrategy::ZSTD): dec = &ZstdDecompress; break;
         case (CompressionStrategy::LZ4):  dec = &Lz4Decompress;  break;
     }
-    int ret = (*dec)(p, p_len, support_buffer, support_cap);
-    memcpy(p, support_buffer, ret); // copy data back to p
+    if (p_len != 0) {    
+        int ret = (*dec)(p, p_len, support_buffer, support_cap);
+        memcpy(p, support_buffer, ret); // copy data back to p
+    }
     p_len = 0;
 
     model_2mc->StartDecoding(support_buffer, support_cap, strat, use_pbwt, reset);
@@ -819,7 +845,7 @@ void djn_ewah_model_container_t::StartDecoding(uint8_t* support_buffer, uint32_t
 
 int djn_ewah_model_container_t::Encode2mc(uint8_t* data, uint32_t len) {
     if (data == nullptr) return -1;
-    if (n_samples == 0) return -2;
+    if (n_samples == 0)  return -2;
     
     if (wah_bitmaps == nullptr) {
         n_samples_wah = std::ceil((float)n_samples / 32) * 32;
