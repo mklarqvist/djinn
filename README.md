@@ -24,6 +24,7 @@ For reference, our proposed compression algorithms were tested and compared agai
 | djinn CTX                | 86.7           | 73.6         | 200.5          | 2.6            | 1118           | 858        | 33.2         |
 | BCF                      | 229.9          | NA             | 80.5            | 1                | NA                | NA             | 148.3        |
 | VCF.gz                   | 281.34         | NA             | 65.8            | 0.82             | NA                | NA             | 457.6         |
+
 \* Decompress: decompressing into the succinct EWAH data structure. \*\*Inflate: decompress and inflate into byte arrays of length N (as in uBcf).
 
 Djinn can offer strong compression with slower decompression speeds using statistical models (CTX). Reversely, the EWAH-based algorithms provide stronger decompression and query speeds with lower compression rates. The optimal algorithm dependends on its application context: whether query speeds or compression matters the most.
