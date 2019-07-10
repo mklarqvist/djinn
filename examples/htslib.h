@@ -26,8 +26,8 @@
 /**
  * In this example we will read data using the provided support class VcfReader
  * that interacts directly with Htslib data structures to consume either 
- * Vcf/Bcf/Vcf.gz/BGZF-based files either from standard in (pipe) or from a 
- * file handle (from disk).
+ * Vcf/Bcf/Vcf.gz/BGZF files either from stdin (pipe) or from a 
+ * file handle (disk).
  * 
  * 
  * @param input_file   Input file string: file path or "-" to read from stdin
@@ -35,7 +35,7 @@
  * @param type         1: ctx model, 2; LZ4-EWAH, 4: ZSTD-EWAH
  * @param permute      Use PBWT preprocessor
  * @param reset_models Reset models for each block (random access)
- * @return int         Returns non-negative value when successful or a negative value otherwise.
+ * @return int         Returns the number of imported variants when successful or a negative value otherwise.
  */
 int ImportHtslib(std::string input_file,   // input file: "-" for stdin
                  std::string output_file,  // output file: "-" for stdout
@@ -102,6 +102,8 @@ int ImportHtslib(std::string input_file,   // input file: "-" for stdin
             djn_ctx->StartEncoding(permute, reset_models);
         }
 
+        // Error handling: if either bcf1_t or bcf_hdr_t pointers are NULL then
+        // a problem has occured.
         if (reader->bcf1_   == NULL) return -2;
         if (reader->header_ == NULL) return -3;
 
@@ -142,7 +144,7 @@ int ImportHtslib(std::string input_file,   // input file: "-" for stdin
         delete out_stream;
     }
 
-    return 1;
+    return n_lines;
 }
 
 #endif
