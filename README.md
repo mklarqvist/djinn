@@ -2,24 +2,24 @@
 
 ![screenshot](DJINN.png)
 
-Djinn is an open-source C++ library for efficiently storing and analyzing whole-genome genotypes and/or haplotypes. Unlike previous efforts, the Djinn algortihms support multiple alternative alleles (up to 16 by default), mixed phasing, and are embarrassingly parallel because of its blocked memory layout. Note: this library is for genotypes/haplotypes only---there are no included functions to store contig, position, and ref/alt information. The library is currently limited to diploid and haploid
+Djinn is an open-source single-header C++ library for efficiently storing and analyzing large collections of genotypes and/or haplotypes. 
+
+Unlike previous efforts, the Djinn algortihms support multiple alternative alleles (up to 16 by default), mixed phasing, and are embarrassingly parallel because of its blocked memory layout. Note: this library is for genotypes/haplotypes only---there are no included functions to store contig, position, and ref/alt information. The library is currently limited to diploid and haploid
 samples.
 
 Implemented algorithms:
 
-- [x] Haplotype PBWT (hPWBT) with RLE-bitmap hybrid (RLE-H) compression.
-- [x] Haplotype PBWT with higher-order context modelling.
+- [x] PBWT-preprocessor with RLE-bitmap hybrid (EWAH) compression.
+- [x] PBWT-preprocessor with higher-order context modelling.
 - [ ] Genotype PBWT (gtPBWT) with RLE-bitmap hybrid compression (from [Tachyon](https://github.com/mklarqvist/tachyon)). 
-- [x] RLE-bitmap hybrid compression for use with the gtOcc data structure.
-- [ ] Block-wise genotype PBWT with word-aligned hybrid compression.
 
 ### Building
 
-Building requires the packages: [htslib](https://github.com/samtools/htslib), [zstd](https://github.com/facebook/zstd), [lz4](https://github.com/lz4/lz4), and `openssl` if debugging. Build with `make` and build with debug flags that perform a very large number of correctness tests by invoking `make debug`. Compile with `make debug_size` to get compression performance dumped to the console.
+For full support, building requires [zstd](https://github.com/facebook/zstd) or [lz4](https://github.com/lz4/lz4). [htslib](https://github.com/samtools/htslib) is required if you intend on using the optional support class `VcfReader.h`. Build with `make` in the root directory.
 
 ### Usage
 
-Compile and execute `djinn` to display available command line options. For usage of the library, see `main.cpp` for an example. Detailed examples coming soon.
+
 
 ### Note
 
@@ -114,3 +114,18 @@ time bcftools query -f "[\t%GT]\n" /media/mdrk/NVMe/1kgp3/hg38_1kgp3_chr20_bare.
 ```
 
 For diploid and biallelic sites the memory cost for genotypes in uncompressed bcf is NM bytes and M(4N-1) bytes in raw vcf.
+
+## Algorithm overview
+
+## Getting help
+
+We are actively developing Djinn and are always interested in improving its quality. If you run into an issue, please report the problem on our [Issue tracker](https://github.com/mklarqvist/djinn/issues). Be sure to add enough detail to your report that we can reproduce the problem and address it.
+
+## Developers' Guide
+
+Djinn is designed as a programming library providing simple C++ APIs to build/load an archieve and to query it. The `examples/` directory contains a variety of examples that demonstrates typical uses of the C++ APIs. The library requires only a single header: `djinn.h`. This file contains additional detailed API documentation. 
+Djinn aims to keep the APIs for `djinn_*` classes in `djinn.h` stable.
+
+## Limitations
+
+* Djinn is a framework for storing and querying sequence variant data only. This excludes all other meta data such as positional information (contig and position) and reference/alternative allele encodings.
