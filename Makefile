@@ -16,36 +16,63 @@
 # under the License.
 ###################################################################
 
-OPTFLAGS  := -O3
-CFLAGS     = -std=c99 $(OPTFLAGS) $(DEBUG_FLAGS)
-CPPFLAGS   = -std=c++0x $(OPTFLAGS) $(DEBUG_FLAGS)
-CPP_SOURCE = frequency_model.cpp main.cpp pbwt.cpp range_coder.cpp gt_compressor.cpp djinn.cpp
+# Version numbers slices from the source header
+LIBVER_MAJOR_SCRIPT:=`sed -n '/const int32_t DJINN_VERSION_MAJOR = /s/.*[[:blank:]]\([0-9][0-9]*\).*/\1/p' < lib/djinn.h`
+LIBVER_MINOR_SCRIPT:=`sed -n '/const int32_t DJINN_VERSION_MINOR = /s/.*[[:blank:]]\([0-9][0-9]*\).*/\1/p' < lib/djinn.h`
+LIBVER_PATCH_SCRIPT:=`sed -n '/const int32_t DJINN_VERSION_PATCH = /s/.*[[:blank:]]\([0-9][0-9]*\).*/\1/p' < lib/djinn.h`
+LIBVER_SCRIPT:= $(LIBVER_MAJOR_SCRIPT).$(LIBVER_MINOR_SCRIPT).$(LIBVER_PATCH_SCRIPT)
+LIBVER_MAJOR := $(shell echo $(LIBVER_MAJOR_SCRIPT))
+LIBVER_MINOR := $(shell echo $(LIBVER_MINOR_SCRIPT))
+LIBVER_PATCH := $(shell echo $(LIBVER_PATCH_SCRIPT))
+LIBVER := $(shell echo $(LIBVER_SCRIPT))
+
+OPTFLAGS  := -O3 -DHAVE_ZLIB -DHAVE_ZSTD -DHAVE_LZ4
+CFLAGS     = -std=c99   $(OPTFLAGS) $(DEBUG_FLAGS) -g
+CXXFLAGS   = -std=c++0x $(OPTFLAGS) $(DEBUG_FLAGS) -g
+CXX_SOURCE = lib/frequency_model.cpp lib/pbwt.cpp lib/djinn.cpp lib/ctx_model.cpp lib/ewah_model.cpp
 C_SOURCE   = 
-OBJECTS    = $(C_SOURCE:.c=.o) $(CPP_SOURCE:.cpp=.o)
+OBJECTS    = $(C_SOURCE:.c=.o) $(CXX_SOURCE:.cpp=.o)
 DEBUG_FLAGS =
 DEBUG_LIBS  =
+OPENSSL_PATH = 
+
+LIBS := -lzstd -llz4
+
+# OS X linker doesn't support -soname, and use different extension
+# see : https://developer.apple.com/library/mac/documentation/DeveloperTools/Conceptual/DynamicLibraries/100-Articles/DynamicLibraryDesignGuidelines.html
+# Use LDFLAGS for passing additional flags. Avoid using LD_LIB_FLAGS.
+ifneq ($(shell uname), Darwin)
+SHARED_EXT   = so
+LD_LIB_FLAGS = -shared '-Wl,-rpath-link,$$ORIGIN/,-rpath-link,$(PWD),-soname,libdjinn.$(SHARED_EXT)' $(LDFLAGS)
+else
+SHARED_EXT   = dylib
+LD_LIB_FLAGS = -dynamiclib -install_name "@rpath/libdjinn.$(SHARED_EXT)" '-Wl,-rpath,@loader_path/,-rpath,$(PWD)' $(LDFLAGS) 
+endif
 
 # Default target
 all: djinn
 
-debug_size: DEBUG_FLAGS += -DDEBUG_SIZE
-debug_size: djinn
-debug: DEBUG_FLAGS += -DDEBUG_PBWT -DDEBUG_WAH -DDEBUG_CONTEXT -DDEBUG_SIZE -g
-debug: DEBUG_LIBS += -lcrypto
-debug: djinn
+library: libdjinn.a libdjinn.$(SHARED_EXT).$(LIBVER)
 
 # Generic rules
-%.o: %.c
-	$(CC) $(CFLAGS) -c -o $@ $<
-
 %.o: %.cpp
-	$(CXX) $(CPPFLAGS) -c -o $@ $<
+	$(CXX) $(CXXFLAGS) $(INCLUDE_PATH) -fPIC -c -DVERSION=\"$(GIT_VERSION)\" -o $@ $<
 
-djinn: $(OBJECTS)
-	$(CXX) $(CPPFLAGS) $(OBJECTS) -lzstd -llz4 -lhts $(DEBUG_LIBS) -o djinn
+libdjinn.$(SHARED_EXT).$(LIBVER): $(OBJECTS)
+	@echo 'Building dynamic library...'
+	$(CXX) $(LD_LIB_FLAGS) $(LIBRARY_PATHS) $(OBJECTS) -pthread $(LIBS) -o libdjinn.$(SHARED_EXT).$(LIBVER)
+	@echo 'Symlinking library...'
+	ln -sf libdjinn.$(SHARED_EXT).$(LIBVER) libdjinn.$(SHARED_EXT)
+	ln -sf libdjinn.$(SHARED_EXT).$(LIBVER) libdjinn.$(SHARED_EXT)
+
+libdjinn.a: $(OBJECTS)
+	@echo 'Building static library...'
+	$(AR) crs libdjinn.a $(OBJECTS)
+
+djinn: library
+	$(CXX) $(CXXFLAGS) main.cpp -Ilib/ -L$(PWD) -pthread $(LIBS) -lhts -ldjinn '-Wl,-rpath,$$ORIGIN/,-rpath,$(PWD)' -o djinn
 
 clean:
-	rm -f $(OBJECTS)
-	rm -f djinn
+	rm -f *.o lib/*.o *.a *.$(SHARED_EXT).* *.$(SHARED_EXT)
 
-.PHONY: all clean debug debug_size
+.PHONY: all library clean
