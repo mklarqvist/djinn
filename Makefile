@@ -49,33 +49,30 @@ SHARED_EXT   = dylib
 LD_LIB_FLAGS = -dynamiclib -install_name "@rpath/libdjinn.$(SHARED_EXT)" '-Wl,-rpath,@loader_path/,-rpath,$(PWD)' $(LDFLAGS) 
 endif
 
-
 # Default target
 all: djinn
 
-debug_size: DEBUG_FLAGS += -DDEBUG_SIZE
-debug_size: djinn
-debug: DEBUG_FLAGS += -DDEBUG_PBWT -DDEBUG_WAH -DDEBUG_CONTEXT -DDEBUG_SIZE -g
-debug: DEBUG_LIBS += -lcrypto
-debug: djinn
+library: libdjinn.a libdjinn.$(SHARED_EXT).$(LIBVER)
 
 # Generic rules
 %.o: %.cpp
 	$(CXX) $(CXXFLAGS) $(INCLUDE_PATH) -fPIC -c -DVERSION=\"$(GIT_VERSION)\" -o $@ $<
 
-library: $(OBJECTS)
+libdjinn.$(SHARED_EXT).$(LIBVER): $(OBJECTS)
 	@echo 'Building dynamic library...'
 	$(CXX) $(LD_LIB_FLAGS) $(LIBRARY_PATHS) $(OBJECTS) -pthread $(LIBS) -o libdjinn.$(SHARED_EXT).$(LIBVER)
-	@echo 'Building static library...'
-	$(AR) crs libdjinn.a $(OBJECTS)
 	@echo 'Symlinking library...'
 	ln -sf libdjinn.$(SHARED_EXT).$(LIBVER) libdjinn.$(SHARED_EXT)
 	ln -sf libdjinn.$(SHARED_EXT).$(LIBVER) libdjinn.$(SHARED_EXT)
+
+libdjinn.a: $(OBJECTS)
+	@echo 'Building static library...'
+	$(AR) crs libdjinn.a $(OBJECTS)
 
 djinn: library
 	$(CXX) $(CXXFLAGS) main.cpp -Ilib/ -L$(PWD) -pthread $(LIBS) -lhts -ldjinn '-Wl,-rpath,$$ORIGIN/,-rpath,$(PWD)' -o djinn
 
 clean:
-	rm -f *.o lib/*.o *.a *.$(SHARED_EXT).* *.$(SHARED_EXT) djinn
+	rm -f *.o lib/*.o *.a *.$(SHARED_EXT).* *.$(SHARED_EXT)
 
-.PHONY: all library clean debug debug_size
+.PHONY: all library clean

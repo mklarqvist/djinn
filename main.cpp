@@ -3,6 +3,9 @@
 #include "vcf_reader.h"
 #include "djinn.h"
 
+#include "examples/htslib.h"
+#include "examples/iterate_vcf.h"
+
 #include <algorithm>//sort
 #include <fstream>//iostreams
 #include <iostream>//cerr/cout
@@ -18,12 +21,12 @@ std::string MicroPrettyString(uint32_t ms) {
     else return time + std::to_string(ms/1000) + "ms";
 }
 
-int ReadHtslib();
 int ReadRaw();
 int WriteToStream();
 int WriteToFile();
 int Decode();
 int DecodeRaw();
+int OutputVcf();
 
 // temp
 int BenchDecodeNextRaw(std::string in_file, int64_t n_s, uint32_t n_blocks, uint32_t n_lines, uint64_t data_in_vcf) {
@@ -419,7 +422,8 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
 
 void usage() {
     printf("djinn\n");
-    printf("   -i STRING input file (vcf,vcf.gz,bcf, or ubcf (required))\n");
+    printf("   -i STRING input file (vcf,vcf.gz,bcf, or ubcf)(required)\n");
+    printf("   -o STRING output destination file or \"-\" for standard out\n");
     printf("   -c BOOL   compress file\n");
     printf("   -d BOOL   decompress file\n");
     printf("   -z BOOL   compress with RLE-hybrid + ZSTD-19\n");
@@ -442,6 +446,7 @@ int main(int argc, char** argv) {
     int option_index = 0;
 	static struct option long_options[] = {
 		{"input",  required_argument, 0,  'i' },
+        {"output",  optional_argument, 0,  'o' },
         {"compress",  required_argument, 0,  'c' },
         {"decompress",  required_argument, 0,  'd' },
 		{"zstd",   optional_argument, 0,  'z' },
@@ -452,7 +457,7 @@ int main(int argc, char** argv) {
 		{0,0,0,0}
 	};
 
-    std::string input;
+    std::string input, output = "-";
     bool zstd = false;
     bool lz4 = true;
     bool context = false;
@@ -461,7 +466,7 @@ int main(int argc, char** argv) {
     bool permute = true;
 
     int c;
-    while ((c = getopt_long(argc, argv, "i:zlcdmpP?", long_options, &option_index)) != -1){
+    while ((c = getopt_long(argc, argv, "i:o:zlcdmpP?", long_options, &option_index)) != -1){
 		switch (c){
 		case 0:
 			std::cerr << "Case 0: " << option_index << '\t' << long_options[option_index].name << std::endl;
@@ -469,13 +474,16 @@ int main(int argc, char** argv) {
 		case 'i':
 			input = std::string(optarg);
 			break;
+        case 'o':
+			output = std::string(optarg);
+			break;
 		
-        case 'z': zstd = true; lz4 = false; context = false; break;
-        case 'l': zstd = false; lz4 = true; context = false; break;
-        case 'm': zstd = false; lz4 = false; context = true; break;
-        case 'c': compress = true; decompress = false; break;
-        case 'd': compress = false; decompress = true; break;
-        case 'p': permute = true; break;
+        case 'z': zstd = true;  lz4 = false; context = false; break;
+        case 'l': zstd = false; lz4 = true;  context = false; break;
+        case 'm': zstd = false; lz4 = false; context = true;  break;
+        case 'c': compress = true;  decompress = false; break;
+        case 'd': compress = false; decompress = true;  break;
+        case 'p': permute = true;  break;
         case 'P': permute = false; break;
 
 		default:
@@ -490,15 +498,15 @@ int main(int argc, char** argv) {
 	}
 
     assert(zstd || lz4 || context);
-    int type = (zstd << 2) | (lz4 << 1) | (context << 0);
+    uint32_t type = (zstd << 2) | (lz4 << 1) | (context << 0);
 
+    bool reset = true;
     if (compress) {
-        return(ReadVcfGT(input, type, permute));
+        return ImportHtslib(input, output, type, permute, reset);
     }
 
     if (decompress) {
-        // return(DecompressExample(input, type));
-        return EXIT_FAILURE;
+        return IterateVcf(input, type);
     }
 
     return EXIT_FAILURE;

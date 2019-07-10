@@ -21,7 +21,7 @@
 #include <cstddef>//size_t
 #include <cstdint>//uint
 
-#include <cstdlib>//malloc
+// #include <cstdlib>//malloc
 #include <cstring>//memcpy
 #include <cassert>//assert
 
