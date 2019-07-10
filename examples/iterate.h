@@ -52,14 +52,13 @@ int Iterate(std::string input_file, int model) {
 
     djinn::djinn_model* djn_decode = nullptr;
     if (model == 1) djn_decode = new djinn::djinn_ctx_model();
-    else if(model == 2) djn_decode = new djinn::djinn_ewah_model();
-    else return -3;
+    else if(model == 2 || model == 4) djn_decode = new djinn::djinn_ewah_model();
+    else {
+        std::cerr << "unknown model: " << model << std::endl;
+        return -3;
+    }
 
-    char* vcf_out_buffer = new char[4*65536];
-    uint32_t len_vcf   = 0;
     uint32_t n_lines   = 0;
-    uint64_t b_out_vcf = 0;
-
     djinn::djinn_variant_t* variant = nullptr;
 
     while (true) {
@@ -72,8 +71,6 @@ int Iterate(std::string input_file, int model) {
             assert(objs > 0);
         }
     }
-
-    delete[] vcf_out_buffer;
     delete variant;
     delete djn_decode;
 

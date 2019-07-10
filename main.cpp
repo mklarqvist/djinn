@@ -5,6 +5,8 @@
 
 #include "examples/htslib.h"
 #include "examples/iterate_vcf.h"
+#include "examples/iterate_raw.h"
+#include "examples/iterate.h"
 
 #include <algorithm>//sort
 #include <fstream>//iostreams
@@ -15,232 +17,51 @@
 // Definition for microsecond timer.
 typedef std::chrono::high_resolution_clock::time_point clockdef;
 
-std::string MicroPrettyString(uint32_t ms) {
-    std::string time;
-    if (ms < 1000) return time + std::to_string(ms) + "us";
-    else return time + std::to_string(ms/1000) + "ms";
+int Benchmark(std::string input_file,   // input file: "-" for stdin
+              std::string output_file,  // output file: "-" for stdout
+              const uint32_t type,      // 1: ctx model, 2; LZ4-EWAH, 4: ZSTD-EWAH
+              const bool permute = true,// PBWT preprocessor
+              const bool reset_models = true)
+{
+    if (output_file == "-") {
+        std::cerr << "cannot benchmark when piping to stdout" << std::endl;
+        return -1;
+    }
+
+    // Encode input Vcf file.
+    clockdef t1 = std::chrono::high_resolution_clock::now();
+    int ret = ImportHtslib(input_file, output_file, type, permute, reset_models);
+    clockdef t2 = std::chrono::high_resolution_clock::now();
+    auto time_span = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1);
+    if (ret <= 0) return -1;
+    std::cerr << "[Import] Imported " << ret << " records in " << time_span.count() << "ms (" << (double)time_span.count()/ret << "ms/record)" << std::endl;
+
+    // Benchmark raw iterator.
+    t1 = std::chrono::high_resolution_clock::now();
+    int ret2 = IterateRaw(output_file, type);
+    t2 = std::chrono::high_resolution_clock::now();
+    time_span = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1);
+    if (ret2 <= 0) return -1;
+    std::cerr << "[IterateRaw] Decoded " << ret << " records in " << time_span.count() << "ms (" << (double)time_span.count()/ret << "ms/record)" << std::endl;
+
+    // Benchmark iterator.
+    t1 = std::chrono::high_resolution_clock::now();
+    int ret3 = Iterate(output_file, type);
+    t2 = std::chrono::high_resolution_clock::now();
+    time_span = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1);
+    if (ret3 <= 0) return -1;
+    std::cerr << "[Iterate] Decoded " << ret << " records in " << time_span.count() << "ms (" << (double)time_span.count()/ret << "ms/record)" << std::endl;
+
+    // Benchmark iterator writing Vcf to stdout.
+    t1 = std::chrono::high_resolution_clock::now();
+    int ret4 = IterateVcf(output_file, type);
+    t2 = std::chrono::high_resolution_clock::now();
+    time_span = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1);
+    if (ret4 <= 0) return -1;
+    std::cerr << "[IterateVcf] Decoded " << ret << " records in " << time_span.count() << "ms (" << (double)time_span.count()/ret << "ms/record)" << std::endl;
+
+    return 1;
 }
-
-int ReadRaw();
-int WriteToStream();
-int WriteToFile();
-int Decode();
-int DecodeRaw();
-int OutputVcf();
-
-// temp
-int BenchDecodeNextRaw(std::string in_file, int64_t n_s, uint32_t n_blocks, uint32_t n_lines, uint64_t data_in_vcf) {
-    // Decode test
-    std::cerr << "============== BenchDecodeNextRaw ===============" << std::endl;
-
-    std::ifstream test_read(in_file, std::ios::in | std::ios::binary | std::ios::ate);
-    if (test_read.good() == false) {
-        std::cerr << "could not open infile handle" << std::endl;
-        return -3;
-    }
-    uint64_t filesize = test_read.tellg();
-    test_read.seekg(0);
-
-    djinn::djinn_model* djn_decode = new djinn::djinn_ewah_model();
-    char* vcf_out_buffer = new char[4*n_s+65536];
-    uint32_t len_vcf   = 0;
-    uint64_t b_out_vcf = 0;
-
-     uint8_t* decode_buf = new uint8_t[10000000];
-
-    djinn::djinn_variant_t* variant = nullptr;
-
-    clockdef t1_decode = std::chrono::high_resolution_clock::now();
-    for (int i = 0; i < n_blocks; ++i) {
-        int decode_ctx_ret = djn_decode->Deserialize(test_read);
-        djn_decode->StartDecoding();
-        for (int i = 0; i < djn_decode->n_variants; ++i) {
-            int objs = djn_decode->DecodeNextRaw(variant);
-            assert(objs > 0);
-
-            // Write Vcf-encoded data to a local buffer and then write to standard out.
-            // len_vcf = variant->ToVcfDebug(vcf_out_buffer);
-            // assert(len_vcf > 0);
-            // std::cout.write(vcf_out_buffer, len_vcf);
-            // b_out_vcf += len_vcf;
-            // len_vcf = 0;
-        }
-    }
-    // Timings total
-    clockdef t2_decode = std::chrono::high_resolution_clock::now();
-    auto time_span_decode = std::chrono::duration_cast<std::chrono::milliseconds>(t2_decode - t1_decode);
-    std::cerr << "[Decode] Decoded " << n_lines << " records in " << time_span_decode.count() 
-        << "ms (" << (double)time_span_decode.count()/n_lines << "ms/record)" << std::endl;
-
-    std::cerr << "Decompression speed: Out=" << data_in_vcf << "->" << (double)(data_in_vcf/1000000.0f)/(time_span_decode.count()/1000.0f) << "MB/s" << std::endl;
-
-    delete[] decode_buf;
-    delete[] vcf_out_buffer;
-    delete variant;
-    delete djn_decode;
-
-    return n_lines;
-}
-
-int BenchDecodeNext(std::string in_file, int64_t n_s, uint32_t n_blocks, uint32_t n_lines, uint64_t data_in_vcf) {
-    // Decode test
-    std::cerr << "============== BenchDecodeNext ===============" << std::endl;
-
-    std::ifstream test_read(in_file, std::ios::in | std::ios::binary | std::ios::ate);
-    if (test_read.good() == false) {
-        std::cerr << "could not open infile handle" << std::endl;
-        return -3;
-    }
-    uint64_t filesize = test_read.tellg();
-    test_read.seekg(0);
-
-    djinn::djinn_model* djn_decode = new djinn::djinn_ewah_model();
-    char* vcf_out_buffer = new char[4*n_s+65536];
-    uint32_t len_vcf   = 0;
-    uint64_t b_out_vcf = 0;
-
-     uint8_t* decode_buf = new uint8_t[10000000];
-
-    djinn::djinn_variant_t* variant = nullptr;
-
-    clockdef t1_decode = std::chrono::high_resolution_clock::now();
-    for (int i = 0; i < n_blocks; ++i) {
-        int decode_ctx_ret = djn_decode->Deserialize(test_read);
-        djn_decode->StartDecoding();
-        for (int i = 0; i < djn_decode->n_variants; ++i) {
-            int objs = djn_decode->DecodeNext(variant);
-            assert(objs > 0);
-
-            // Write Vcf-encoded data to a local buffer and then write to standard out.
-            // len_vcf = variant->ToVcfDebug(vcf_out_buffer);
-            // assert(len_vcf > 0);
-            // std::cout.write(vcf_out_buffer, len_vcf);
-            // b_out_vcf += len_vcf;
-            // len_vcf = 0;
-        }
-    }
-    // Timings total
-    clockdef t2_decode = std::chrono::high_resolution_clock::now();
-    auto time_span_decode = std::chrono::duration_cast<std::chrono::milliseconds>(t2_decode - t1_decode);
-    std::cerr << "[Decode] Decoded " << n_lines << " records in " << time_span_decode.count() 
-        << "ms (" << (double)time_span_decode.count()/n_lines << "ms/record)" << std::endl;
-
-    std::cerr << "Decompression speed: Out=" << data_in_vcf << "->" << (double)(data_in_vcf/1000000.0f)/(time_span_decode.count()/1000.0f) << "MB/s" << std::endl;
-
-    delete[] decode_buf;
-    delete[] vcf_out_buffer;
-    delete variant;
-    delete djn_decode;
-
-    return n_lines;
-}
-
-int BenchDecodeNextVcf(std::string in_file, int64_t n_s, uint32_t n_blocks, uint32_t n_lines, uint64_t data_in_vcf) {
-    // Decode test
-    std::cerr << "============== BenchDecodeNextVcf ===============" << std::endl;
-
-    std::ifstream test_read(in_file, std::ios::in | std::ios::binary | std::ios::ate);
-    if (test_read.good() == false) {
-        std::cerr << "could not open infile handle" << std::endl;
-        return -3;
-    }
-    uint64_t filesize = test_read.tellg();
-    test_read.seekg(0);
-
-    djinn::djinn_model* djn_decode = new djinn::djinn_ewah_model();
-    char* vcf_out_buffer = new char[4*n_s+65536];
-    uint32_t len_vcf   = 0;
-    uint64_t b_out_vcf = 0;
-
-     uint8_t* decode_buf = new uint8_t[10000000];
-
-    djinn::djinn_variant_t* variant = nullptr;
-
-    clockdef t1_decode = std::chrono::high_resolution_clock::now();
-    for (int i = 0; i < n_blocks; ++i) {
-        int decode_ctx_ret = djn_decode->Deserialize(test_read);
-        djn_decode->StartDecoding();
-        for (int i = 0; i < djn_decode->n_variants; ++i) {
-            int objs = djn_decode->DecodeNext(variant);
-            assert(objs > 0);
-
-            // Write Vcf-encoded data to a local buffer and then write to standard out.
-            len_vcf = variant->ToVcfDebug(vcf_out_buffer);
-            assert(len_vcf > 0);
-            std::cout.write(vcf_out_buffer, len_vcf);
-            b_out_vcf += len_vcf;
-            len_vcf = 0;
-        }
-    }
-    // Timings total
-    clockdef t2_decode = std::chrono::high_resolution_clock::now();
-    auto time_span_decode = std::chrono::duration_cast<std::chrono::milliseconds>(t2_decode - t1_decode);
-    std::cerr << "[Decode] Decoded " << n_lines << " records in " << time_span_decode.count() 
-        << "ms (" << (double)time_span_decode.count()/n_lines << "ms/record)" << std::endl;
-
-    std::cerr << "Decompression speed: Out=" << data_in_vcf << "->" << (double)(data_in_vcf/1000000.0f)/(time_span_decode.count()/1000.0f) << "MB/s" << std::endl;
-
-    delete[] decode_buf;
-    delete[] vcf_out_buffer;
-    delete variant;
-    delete djn_decode;
-
-    return n_lines;
-}
-
-int BenchDecodeNextRawVcf(std::string in_file, int64_t n_s, uint32_t n_blocks, uint32_t n_lines, uint64_t data_in_vcf) {
-    // Decode test
-    std::cerr << "============== BenchDecodeNextRawVcf ===============" << std::endl;
-
-    std::ifstream test_read(in_file, std::ios::in | std::ios::binary | std::ios::ate);
-    if (test_read.good() == false) {
-        std::cerr << "could not open infile handle" << std::endl;
-        return -3;
-    }
-    uint64_t filesize = test_read.tellg();
-    test_read.seekg(0);
-
-    djinn::djinn_model* djn_decode = new djinn::djinn_ewah_model();
-    char* vcf_out_buffer = new char[4*n_s+65536];
-    uint32_t len_vcf   = 0;
-    uint64_t b_out_vcf = 0;
-
-     uint8_t* decode_buf = new uint8_t[10000000];
-
-    djinn::djinn_variant_t* variant = nullptr;
-
-    clockdef t1_decode = std::chrono::high_resolution_clock::now();
-    for (int i = 0; i < n_blocks; ++i) {
-        int decode_ctx_ret = djn_decode->Deserialize(test_read);
-        djn_decode->StartDecoding();
-        for (int i = 0; i < djn_decode->n_variants; ++i) {
-            int objs = djn_decode->DecodeNextRaw(variant);
-            assert(objs > 0);
-
-            // Write Vcf-encoded data to a local buffer and then write to standard out.
-            len_vcf = variant->ToVcfDebug(vcf_out_buffer);
-            assert(len_vcf > 0);
-            std::cout.write(vcf_out_buffer, len_vcf);
-            b_out_vcf += len_vcf;
-            len_vcf = 0;
-        }
-    }
-    // Timings total
-    clockdef t2_decode = std::chrono::high_resolution_clock::now();
-    auto time_span_decode = std::chrono::duration_cast<std::chrono::milliseconds>(t2_decode - t1_decode);
-    std::cerr << "[Decode] Decoded " << n_lines << " records in " << time_span_decode.count() 
-        << "ms (" << (double)time_span_decode.count()/n_lines << "ms/record)" << std::endl;
-
-    std::cerr << "Decompression speed: Out=" << data_in_vcf << "->" << (double)(data_in_vcf/1000000.0f)/(time_span_decode.count()/1000.0f) << "MB/s" << std::endl;
-
-    delete[] decode_buf;
-    delete[] vcf_out_buffer;
-    delete variant;
-    delete djn_decode;
-
-    return n_lines;
-}
-//end temp
 
 int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
     std::unique_ptr<djinn::VcfReader> reader = djinn::VcfReader::FromFile(filename);
@@ -408,13 +229,6 @@ int ReadVcfGT(const std::string& filename, int type, bool permute = true) {
     std::cerr << "[Encoded] Encoded " << n_lines << " records in " << time_span_encode.count() 
         << "ms (" << (double)time_span_encode.count()/n_lines << "ms/record)" << std::endl;
 
-    // Decode test
-    std::cerr << "============== DECODING ===============" << std::endl;
-
-    BenchDecodeNextRaw(temp_file, reader->n_samples_, n_blocks, n_lines, data_in_vcf);
-    BenchDecodeNext(temp_file, reader->n_samples_, n_blocks, n_lines, data_in_vcf);
-    BenchDecodeNextVcf(temp_file, reader->n_samples_, n_blocks, n_lines, data_in_vcf);
-    BenchDecodeNextRawVcf(temp_file, reader->n_samples_, n_blocks, n_lines, data_in_vcf);
 
     delete[] decode_buf;
     return n_lines;
@@ -454,6 +268,7 @@ int main(int argc, char** argv) {
 		{"modelling",optional_argument, 0,  'm' },
         {"permute",  optional_argument, 0,  'p' },
         {"no-permute",  optional_argument, 0,  'P' },
+        {"benchmark",  optional_argument, 0,  'b' },
 		{0,0,0,0}
 	};
 
@@ -464,9 +279,10 @@ int main(int argc, char** argv) {
     bool compress = true;
     bool decompress = false;
     bool permute = true;
+    bool benchmark = false;
 
     int c;
-    while ((c = getopt_long(argc, argv, "i:o:zlcdmpP?", long_options, &option_index)) != -1){
+    while ((c = getopt_long(argc, argv, "i:o:zlcdmpPb?", long_options, &option_index)) != -1){
 		switch (c){
 		case 0:
 			std::cerr << "Case 0: " << option_index << '\t' << long_options[option_index].name << std::endl;
@@ -478,6 +294,7 @@ int main(int argc, char** argv) {
 			output = std::string(optarg);
 			break;
 		
+        case 'b': benchmark = true; break;
         case 'z': zstd = true;  lz4 = false; context = false; break;
         case 'l': zstd = false; lz4 = true;  context = false; break;
         case 'm': zstd = false; lz4 = false; context = true;  break;
@@ -500,7 +317,12 @@ int main(int argc, char** argv) {
     assert(zstd || lz4 || context);
     uint32_t type = (zstd << 2) | (lz4 << 1) | (context << 0);
 
+
     bool reset = true;
+    if (benchmark) {
+        return Benchmark(input, output, type, permute, reset);
+    }
+
     if (compress) {
         return ImportHtslib(input, output, type, permute, reset);
     }
