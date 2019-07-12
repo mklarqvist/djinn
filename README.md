@@ -25,7 +25,7 @@ For reference, our proposed compression algorithms were tested and compared agai
 | BCF                      | 229.9          | NA             | 80.5            | 1                | NA                | NA             | 148.3        |
 | VCF.gz                   | 281.34         | NA             | 65.8            | 0.82             | NA                | NA             | 457.6         |
 
-\* Decompress: decompressing into the succinct EWAH data structure. \*\*Inflate: decompress and inflate into byte arrays of length N (as in uBcf).
+\*Decompress: decompressing into the succinct EWAH data structure. \*\*Inflate: decompress and inflate into byte arrays of length N (as in uBcf).
 
 Djinn can offer strong compression with slower decompression speeds using statistical models (CTX). Reversely, the EWAH-based algorithms provide stronger decompression and query speeds with lower compression rates. The optimal algorithm dependends on its application context: whether query speeds or compression matters the most.
 
@@ -83,21 +83,34 @@ delete variant;
 delete djn_decode
 ```
 
-
-
 ## Getting help
 
 We are actively developing Djinn and are always interested in improving its quality. If you run into an issue, please report the problem on our [Issue tracker](https://github.com/mklarqvist/djinn/issues). Be sure to add enough detail to your report that we can reproduce the problem and address it.
+
+## Algorithmic overview
+
+The extended word-aligned hybrid (EWAH) data model was first described by [@lemire](https://github.com/lemire/):
+
+* Lemire D, Kaser O, Aouiche K. Sorting improves word-aligned bitmap indexes.Data & Knowledge Engineering2010;69(1):3–28, doi:[10.1016/j.datak.2009.08.006](https://arxiv.org/abs/0901.3751).
+
+The positional Burrows-Wheeler transform (PBWT) was described by [@richarddurbin](https://github.com/richarddurbin/):
+
+* Richard Durbin, Efficient haplotype matching and storage using the positional Burrows–Wheeler transform (PBWT), Bioinformatics, Volume 30, Issue 9, 1 May 2014, Pages 1266–1272, [https://doi.org/10.1093/bioinformatics/btu014](https://doi.org/10.1093/bioinformatics/btu014)
+
+The idea of using statistical models in compression has been around for decades but the ideas and code use in this project was first described by [@jkbonfield](https://github.com/jkbonfield):
+
+* Bonfield JK, Mahoney MV (2013) Compression of FASTQ and SAM Format Sequencing Data. PLoS ONE 8(3): e59190. [https://doi.org/10.1371/journal.pone.0059190](https://doi.org/10.1371/journal.pone.0059190)
 
 ## Limitations
 
 * Djinn is a framework for storing and querying sequence variant data only. This excludes all other meta data such as positional information (contig and position) and reference/alternative allele encodings.
 * Djinn is currently limited to at most 16 alternative alleles.
+* There is no default support for random access in a data block. If desired, this must be implemented by the user. For EWAH-enoded data this is trivial: store the virtual byte offset to the beginning of each variant site in an array.
   
-### Note
+## Note
 
 This is a collaborative effort between Marcus D. R. Klarqvist ([@klarqvist](https://github.com/mklarqvist/)) and James Bonfield ([@jkbonfield](https://github.com/jkbonfield)).
 
-### License
+## License
 
 Djinn is licensed under [MIT](LICENSE)

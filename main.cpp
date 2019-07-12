@@ -7,6 +7,8 @@
 #include "examples/iterate_vcf.h"
 #include "examples/iterate_raw.h"
 #include "examples/iterate.h"
+#include "examples/encode.h"
+
 
 #include <algorithm>//sort
 #include <fstream>//iostreams

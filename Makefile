@@ -70,9 +70,12 @@ libdjinn.a: $(OBJECTS)
 	$(AR) crs libdjinn.a $(OBJECTS)
 
 djinn: library
-	$(CXX) $(CXXFLAGS) main.cpp -Ilib/ -L$(PWD) -pthread $(LIBS) -lhts -ldjinn '-Wl,-rpath,$$ORIGIN/,-rpath,$(PWD)' -o djinn
+	$(CXX) $(CXXFLAGS) main.cpp -Ilib/ -L$(PWD) $(LIBS) -lhts -ldjinn '-Wl,-rpath,$$ORIGIN/,-rpath,$(PWD)' -o djinn
+
+minimum_example: library
+	$(CXX) $(CXXFLAGS) examples/minimum_example.cpp -Ilib/ -L$(PWD) $(LIBS) -ldjinn '-Wl,-rpath,$$ORIGIN/,-rpath,$(PWD)' -o examples/$@
 
 clean:
-	rm -f *.o lib/*.o *.a *.$(SHARED_EXT).* *.$(SHARED_EXT)
+	rm -f *.o lib/*.o *.a *.$(SHARED_EXT).* *.$(SHARED_EXT) examples/minimum_example
 
 .PHONY: all library clean
