@@ -1,6 +1,4 @@
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-
-![screenshot](DJINN.png)
+<p align="center"><img src="https://raw.githubusercontent.com/mklarqvist/djinn/auto/DJINN.png" alt="Zstandard" style="max-width:300px"></p>
 
 Djinn is an open-source single-header C++ library for efficiently storing and analyzing large collections of genotypes and/or haplotypes. 
 
@@ -9,6 +7,12 @@ Implemented algorithms:
 - [x] PBWT-preprocessor with RLE-bitmap hybrid (EWAH) compression.
 - [x] PBWT-preprocessor with higher-order context modelling.
 - [ ] Genotype PBWT (gtPBWT) with RLE-bitmap hybrid compression (from [Tachyon](https://github.com/mklarqvist/tachyon)). 
+
+### Branch status:
+
+[![Build Status](https://travis-ci.com/mklarqvist/djinn.svg?branch=master)](https://travis-ci.com/mklarqvist/djinn)
+[![Release](https://img.shields.io/badge/Release-beta_0.0.1-blue.svg)](https://github.com/mklarqvist/djinn/releases)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
 ## Performance evaluation
 

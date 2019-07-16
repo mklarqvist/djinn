@@ -3,6 +3,7 @@ language: cpp
 
 matrix:
   fast_finish: true
+  
   include:
     - name: Xenial (g++-5)
       os: linux
@@ -92,7 +93,8 @@ matrix:
       env:
         - COMPILERS="CC=gcc-8 && CXX=g++-8"
 
-    - os: linux
+    - name: Xenial (clang++-3.7)
+      os: linux
       addons:
         apt:
           sources:
@@ -279,7 +281,7 @@ matrix:
 
 before_install:
   # Overwrite default CC and CXX
-  - eval "${COMPILERS}"
+  - eval "${MATRIX_EVAL}"
   - git clone https://github.com/facebook/zstd && cd zstd && make -j 4 && sudo make install && cd ..
   - git clone https://github.com/lz4/lz4 && cd lz4 && make -j 4 && sudo make install && cd ..
   - git clone https://github.com/samtools/htslib && cd htslib && autoheader && autoconf && ./configure && make -j 4 && sudo make install && cd ..
