@@ -3,13 +3,6 @@ language: cpp
 
 matrix:
   include:
-    - os: osx
-      compiler: clang
-
-    - os: linux
-      dist: xenial
-      compiler: clang
-
     - os: linux
       dist: xenial
       addons:
@@ -17,6 +10,16 @@ matrix:
           packages:
             - g++-5
             - g++-5-multilib
+            - pkg-config
+            - libncurses5-dev
+            - libncursesw5-dev
+            - zlib1g-dev 
+            - libssl-dev
+            - liblz4-dev
+            - libcurl4-openssl-dev 
+            - liblz-dev
+            - libbz2-dev
+            - liblzma-dev
           sources: &sources
             - ubuntu-toolchain-r-test
       env:
@@ -29,6 +32,16 @@ matrix:
           packages:
             - g++-6
             - g++-6-multilib
+            - pkg-config
+            - libncurses5-dev
+            - libncursesw5-dev
+            - zlib1g-dev 
+            - libssl-dev
+            - liblz4-dev
+            - libcurl4-openssl-dev 
+            - liblz-dev
+            - libbz2-dev
+            - liblzma-dev
           sources: &sources
             - ubuntu-toolchain-r-test
       env:
@@ -41,6 +54,16 @@ matrix:
           packages:
             - g++-7
             - g++-7-multilib
+            - pkg-config
+            - libncurses5-dev
+            - libncursesw5-dev
+            - zlib1g-dev 
+            - libssl-dev
+            - liblz4-dev
+            - libcurl4-openssl-dev 
+            - liblz-dev
+            - libbz2-dev
+            - liblzma-dev
           sources: &sources
             - ubuntu-toolchain-r-test
       env:
@@ -53,6 +76,16 @@ matrix:
           packages:
             - g++-8
             - g++-8-multilib
+            - pkg-config
+            - libncurses5-dev
+            - libncursesw5-dev
+            - zlib1g-dev 
+            - libssl-dev
+            - liblz4-dev
+            - libcurl4-openssl-dev 
+            - liblz-dev
+            - libbz2-dev
+            - liblzma-dev
           sources: &sources
             - ubuntu-toolchain-r-test
       env:
