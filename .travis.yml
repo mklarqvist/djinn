@@ -2,8 +2,10 @@
 language: cpp
 
 matrix:
+  fast_finish: true
   include:
-    - os: linux
+    - name: Xenial (g++-5)
+      os: linux
       dist: xenial
       addons:
         apt:
@@ -24,7 +26,8 @@ matrix:
       env:
         - COMPILERS="CC=gcc-5 && CXX=g++-5"
 
-    - os: linux
+    - name: Xenial (g++-6)
+      os: linux
       dist: xenial
       addons:
         apt:
@@ -45,7 +48,8 @@ matrix:
       env:
         - COMPILERS="CC=gcc-6 && CXX=g++-6"
 
-    - os: linux
+    - name: Xenial (g++-7)
+      os: linux
       dist: xenial
       addons:
         apt:
@@ -66,7 +70,8 @@ matrix:
       env:
         - COMPILERS="CC=gcc-7 && CXX=g++-7"
 
-    - os: linux
+    - name: Xenial (g++-8)
+      os: linux
       dist: xenial
       addons:
         apt:
@@ -86,6 +91,191 @@ matrix:
             - ubuntu-toolchain-r-test
       env:
         - COMPILERS="CC=gcc-8 && CXX=g++-8"
+
+    - os: linux
+      addons:
+        apt:
+          sources:
+            - ubuntu-toolchain-r-test
+            - llvm-toolchain-precise-3.7
+          packages:
+            - clang-3.7
+            - pkg-config
+            - libncurses5-dev
+            - libncursesw5-dev
+            - zlib1g-dev 
+            - libssl-dev
+            - liblz4-dev
+            - libcurl4-openssl-dev 
+            - liblz-dev
+            - libbz2-dev
+            - liblzma-dev
+      env:
+        - MATRIX_EVAL="CC=clang-3.7 && CXX=clang++-3.7"
+      compiler: clang
+
+    - name: Xenial (clang++-3.8)
+      os: linux
+      addons:
+        apt:
+          sources:
+            - ubuntu-toolchain-r-test
+            - llvm-toolchain-precise-3.8
+          packages:
+            - clang-3.8
+            - pkg-config
+            - libncurses5-dev
+            - libncursesw5-dev
+            - zlib1g-dev
+            - libssl-dev
+            - liblz4-dev
+            - libcurl4-openssl-dev 
+            - liblz-dev
+            - libbz2-dev
+            - liblzma-dev
+      env:
+        - MATRIX_EVAL="CC=clang-3.8 && CXX=clang++-3.8"
+      compiler: clang
+
+    - name: Xenial (clang++-3.9)
+      os: linux
+      addons:
+        apt:
+          sources:
+            - llvm-toolchain-trusty-3.9
+          packages:
+            - clang-3.9
+            - pkg-config
+            - libncurses5-dev
+            - libncursesw5-dev
+            - zlib1g-dev 
+            - libssl-dev
+            - liblz4-dev
+            - libcurl4-openssl-dev 
+            - liblz-dev
+            - libbz2-dev
+            - liblzma-dev
+      env:
+        - MATRIX_EVAL="CC=clang-3.9 && CXX=clang++-3.9"
+      compiler: clang
+
+    - name: Xenial (clang++-4.0)
+      os: linux
+      addons:
+        apt:
+          sources:
+            - llvm-toolchain-trusty-4.0
+          packages:
+            - clang-4.0
+            - pkg-config
+            - libncurses5-dev
+            - libncursesw5-dev
+            - zlib1g-dev 
+            - libssl-dev
+            - liblz4-dev
+            - libcurl4-openssl-dev 
+            - liblz-dev
+            - libbz2-dev
+            - liblzma-dev
+      env:
+        - MATRIX_EVAL="CC=clang-4.0 && CXX=clang++-4.0"
+      compiler: clang
+
+    - name: Xenial (clang++-5.0)
+      os: linux
+      addons:
+        apt:
+          sources:
+            - llvm-toolchain-trusty-5.0
+          packages:
+            - clang-5.0
+            - pkg-config
+            - libncurses5-dev
+            - libncursesw5-dev
+            - zlib1g-dev 
+            - libssl-dev
+            - liblz4-dev
+            - libcurl4-openssl-dev 
+            - liblz-dev
+            - libbz2-dev
+            - liblzma-dev
+      env:
+        - MATRIX_EVAL="CC=clang-5.0 && CXX=clang++-5.0"
+      compiler: clang
+
+    - name: Xenial (clang++-6.0)
+      os: linux
+      addons:
+        apt:
+          sources:
+            - ubuntu-toolchain-r-test
+            - llvm-toolchain-trusty-6.0
+          packages:
+            - clang-6.0
+            - libstdc++-6-dev
+            - pkg-config
+            - libncurses5-dev
+            - libncursesw5-dev
+            - zlib1g-dev 
+            - libssl-dev
+            - liblz4-dev
+            - libcurl4-openssl-dev 
+            - liblz-dev
+            - libbz2-dev
+            - liblzma-dev
+      env:
+        - MATRIX_EVAL="CC=clang-6.0 && CXX=clang++-6.0"
+      compiler: clang
+
+    - name: Xenial (clang++-7.0)
+      os: linux
+      addons:
+        apt:
+          sources:
+            - ubuntu-toolchain-r-test
+            - llvm-toolchain-trusty-7
+          packages:
+            - clang-7
+            - libstdc++-7-dev
+            - pkg-config
+            - libncurses5-dev
+            - libncursesw5-dev
+            - zlib1g-dev 
+            - libssl-dev
+            - liblz4-dev
+            - libcurl4-openssl-dev 
+            - liblz-dev
+            - libbz2-dev
+            - liblzma-dev
+      env:
+        - MATRIX_EVAL="CC=clang-7 && CXX=clang++-7"
+      compiler: clang
+
+    # OSX begin
+    - name: Xcode10 (gcc++-5)
+      os: osx
+      osx_image: xcode10
+      env:
+        - MATRIX_EVAL="brew update && brew install gcc@5 && CC=gcc-5 && CXX=g++-5
+
+    - name: Xcode10 (gcc++-6)
+      os: osx
+      osx_image: xcode10
+      env:
+        - MATRIX_EVAL="brew update && brew install gcc@6 && CC=gcc-6 && CXX=g++-6
+
+    - name: Xcode10 (gcc++-7)
+      os: osx
+      osx_image: xcode10
+      env:
+        - MATRIX_EVAL="brew update && brew install gcc@7 && CC=gcc-7 && CXX=g++-7
+
+    - name: Xcode10 (gcc++-8)
+      os: osx
+      osx_image: xcode10
+      env:
+        - MATRIX_EVAL="brew update && brew install gcc@8 && CC=gcc-8 && CXX=g++-8
+
 
 before_install:
   # Overwrite default CC and CXX
