@@ -87,15 +87,6 @@ matrix:
       env:
         - COMPILERS="CC=gcc-8 && CXX=g++-8"
 
-    - os: linux
-      dist: xenial
-      addons:
-        apt:
-          packages:
-            - mingw-w64
-      env:
-        - COMPILERS="CC=x86_64-w64-mingw32-gcc-posix && CXX=x86_64-w64-mingw32-g++-posix"
-
 before_install:
   # Overwrite default CC and CXX
   - eval "${COMPILERS}"
@@ -104,4 +95,4 @@ before_install:
   - git clone https://github.com/samtools/htslib && cd htslib && autoheader && autoconf && ./configure && make -j 4 && sudo make install && cd ..
 
 script:
-  - ./autogen.sh && ./configure && make -j4 && make install
+  - ./autogen.sh && ./configure && make -j4 && sudo make install
