@@ -21,26 +21,6 @@ AC_ENABLE_SHARED
 AC_ENABLE_STATIC
 AC_PROG_LIBTOOL(libtool)
 
-zlib_devel=ok
-AC_CHECK_HEADER([zlib.h], [], [zlib_devel=missing], [;])
-AC_CHECK_LIB(z, inflate,  [], [zlib_devel=missing])
-
-hts_devel=ok
-AC_CHECK_HEADER([htslib/vcf.h], [], [hts_devel=missing], [;])
-AC_CHECK_LIB(hts, bcf_hdr_read, [], [hts_devel=missing])
-
-lz4_devel=ok
-AC_CHECK_HEADER([lz4.h], [], [lz4_devel=missing], [;])
-AC_CHECK_LIB(lz4, LZ4_compress_HC,  [], [lz4_devel=missing])
-
-zstd_devel=ok
-AC_CHECK_HEADER([zstd.h], [], [zstd_devel=missing], [;])
-AC_CHECK_LIB(zstd, ZSTD_compress,  [], [zstd_devel=missing])
-
-AM_CONDITIONAL([ZSTD_AVAIL], [test $zstd_devel == ok])
-AM_CONDITIONAL([LZ4_AVAIL], [test $lz4_devel == ok])
-AM_CONDITIONAL([HTS_AVAIL], [test $hts_devel == ok])
-AM_CONDITIONAL([ZLIB_AVAIL], [test $zlib_devel == ok])
 
 AC_ARG_WITH([zlib-path],
   [AS_HELP_STRING([--with-zlib-path=PATH],
@@ -85,6 +65,27 @@ AC_ARG_WITH([htslib-path],
   [with_htslib_path=$with_htslib_path])
 AC_SUBST([HTSLIB_PATH], $with_htslib_path)
 AM_CONDITIONAL([HAVE_HTSLIB_PATH], [test $with_htslib_path])
+
+zlib_devel=ok
+AC_CHECK_HEADER([zlib.h], [], [zlib_devel=missing], [;])
+AC_CHECK_LIB(z, inflate,  [], [zlib_devel=missing])
+
+hts_devel=ok
+AC_CHECK_HEADER([htslib/vcf.h], [], [hts_devel=missing], [;])
+AC_CHECK_LIB(hts, bcf_hdr_read, [], [hts_devel=missing])
+
+lz4_devel=ok
+AC_CHECK_HEADER([lz4.h], [], [lz4_devel=missing], [;])
+AC_CHECK_LIB(lz4, LZ4_compress_HC,  [], [lz4_devel=missing])
+
+zstd_devel=ok
+AC_CHECK_HEADER([zstd.h], [], [zstd_devel=missing], [;])
+AC_CHECK_LIB(zstd, ZSTD_compress,  [], [zstd_devel=missing])
+
+AM_CONDITIONAL([ZSTD_AVAIL], [test $zstd_devel == ok])
+AM_CONDITIONAL([LZ4_AVAIL], [test $lz4_devel == ok])
+AM_CONDITIONAL([HTS_AVAIL], [test $hts_devel == ok])
+AM_CONDITIONAL([ZLIB_AVAIL], [test $zlib_devel == ok])
 
 # Checks for typedefs, structures, and compiler characteristics.
 AC_CHECK_HEADER_STDBOOL
