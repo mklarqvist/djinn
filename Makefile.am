@@ -1,6 +1,6 @@
 AUTOMAKE_OPTIONS = foreign subdir-objects
 ACLOCAL_AMFLAGS = -I m4
-AM_CXXFLAGS = -fPIC
+AM_CXXFLAGS = -fPIC -std=c++11
 if ZSTD_AVAIL
 AM_CXXFLAGS += -DHAVE_ZSTD
 endif
