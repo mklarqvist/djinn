@@ -70,6 +70,16 @@ zlib_devel=ok
 AC_CHECK_HEADER([zlib.h], [], [zlib_devel=missing], [;])
 AC_CHECK_LIB(z, inflate,  [], [zlib_devel=missing])
 
+if test $zlib_devel != ok; then
+  AC_MSG_NOTICE([zlib development files not found
+
+Djinn and HTSlib uses compression routines from the zlib library <http://zlib.net>.
+Building Djinn does not require zlib development files to be installed on the build
+machine but is required for full functionality; you may want to ensure a package 
+such as zlib1g-dev (on Debian or Ubuntu Linux) or zlib-devel (on RPM-based Linux 
+distributions or Cygwin) is installed.])
+fi
+
 hts_devel=ok
 AC_CHECK_HEADER([htslib/vcf.h], [], [hts_devel=missing], [;])
 AC_CHECK_LIB(hts, bcf_hdr_read, [], [hts_devel=missing])
@@ -78,9 +88,28 @@ lz4_devel=ok
 AC_CHECK_HEADER([lz4.h], [], [lz4_devel=missing], [;])
 AC_CHECK_LIB(lz4, LZ4_compress_HC,  [], [lz4_devel=missing])
 
+if test $lz4_devel != ok; then
+  AC_MSG_NOTICE([lz4 development files not found
+
+Djinn uses compression routines from the lz4 library <https://lz4.github.io/lz4/>.
+Building Djinn does not require lz4 development files to be installed on the build
+machine but is required for full functionality; you may want to ensure that this
+package is installed.])
+fi
+
 zstd_devel=ok
 AC_CHECK_HEADER([zstd.h], [], [zstd_devel=missing], [;])
 AC_CHECK_LIB(zstd, ZSTD_compress,  [], [zstd_devel=missing])
+
+if test $zstd_devel != ok; then
+  AC_MSG_NOTICE([zstd development files not found
+
+Djinn uses compression routines from the zstd library <https://facebook.github.io/zstd>.
+Building Djinn does not require zstd development files to be installed on the build
+machine but is required for full functionality; you may want to ensure a package 
+such as zstd (on Debian or Ubuntu Linux) or zstd (on RPM-based Linux 
+distributions or Cygwin) is installed.])
+fi
 
 AM_CONDITIONAL([ZSTD_AVAIL], [test $zstd_devel == ok])
 AM_CONDITIONAL([LZ4_AVAIL], [test $lz4_devel == ok])
