@@ -75,9 +75,9 @@ env:
 before_install:
   # Overwrite default CC and CXX
   - eval "${COMPILERS}"
-  - git clone https://github.com/facebook/zstd && cd zstd && make -j 4 && make install && cd ..
-  - git clone https://github.com/lz4/lz4 && cd lz4 && make -j 4 && make install && cd ..
-  - git clone https://github.com/samtools/htslib && cd htslib && autoheader && autoconf && ./configure && make -j 4 && make install && cd ..
+  - git clone https://github.com/facebook/zstd && cd zstd && make -j 4 && sudo make install && cd ..
+  - git clone https://github.com/lz4/lz4 && cd lz4 && make -j 4 && sudo make install && cd ..
+  - git clone https://github.com/samtools/htslib && cd htslib && autoheader && autoconf && ./configure && make -j 4 && sudo make install && cd ..
 
 script:
   - ./autogen.sh && ./configure && make -j4 && make install
