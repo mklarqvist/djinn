@@ -35,3 +35,5 @@ endif
 lib_LTLIBRARIES = libdjinn.la
 libdjinn_la_LDFLAGS = -version-info 0:1:0
 libdjinn_la_SOURCES = lib/compressors.h lib/ctx_model.cpp lib/djinn.cpp lib/djinn.h lib/ewah_model.cpp lib/frequency_model.cpp lib/frequency_model.h lib/pbwt.cpp lib/pbwt.h
+libdjinn_ladir = $(includedir)/djinn
+libdjinn_la_HEADERS = lib/djinn.h lib/vcf_reader.h
