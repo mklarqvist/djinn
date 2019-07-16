@@ -18,7 +18,7 @@ bin_PROGRAMS = djinn
 
 djinn_SOURCES = main.cpp
 djinn_LDADD = libdjinn.la
-djinn_CXXFLAGS = -Ilib/
+djinn_CXXFLAGS = -Ilib/ -std=c++11
 if HAVE_ZLIB_PATH
 djinn_CXXFLAGS += -L$(ZLIB_PATH)
 endif
