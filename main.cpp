@@ -19,6 +19,42 @@
 // Definition for microsecond timer.
 typedef std::chrono::high_resolution_clock::time_point clockdef;
 
+int HtslibIterateBcf(const std::string& filename) {
+    std::unique_ptr<djinn::VcfReader> reader = djinn::VcfReader::FromFile(filename);
+    if (reader.get() == nullptr) {
+        std::cerr << "failed read" << std::endl;
+        return -1;
+    }
+
+    std::cerr << "Samples in VCF=" << reader->n_samples_ << std::endl;
+    
+    uint64_t n_lines = 0;
+    uint64_t data_in = 0, data_in_vcf = 0;
+
+    // While there are bcf records available.
+    clockdef t1_encode = std::chrono::high_resolution_clock::now();
+
+    while (reader->Next()) {
+        if (reader->bcf1_ == NULL)   return -1;
+        if (reader->header_ == NULL) return -2;
+
+        // Check for GT
+        const bcf_fmt_t* fmt = bcf_get_fmt(reader->header_, reader->bcf1_, "GT");
+        if (fmt == NULL) return 0;
+        
+        data_in += fmt->p_len;
+        data_in_vcf += 2*fmt->p_len - 1;
+        ++n_lines;
+    }
+
+    clockdef t2_encode = std::chrono::high_resolution_clock::now();
+    auto time_span_encode = std::chrono::duration_cast<std::chrono::milliseconds>(t2_encode - t1_encode);
+    std::cerr << "[Htslib] Iterated " << n_lines << " records in " << time_span_encode.count() 
+        << "ms (" << (double)time_span_encode.count()/n_lines << "ms/record). Total: " << (data_in_vcf/1000.0f)/(time_span_encode.count()/1000000.0f) << " MB/s" << std::endl;
+
+    return n_lines;
+}
+
 int Benchmark(std::string input_file,   // input file: "-" for stdin
               std::string output_file,  // output file: "-" for stdout
               const uint32_t type,      // 1: ctx model, 2; LZ4-EWAH, 4: ZSTD-EWAH
@@ -30,11 +66,19 @@ int Benchmark(std::string input_file,   // input file: "-" for stdin
         return -1;
     }
 
-    // Encode input Vcf file.
+    // 
     clockdef t1 = std::chrono::high_resolution_clock::now();
-    int ret = ImportHtslib(input_file, output_file, type, permute, reset_models);
+    int ret = HtslibIterateBcf(input_file);
     clockdef t2 = std::chrono::high_resolution_clock::now();
     auto time_span = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1);
+    if (ret <= 0) return -1;
+    std::cerr << "[Htslib] Iterated " << ret << " records in " << time_span.count() << "ms (" << (double)time_span.count()/ret << "ms/record)" << std::endl;
+
+    // Encode input Vcf file.
+    t1 = std::chrono::high_resolution_clock::now();
+    ret = ImportHtslib(input_file, output_file, type, permute, reset_models);
+    t2 = std::chrono::high_resolution_clock::now();
+    time_span = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1);
     if (ret <= 0) return -1;
     std::cerr << "[Import] Imported " << ret << " records in " << time_span.count() << "ms (" << (double)time_span.count()/ret << "ms/record)" << std::endl;
 
