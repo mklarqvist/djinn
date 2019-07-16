@@ -10,6 +10,7 @@ matrix:
           packages:
             - g++-5
             - g++-5-multilib
+            - libstdc++-5-dev
             - pkg-config
             - libncurses5-dev
             - libncursesw5-dev
@@ -32,6 +33,7 @@ matrix:
           packages:
             - g++-6
             - g++-6-multilib
+            - libstdc++-6-dev
             - pkg-config
             - libncurses5-dev
             - libncursesw5-dev
@@ -54,6 +56,7 @@ matrix:
           packages:
             - g++-7
             - g++-7-multilib
+            - libstdc++-7-dev
             - pkg-config
             - libncurses5-dev
             - libncursesw5-dev
@@ -76,6 +79,7 @@ matrix:
           packages:
             - g++-8
             - g++-8-multilib
+            - libstdc++-8-dev
             - pkg-config
             - libncurses5-dev
             - libncursesw5-dev
