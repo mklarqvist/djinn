@@ -1,12 +1,6 @@
-<p align="center"><img src="https://raw.githubusercontent.com/mklarqvist/djinn/auto/DJINN.png" alt="Zstandard" style="max-width:300px"></p>
+<p align="center"><img src="https://raw.githubusercontent.com/mklarqvist/djinn/auto/DJINN.png" alt="Djinn" width="350px"></p>
 
-Djinn is an open-source single-header C++ library for efficiently storing and analyzing large collections of genotypes and/or haplotypes. 
-
-Implemented algorithms:
-
-- [x] PBWT-preprocessor with RLE-bitmap hybrid (EWAH) compression.
-- [x] PBWT-preprocessor with higher-order context modelling.
-- [ ] Genotype PBWT (gtPBWT) with RLE-bitmap hybrid compression (from [Tachyon](https://github.com/mklarqvist/tachyon)). 
+Djinn is an open-source single-header C++ library for efficiently storing and analyzing large collections of genotypes and/or haplotypes.
 
 ### Branch status:
 
@@ -49,9 +43,16 @@ make install   # Install headers and libraries
 Djinn is designed as a programming library providing simple C++ APIs to build/load an archieve and to query it. The `examples/` directory contains a variety of examples that demonstrates typical uses of the C++ APIs. The library requires only a single header: `djinn.h`. This file contains additional detailed API documentation. 
 Djinn aims to keep the APIs for `djinn_*` classes in `djinn.h` stable.
 
+Implemented algorithms:
+
+- [x] PBWT-preprocessor with RLE-bitmap hybrid (EWAH) compression.
+- [x] PBWT-preprocessor with higher-order context modelling.
+- [ ] Genotype PBWT (gtPBWT) with RLE-bitmap hybrid compression (from [Tachyon](https://github.com/mklarqvist/tachyon)).
+
 ### Quick guide
 
 A simple quick start guide to encoding:
+
 ```C++
 #include <djinn/djinn.h>
 
@@ -101,21 +102,21 @@ We are actively developing Djinn and are always interested in improving its qual
 
 The extended word-aligned hybrid (EWAH) data model was first described by [@lemire](https://github.com/lemire/):
 
-* Lemire D, Kaser O, Aouiche K. Sorting improves word-aligned bitmap indexes.Data & Knowledge Engineering2010;69(1):3–28, doi:[10.1016/j.datak.2009.08.006](https://arxiv.org/abs/0901.3751).
+- Lemire D, Kaser O, Aouiche K. Sorting improves word-aligned bitmap indexes.Data & Knowledge Engineering2010;69(1):3–28, doi:[10.1016/j.datak.2009.08.006](https://arxiv.org/abs/0901.3751).
 
 The positional Burrows-Wheeler transform (PBWT) was described by [@richarddurbin](https://github.com/richarddurbin/):
 
-* Richard Durbin, Efficient haplotype matching and storage using the positional Burrows–Wheeler transform (PBWT), Bioinformatics, Volume 30, Issue 9, 1 May 2014, Pages 1266–1272, [https://doi.org/10.1093/bioinformatics/btu014](https://doi.org/10.1093/bioinformatics/btu014)
+- Richard Durbin, Efficient haplotype matching and storage using the positional Burrows–Wheeler transform (PBWT), Bioinformatics, Volume 30, Issue 9, 1 May 2014, Pages 1266–1272, [https://doi.org/10.1093/bioinformatics/btu014](https://doi.org/10.1093/bioinformatics/btu014)
 
-The idea of using statistical models in compression has been around for decades but the ideas and code use in this project was first described by [@jkbonfield](https://github.com/jkbonfield):
+The idea of using statistical models in compression has been around for decades but the ideas and original code used in this project was first described by [@jkbonfield](https://github.com/jkbonfield):
 
-* Bonfield JK, Mahoney MV (2013) Compression of FASTQ and SAM Format Sequencing Data. PLoS ONE 8(3): e59190. [https://doi.org/10.1371/journal.pone.0059190](https://doi.org/10.1371/journal.pone.0059190)
+- Bonfield JK, Mahoney MV (2013) Compression of FASTQ and SAM Format Sequencing Data. PLoS ONE 8(3): e59190. [https://doi.org/10.1371/journal.pone.0059190](https://doi.org/10.1371/journal.pone.0059190)
 
 ## Limitations
 
-* Djinn is a framework for storing and querying sequence variant data only. This excludes all other meta data such as positional information (contig and position) and reference/alternative allele encodings.
-* Djinn is currently limited to at most 16 alternative alleles.
-* There is no default support for random access in a data block. If desired, this must be implemented by the user. For EWAH-enoded data this is trivial: store the virtual byte offset to the beginning of each variant site in an array.
+- Djinn is a framework for storing and querying sequence variant data only. This excludes all other meta data such as positional information (contig and position) and reference/alternative allele encodings.
+- Djinn is currently limited to at most 16 alternative alleles.
+- There is no default support for random access in a data block. If desired, this must be implemented by the user. For EWAH-enoded data this is trivial: store the virtual byte offset to the beginning of each variant site in an array.
   
 ## Note
 
