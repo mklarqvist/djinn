@@ -18,10 +18,11 @@ endif
 AUTOMAKE_OPTIONS = subdir-objects
 #ACLOCAL_AMFLAGS = $(ACLOCAL_FLAGS)
 
-#bin_PROGRAMS = helloWorld
+bin_PROGRAMS = djinn
 
-#helloWorld_SOURCES = main.cpp
-#helloWorld_LDADD = libdjinn.la
+djinn_SOURCES = main.cpp
+djinn_LDADD = libdjinn.la
+djinn_CXXFLAGS = -Ilib/
 
 lib_LTLIBRARIES = libdjinn.la
 libdjinn_la_LDFLAGS = -version-info 0:1:0

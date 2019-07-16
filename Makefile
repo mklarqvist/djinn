@@ -15,6 +15,7 @@
 
 
 
+
 am__is_gnu_make = { \
   if test -z '$(MAKELEVEL)'; then \
     false; \
@@ -92,6 +93,7 @@ am__append_1 = -DHAVE_ZSTD
 am__append_2 = -DHAVE_LZ4
 am__append_3 = -DHAVE_ZLIB
 am__append_4 = -DHAVE_HTS
+bin_PROGRAMS = djinn$(EXEEXT)
 subdir = .
 ACLOCAL_M4 = $(top_srcdir)/aclocal.m4
 am__aclocal_m4_deps = $(top_srcdir)/m4/libtool.m4 \
@@ -135,7 +137,7 @@ am__uninstall_files_from_dir = { \
     || { echo " ( cd '$$dir' && rm -f" $$files ")"; \
          $(am__cd) "$$dir" && rm -f $$files; }; \
   }
-am__installdirs = "$(DESTDIR)$(libdir)"
+am__installdirs = "$(DESTDIR)$(libdir)" "$(DESTDIR)$(bindir)"
 LTLIBRARIES = $(lib_LTLIBRARIES)
 libdjinn_la_LIBADD =
 am__dirstamp = $(am__leading_dot)dirstamp
@@ -149,6 +151,13 @@ am__v_lt_1 =
 libdjinn_la_LINK = $(LIBTOOL) $(AM_V_lt) --tag=CXX $(AM_LIBTOOLFLAGS) \
 	$(LIBTOOLFLAGS) --mode=link $(CXXLD) $(AM_CXXFLAGS) \
 	$(CXXFLAGS) $(libdjinn_la_LDFLAGS) $(LDFLAGS) -o $@
+PROGRAMS = $(bin_PROGRAMS)
+am_djinn_OBJECTS = djinn-main.$(OBJEXT)
+djinn_OBJECTS = $(am_djinn_OBJECTS)
+djinn_DEPENDENCIES = libdjinn.la
+djinn_LINK = $(LIBTOOL) $(AM_V_lt) --tag=CXX $(AM_LIBTOOLFLAGS) \
+	$(LIBTOOLFLAGS) --mode=link $(CXXLD) $(djinn_CXXFLAGS) \
+	$(CXXFLAGS) $(AM_LDFLAGS) $(LDFLAGS) -o $@
 AM_V_P = $(am__v_P_$(V))
 am__v_P_ = $(am__v_P_$(AM_DEFAULT_VERBOSITY))
 am__v_P_0 = false
@@ -201,8 +210,8 @@ AM_V_CCLD = $(am__v_CCLD_$(V))
 am__v_CCLD_ = $(am__v_CCLD_$(AM_DEFAULT_VERBOSITY))
 am__v_CCLD_0 = @echo "  CCLD    " $@;
 am__v_CCLD_1 = 
-SOURCES = $(libdjinn_la_SOURCES)
-DIST_SOURCES = $(libdjinn_la_SOURCES)
+SOURCES = $(libdjinn_la_SOURCES) $(djinn_SOURCES)
+DIST_SOURCES = $(libdjinn_la_SOURCES) $(djinn_SOURCES)
 am__can_run_installinfo = \
   case $$AM_UPDATE_INFO_DIR in \
     n|no|NO) false;; \
@@ -378,12 +387,9 @@ AM_CXXFLAGS = -fPIC $(am__append_1) $(am__append_2) $(am__append_3) \
 	$(am__append_4)
 #SUBDIRS = lib
 AUTOMAKE_OPTIONS = subdir-objects
-#ACLOCAL_AMFLAGS = $(ACLOCAL_FLAGS)
-
-#bin_PROGRAMS = helloWorld
-
-#helloWorld_SOURCES = main.cpp
-#helloWorld_LDADD = libdjinn.la
+djinn_SOURCES = main.cpp
+djinn_LDADD = libdjinn.la
+djinn_CXXFLAGS = -Ilib/
 lib_LTLIBRARIES = libdjinn.la
 libdjinn_la_LDFLAGS = -version-info 0:1:0
 libdjinn_la_SOURCES = lib/compressors.h lib/ctx_model.cpp lib/djinn.cpp lib/djinn.h lib/ewah_model.cpp lib/frequency_model.cpp lib/frequency_model.h lib/pbwt.cpp lib/pbwt.h lib/vcf_reader.h
@@ -490,6 +496,59 @@ lib/pbwt.lo: lib/$(am__dirstamp) lib/$(DEPDIR)/$(am__dirstamp)
 
 libdjinn.la: $(libdjinn_la_OBJECTS) $(libdjinn_la_DEPENDENCIES) $(EXTRA_libdjinn_la_DEPENDENCIES) 
 	$(AM_V_CXXLD)$(libdjinn_la_LINK) -rpath $(libdir) $(libdjinn_la_OBJECTS) $(libdjinn_la_LIBADD) $(LIBS)
+install-binPROGRAMS: $(bin_PROGRAMS)
+	@$(NORMAL_INSTALL)
+	@list='$(bin_PROGRAMS)'; test -n "$(bindir)" || list=; \
+	if test -n "$$list"; then \
+	  echo " $(MKDIR_P) '$(DESTDIR)$(bindir)'"; \
+	  $(MKDIR_P) "$(DESTDIR)$(bindir)" || exit 1; \
+	fi; \
+	for p in $$list; do echo "$$p $$p"; done | \
+	sed 's/$(EXEEXT)$$//' | \
+	while read p p1; do if test -f $$p \
+	 || test -f $$p1 \
+	  ; then echo "$$p"; echo "$$p"; else :; fi; \
+	done | \
+	sed -e 'p;s,.*/,,;n;h' \
+	    -e 's|.*|.|' \
+	    -e 'p;x;s,.*/,,;s/$(EXEEXT)$$//;$(transform);s/$$/$(EXEEXT)/' | \
+	sed 'N;N;N;s,\n, ,g' | \
+	$(AWK) 'BEGIN { files["."] = ""; dirs["."] = 1 } \
+	  { d=$$3; if (dirs[d] != 1) { print "d", d; dirs[d] = 1 } \
+	    if ($$2 == $$4) files[d] = files[d] " " $$1; \
+	    else { print "f", $$3 "/" $$4, $$1; } } \
+	  END { for (d in files) print "f", d, files[d] }' | \
+	while read type dir files; do \
+	    if test "$$dir" = .; then dir=; else dir=/$$dir; fi; \
+	    test -z "$$files" || { \
+	    echo " $(INSTALL_PROGRAM_ENV) $(LIBTOOL) $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=install $(INSTALL_PROGRAM) $$files '$(DESTDIR)$(bindir)$$dir'"; \
+	    $(INSTALL_PROGRAM_ENV) $(LIBTOOL) $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=install $(INSTALL_PROGRAM) $$files "$(DESTDIR)$(bindir)$$dir" || exit $$?; \
+	    } \
+	; done
+
+uninstall-binPROGRAMS:
+	@$(NORMAL_UNINSTALL)
+	@list='$(bin_PROGRAMS)'; test -n "$(bindir)" || list=; \
+	files=`for p in $$list; do echo "$$p"; done | \
+	  sed -e 'h;s,^.*/,,;s/$(EXEEXT)$$//;$(transform)' \
+	      -e 's/$$/$(EXEEXT)/' \
+	`; \
+	test -n "$$list" || exit 0; \
+	echo " ( cd '$(DESTDIR)$(bindir)' && rm -f" $$files ")"; \
+	cd "$(DESTDIR)$(bindir)" && rm -f $$files
+
+clean-binPROGRAMS:
+	@list='$(bin_PROGRAMS)'; test -n "$$list" || exit 0; \
+	echo " rm -f" $$list; \
+	rm -f $$list || exit $$?; \
+	test -n "$(EXEEXT)" || exit 0; \
+	list=`for p in $$list; do echo "$$p"; done | sed 's/$(EXEEXT)$$//'`; \
+	echo " rm -f" $$list; \
+	rm -f $$list
+
+djinn$(EXEEXT): $(djinn_OBJECTS) $(djinn_DEPENDENCIES) $(EXTRA_djinn_DEPENDENCIES) 
+	@rm -f djinn$(EXEEXT)
+	$(AM_V_CXXLD)$(djinn_LINK) $(djinn_OBJECTS) $(djinn_LDADD) $(LIBS)
 
 mostlyclean-compile:
 	-rm -f *.$(OBJEXT)
@@ -499,6 +558,7 @@ mostlyclean-compile:
 distclean-compile:
 	-rm -f *.tab.c
 
+include ./$(DEPDIR)/djinn-main.Po
 include lib/$(DEPDIR)/ctx_model.Plo
 include lib/$(DEPDIR)/djinn.Plo
 include lib/$(DEPDIR)/ewah_model.Plo
@@ -528,6 +588,20 @@ include lib/$(DEPDIR)/pbwt.Plo
 #	$(AM_V_CXX)source='$<' object='$@' libtool=yes \
 #	DEPDIR=$(DEPDIR) $(CXXDEPMODE) $(depcomp) \
 #	$(AM_V_CXX_no)$(LTCXXCOMPILE) -c -o $@ $<
+
+djinn-main.o: main.cpp
+	$(AM_V_CXX)$(CXX) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(djinn_CXXFLAGS) $(CXXFLAGS) -MT djinn-main.o -MD -MP -MF $(DEPDIR)/djinn-main.Tpo -c -o djinn-main.o `test -f 'main.cpp' || echo '$(srcdir)/'`main.cpp
+	$(AM_V_at)$(am__mv) $(DEPDIR)/djinn-main.Tpo $(DEPDIR)/djinn-main.Po
+#	$(AM_V_CXX)source='main.cpp' object='djinn-main.o' libtool=no \
+#	DEPDIR=$(DEPDIR) $(CXXDEPMODE) $(depcomp) \
+#	$(AM_V_CXX_no)$(CXX) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(djinn_CXXFLAGS) $(CXXFLAGS) -c -o djinn-main.o `test -f 'main.cpp' || echo '$(srcdir)/'`main.cpp
+
+djinn-main.obj: main.cpp
+	$(AM_V_CXX)$(CXX) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(djinn_CXXFLAGS) $(CXXFLAGS) -MT djinn-main.obj -MD -MP -MF $(DEPDIR)/djinn-main.Tpo -c -o djinn-main.obj `if test -f 'main.cpp'; then $(CYGPATH_W) 'main.cpp'; else $(CYGPATH_W) '$(srcdir)/main.cpp'; fi`
+	$(AM_V_at)$(am__mv) $(DEPDIR)/djinn-main.Tpo $(DEPDIR)/djinn-main.Po
+#	$(AM_V_CXX)source='main.cpp' object='djinn-main.obj' libtool=no \
+#	DEPDIR=$(DEPDIR) $(CXXDEPMODE) $(depcomp) \
+#	$(AM_V_CXX_no)$(CXX) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(djinn_CXXFLAGS) $(CXXFLAGS) -c -o djinn-main.obj `if test -f 'main.cpp'; then $(CYGPATH_W) 'main.cpp'; else $(CYGPATH_W) '$(srcdir)/main.cpp'; fi`
 
 mostlyclean-libtool:
 	-rm -f *.lo
@@ -763,9 +837,11 @@ distcleancheck: distclean
 	       exit 1; } >&2
 check-am: all-am
 check: check-am
-all-am: Makefile $(LTLIBRARIES) config.h
+all-am: Makefile $(LTLIBRARIES) $(PROGRAMS) config.h
+install-binPROGRAMS: install-libLTLIBRARIES
+
 installdirs:
-	for dir in "$(DESTDIR)$(libdir)"; do \
+	for dir in "$(DESTDIR)$(libdir)" "$(DESTDIR)$(bindir)"; do \
 	  test -z "$$dir" || $(MKDIR_P) "$$dir"; \
 	done
 install: install-am
@@ -802,12 +878,12 @@ maintainer-clean-generic:
 	@echo "it deletes files that may require special tools to rebuild."
 clean: clean-am
 
-clean-am: clean-generic clean-libLTLIBRARIES clean-libtool \
-	mostlyclean-am
+clean-am: clean-binPROGRAMS clean-generic clean-libLTLIBRARIES \
+	clean-libtool mostlyclean-am
 
 distclean: distclean-am
 	-rm -f $(am__CONFIG_DISTCLEAN_FILES)
-	-rm -rf lib/$(DEPDIR)
+	-rm -rf ./$(DEPDIR) lib/$(DEPDIR)
 	-rm -f Makefile
 distclean-am: clean-am distclean-compile distclean-generic \
 	distclean-hdr distclean-libtool distclean-tags
@@ -830,7 +906,7 @@ install-dvi: install-dvi-am
 
 install-dvi-am:
 
-install-exec-am: install-libLTLIBRARIES
+install-exec-am: install-binPROGRAMS install-libLTLIBRARIES
 
 install-html: install-html-am
 
@@ -855,7 +931,7 @@ installcheck-am:
 maintainer-clean: maintainer-clean-am
 	-rm -f $(am__CONFIG_DISTCLEAN_FILES)
 	-rm -rf $(top_srcdir)/autom4te.cache
-	-rm -rf lib/$(DEPDIR)
+	-rm -rf ./$(DEPDIR) lib/$(DEPDIR)
 	-rm -f Makefile
 maintainer-clean-am: distclean-am maintainer-clean-generic
 
@@ -872,26 +948,28 @@ ps: ps-am
 
 ps-am:
 
-uninstall-am: uninstall-libLTLIBRARIES
+uninstall-am: uninstall-binPROGRAMS uninstall-libLTLIBRARIES
 
 .MAKE: all install-am install-strip
 
 .PHONY: CTAGS GTAGS TAGS all all-am am--refresh check check-am clean \
-	clean-cscope clean-generic clean-libLTLIBRARIES clean-libtool \
-	cscope cscopelist-am ctags ctags-am dist dist-all dist-bzip2 \
-	dist-gzip dist-lzip dist-shar dist-tarZ dist-xz dist-zip \
-	distcheck distclean distclean-compile distclean-generic \
-	distclean-hdr distclean-libtool distclean-tags distcleancheck \
-	distdir distuninstallcheck dvi dvi-am html html-am info \
-	info-am install install-am install-data install-data-am \
-	install-dvi install-dvi-am install-exec install-exec-am \
-	install-html install-html-am install-info install-info-am \
-	install-libLTLIBRARIES install-man install-pdf install-pdf-am \
-	install-ps install-ps-am install-strip installcheck \
-	installcheck-am installdirs maintainer-clean \
+	clean-binPROGRAMS clean-cscope clean-generic \
+	clean-libLTLIBRARIES clean-libtool cscope cscopelist-am ctags \
+	ctags-am dist dist-all dist-bzip2 dist-gzip dist-lzip \
+	dist-shar dist-tarZ dist-xz dist-zip distcheck distclean \
+	distclean-compile distclean-generic distclean-hdr \
+	distclean-libtool distclean-tags distcleancheck distdir \
+	distuninstallcheck dvi dvi-am html html-am info info-am \
+	install install-am install-binPROGRAMS install-data \
+	install-data-am install-dvi install-dvi-am install-exec \
+	install-exec-am install-html install-html-am install-info \
+	install-info-am install-libLTLIBRARIES install-man install-pdf \
+	install-pdf-am install-ps install-ps-am install-strip \
+	installcheck installcheck-am installdirs maintainer-clean \
 	maintainer-clean-generic mostlyclean mostlyclean-compile \
 	mostlyclean-generic mostlyclean-libtool pdf pdf-am ps ps-am \
-	tags tags-am uninstall uninstall-am uninstall-libLTLIBRARIES
+	tags tags-am uninstall uninstall-am uninstall-binPROGRAMS \
+	uninstall-libLTLIBRARIES
 
 .PRECIOUS: Makefile
 
