@@ -69,8 +69,8 @@ matrix:
 
 env:
   global:
-    - CFLAGS="-O3 -g -Wall -Wextra -Werror -pedantic -Wno-long-long -Wno-missing-braces"
-    - CXXFLAGS="-O3 -g -Wall -Wextra -Werror -pedantic -Wno-long-long -Wno-missing-braces"
+    - CFLAGS="-O3 -g -Wall -Wextra -Werror -Wno-long-long -Wno-missing-braces"
+    - CXXFLAGS="-O3 -g -Wall -Wextra -Werror -Wno-long-long -Wno-missing-braces"
 
 before_install:
   # Overwrite default CC and CXX
