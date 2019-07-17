@@ -27,10 +27,7 @@ For reference, our proposed compression algorithms were tested and compared agai
 
 Djinn can offer strong compression with slower decompression speeds using statistical models (CTX). Reversely, the EWAH-based algorithms provide stronger decompression and query speeds with lower compression rates. The optimal algorithm dependends on its application context: whether query speeds or compression matters the most.
 
-![Compression Ratio](doc/images/djn_ctx_hrc.jpeg "Compression Ratio")
-![Compression Ratio](doc/images/djn_ctx_hrc_zoom.jpeg "Compression Ratio")
-![Compression Ratio](doc/images/djn_ctx_hrc_bar.jpeg "Compression Ratio")
-
+![Compression Ratio](doc/images/djn_ewah_lz4.jpg "Djinn LZ4")
 
 ### Building
 
