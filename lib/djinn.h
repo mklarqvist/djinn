@@ -20,8 +20,7 @@
 
 #include <cstddef>//size_t
 #include <cstdint>//uint
-
-// #include <cstdlib>//malloc
+#include <cmath>//ceil,floor
 #include <cstring>//memcpy
 #include <cassert>//assert
 
@@ -222,6 +221,25 @@ struct djinn_variant_t {
      * @return int    Returns the number of bytes used.
      */
     int ToVcf(char* out, const char phasing = '|') const;
+
+    // Todo: implement me
+    int Merge(const djinn_variant_t& other) {
+        if (data == nullptr && other.data == nullptr) return 0;
+        if (errcode || other.errcode) return -1*errcode;
+        if (unpacked != other.unpacked) return -1;
+
+        // Resize if required
+        if (data_len + other.data_len > data_alloc) {
+            uint8_t* old = data;
+            data_alloc = data_len + other.data_len + 65536;
+            data = new uint8_t[data_alloc];
+            memcpy(data, old, data_len);
+            if (data_free) delete[] old;
+            data_free = true;
+        }
+
+        return 1;
+    }
 
     int ploidy, n_allele; // ploidy: data stride size for unpacked data, n_allele: number of alleles including ref
     uint8_t* data;
@@ -740,6 +758,129 @@ public:
 
     std::unordered_map<uint64_t, uint32_t> ploidy_map; // maps (data length, ploidy) packed into a 64-bit word to model offsets
     std::vector< std::shared_ptr<djn_ewah_model_container_t> > ploidy_models;
+};
+
+/***************************************
+*  Sample-centric bitmap model
+***************************************/
+struct djn_bitmap_model_t {
+public:
+    djn_bitmap_model_t() : p(nullptr), p_len(0), u_len(0), p_cap(0), p_free(true) {}
+    ~djn_bitmap_model_t() { 
+        if (p_free) delete[] p;
+    }
+
+    // Read/write
+    int Serialize(uint8_t* dst) const;
+    int Serialize(std::ostream& stream) const;
+    int GetSerializedSize() const;
+    int Deserialize(uint8_t* dst);
+    int Deserialize(std::istream& stream);
+
+public:
+    // Data must be aligned to the largest memory boundary available to 
+    // ascertain good vectorization performance.
+    uint64_t *p;     // bitmaps
+    uint32_t p_len, u_len; // data length
+    uint32_t p_cap:31, p_free:1; // capacity (memory allocated), flag for data ownership
+};
+
+class djinn_bitmap_model {
+public:
+    djinn_bitmap_model() : 
+        codec(CompressionStrategy::LZ4), compression_level(1), 
+        q(new uint8_t[10000000]), q_len(0), 
+        q_alloc(10000000), q_free(true), n_samples(0), n_samples_bitmap(0), n_variants(0) { }
+
+    djinn_bitmap_model(CompressionStrategy codec, int c_level = 1) : 
+        codec(codec), compression_level(c_level), 
+        q(new uint8_t[10000000]), q_len(0), 
+        q_alloc(10000000), q_free(true), n_samples(0), n_samples_bitmap(0), n_variants(0) { }
+
+    ~djinn_bitmap_model() {
+        if (q_free) delete[] q;
+    }
+
+    // Only biallelic haploid or diploid samples are supported in this model.
+    // This is a concious design decision to maximize computational throughput
+    // for the most common use-case.
+    int EncodeBcf(uint8_t* data, size_t len_data, int ploidy, uint8_t alt_alleles);
+    
+    int Encode(uint8_t* data, size_t len_data, int ploidy, uint8_t alt_alleles) {
+        if (data == nullptr) return -1;
+        if (len_data == 0)   return  0;
+        if (alt_alleles > 4) return -2;
+        if (n_variants == n_samples) return -3;
+
+        // Compute allele counts.
+        memset(hist_alts, 0, 256*sizeof(uint32_t));
+        for (int i = 0; i < len_data; ++i) {
+            ++hist_alts[data[i]];
+        }
+
+        if (ploidy == 1) {
+            for (int i = 0; i < len_data; ++i) {
+                const uint8_t& gt = DJN_BCF_UNPACK_GENOTYPE(data[i]);
+                bitmaps[i]->p[n_variants / 64] |= (uint64_t)gt << (n_variants % 64);
+            }
+        } else if (ploidy == 2) {
+                for (int i = 0; i < len_data; ++i) {
+                const uint8_t& gt = DJN_BCF_UNPACK_GENOTYPE(data[i]);
+                bitmaps[i]->p[n_variants / 32] |= (uint64_t)gt << (2*(n_variants % 32)+0);
+                bitmaps[i]->p[n_variants / 32] |= (uint64_t)gt << (2*(n_variants % 32)+1);
+            }
+        }
+        ++n_variants;
+
+        return 1;
+    }
+
+    // Allele counts must be either 2 (biallelic, no missing) or 4
+    // biallelic (including missing).
+    int StartEncoding(uint32_t n_samples, uint32_t n_alleles) {
+        if (n_samples == 0) return -1;
+        if (this->n_samples != n_samples) {
+            this->n_samples = n_samples;
+            n_samples_bitmap = std::ceil(n_samples/32.0f)*32;
+            bitmaps.resize(n_samples);
+            n_variants = 0;
+        } else {
+            for (int i = 0; i < bitmaps.size(); ++i) 
+                bitmaps[i]->p_len = 0;
+        }
+        return 1;
+    }
+
+    int StartDecoding();
+
+    // Read/write
+    int Serialize(uint8_t* dst) const;
+    int Serialize(std::ostream& stream) const;
+    int Deserialize(uint8_t* src);
+    int Deserialize(std::istream& stream);
+    int GetSerializedSize() const;
+    int GetCurrentSize() const;
+
+    // Accessors.
+    std::shared_ptr<djn_bitmap_model_t> operator[](const uint32_t p) { return bitmaps[p]; }
+    std::shared_ptr<djn_bitmap_model_t> at(const uint32_t p) { return bitmaps[p]; }
+
+public:
+    CompressionStrategy codec; // Either ZSTD or LZ4 at the moment.
+    int compression_level;
+
+    // Support buffer. Currently only used for using additional compressors.
+    uint8_t *q;     // data
+    uint32_t q_len; // data length
+    uint32_t q_alloc:31, q_free:1; // allocated data length, ownership of data flag
+
+    // Vector of bitmaps.
+    uint32_t n_samples, n_samples_bitmap, n_variants;
+    std::vector< std::shared_ptr<djn_bitmap_model_t> > bitmaps;
+
+    // Supportive array for computing allele counts to determine the presence
+    // of missing values and/or end-of-vector symbols (in Bcf-encodings).
+    uint32_t hist_alts[256];
 };
 
 }
