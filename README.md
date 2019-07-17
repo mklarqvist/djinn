@@ -29,6 +29,8 @@ Djinn can offer strong compression with slower decompression speeds using statis
 
 ![Compression Ratio](doc/images/djn_ewah_lz4.jpg "Djinn LZ4")
 
+Example analysis of HRC-chr20 dataset. a) Output Djinn blocks results in resetting the PBWT permutation order to circumvent storing the permutation array. Each cycle (spike) corresponds to an indenpendent data block with 8192 variants for either with PBWT (green) or without (blue). There is a considerable difference in compressibility and query speed between the two approaches: PBWT-based approaches consume less disk space require more CPU time to query and PBWT-free models require more disk space but is vastly faster to query. b) Zoom in for the first five Djinn blocks in a). c) PBWT-free models can achieve hundreds of gigabytes per second inflate speeds (in Vcf-space) when operating in EWAH-space.
+
 ### Building
 
 Building Djinn requires no additional packages. For full support, building requires [zstd](https://github.com/facebook/zstd) or [lz4](https://github.com/lz4/lz4). If you intend on using the optional support class `vcf_reader.h` for consuming `htslib`-based files then [htslib](https://github.com/samtools/htslib) is required. Build with autotools:
