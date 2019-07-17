@@ -1,4 +1,4 @@
-<p align="center"><img src="https://raw.githubusercontent.com/mklarqvist/djinn/auto/DJINN.png" alt="Djinn" width="350px"></p>
+<p align="center"><img src="https://raw.githubusercontent.com/mklarqvist/djinn/master/DJINN.png" alt="Djinn" width="350px"></p>
 
 Djinn is an open-source single-header C++ library for efficiently storing and analyzing large collections of genotypes and/or haplotypes.
 
