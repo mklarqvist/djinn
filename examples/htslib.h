@@ -63,8 +63,8 @@ int ImportHtslib(std::string input_file,   // input file: "-" for stdin
 
     djinn::djinn_model* djn_ctx = nullptr;
     if ((type >> 0) & 1)      djn_ctx = new djinn::djinn_ctx_model();
-    else if ((type >> 1) & 1) djn_ctx = new djinn::djinn_ewah_model(djinn::CompressionStrategy::LZ4,  1);
-    else if ((type >> 2) & 1) djn_ctx = new djinn::djinn_ewah_model(djinn::CompressionStrategy::ZSTD, 1);
+    else if ((type >> 1) & 1) djn_ctx = new djinn::djinn_ewah_model(djinn::CompressionStrategy::LZ4,  9);
+    else if ((type >> 2) & 1) djn_ctx = new djinn::djinn_ewah_model(djinn::CompressionStrategy::ZSTD, 21);
     djn_ctx->StartEncoding(permute, reset_models);
     
     // Open file stream (or file handle) depending on the passed argument.
