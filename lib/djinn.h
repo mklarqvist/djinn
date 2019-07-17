@@ -20,8 +20,7 @@
 
 #include <cstddef>//size_t
 #include <cstdint>//uint
-
-// #include <cstdlib>//malloc
+#include <cmath>//ceil,floor
 #include <cstring>//memcpy
 #include <cassert>//assert
 
@@ -791,12 +790,12 @@ public:
     djinn_bitmap_model() : 
         codec(CompressionStrategy::LZ4), compression_level(1), 
         q(new uint8_t[10000000]), q_len(0), 
-        q_alloc(10000000), q_free(true), n_samples(0), n_samples_bitmap(0) { }
+        q_alloc(10000000), q_free(true), n_samples(0), n_samples_bitmap(0), n_variants(0) { }
 
     djinn_bitmap_model(CompressionStrategy codec, int c_level = 1) : 
         codec(codec), compression_level(c_level), 
         q(new uint8_t[10000000]), q_len(0), 
-        q_alloc(10000000), q_free(true), n_samples(0), n_samples_bitmap(0) { }
+        q_alloc(10000000), q_free(true), n_samples(0), n_samples_bitmap(0), n_variants(0) { }
 
     ~djinn_bitmap_model() {
         if (q_free) delete[] q;
@@ -876,8 +875,12 @@ public:
     uint32_t q_alloc:31, q_free:1; // allocated data length, ownership of data flag
 
     // Vector of bitmaps.
-    uint32_t n_samples, n_samples_bitmap;
+    uint32_t n_samples, n_samples_bitmap, n_variants;
     std::vector< std::shared_ptr<djn_bitmap_model_t> > bitmaps;
+
+    // Supportive array for computing allele counts to determine the presence
+    // of missing values and/or end-of-vector symbols (in Bcf-encodings).
+    uint32_t hist_alts[256];
 };
 
 }

@@ -16,9 +16,9 @@ endif
 
 bin_PROGRAMS = djinn
 
-djinn_SOURCES = main.cpp
+djinn_SOURCES = main.cpp $(top_srcdir)/lib/djinn.h $(top_srcdir)/lib/vcf_reader.h $(top_srcdir)/examples/encode.h $(top_srcdir)/examples/htslib.h $(top_srcdir)/examples/iterate.h $(top_srcdir)/examples/iterate_raw.h $(top_srcdir)/examples/iterate_vcf.h
 djinn_LDADD = libdjinn.la
-djinn_CXXFLAGS = -Ilib/ -std=c++11
+djinn_CXXFLAGS = -I$(top_srcdir)/lib/ -std=c++11
 if HAVE_ZLIB_PATH
 djinn_CXXFLAGS += -L$(ZLIB_PATH)
 endif

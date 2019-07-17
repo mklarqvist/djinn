@@ -27,6 +27,11 @@ For reference, our proposed compression algorithms were tested and compared agai
 
 Djinn can offer strong compression with slower decompression speeds using statistical models (CTX). Reversely, the EWAH-based algorithms provide stronger decompression and query speeds with lower compression rates. The optimal algorithm dependends on its application context: whether query speeds or compression matters the most.
 
+![Compression Ratio](doc/images/djn_ctx_hrc.jpeg "Compression Ratio")
+![Compression Ratio](doc/images/djn_ctx_hrc_zoom.jpeg "Compression Ratio")
+![Compression Ratio](doc/images/djn_ctx_hrc_bar.jpeg "Compression Ratio")
+
+
 ### Building
 
 Building Djinn requires no additional packages. For full support, building requires [zstd](https://github.com/facebook/zstd) or [lz4](https://github.com/lz4/lz4). If you intend on using the optional support class `vcf_reader.h` for consuming `htslib`-based files then [htslib](https://github.com/samtools/htslib) is required. Build with autotools:
