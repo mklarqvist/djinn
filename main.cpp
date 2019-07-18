@@ -50,7 +50,7 @@ int HtslibIterateBcf(const std::string& filename) {
     clockdef t2_encode = std::chrono::high_resolution_clock::now();
     auto time_span_encode = std::chrono::duration_cast<std::chrono::milliseconds>(t2_encode - t1_encode);
     std::cerr << "[Htslib] Iterated " << n_lines << " records in " << time_span_encode.count() 
-        << "ms (" << (double)time_span_encode.count()/n_lines << "ms/record). Total: " << (data_in_vcf/1000.0f)/(time_span_encode.count()/1000000.0f) << " MB/s" << std::endl;
+        << "ms (" << (double)time_span_encode.count()/n_lines << "ms/record). Total: " << (data_in_vcf/1000000.0f)/(time_span_encode.count()/1000.0f) << " MB/s" << std::endl;
 
     return n_lines;
 }
@@ -97,6 +97,8 @@ int Benchmark(std::string input_file,   // input file: "-" for stdin
     time_span = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1);
     if (ret3 <= 0) return -1;
     std::cerr << "[Iterate] Decoded " << ret << " records in " << time_span.count() << "ms (" << (double)time_span.count()/ret << "ms/record)" << std::endl;
+
+    return 1;
 
     // Benchmark iterator writing Vcf to stdout.
     t1 = std::chrono::high_resolution_clock::now();

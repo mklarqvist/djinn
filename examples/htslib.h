@@ -83,6 +83,9 @@ int ImportHtslib(std::string input_file,   // input file: "-" for stdin
     // Cumulators to print our progress.
     uint64_t data_in = 0, data_in_vcf = 0, model_out = 0;
 
+    uint64_t data_in_local = 0, data_in_vcf_local = 0, data_out_local = 0;
+    uint32_t prev_cost = 0;
+
     while (reader->Next()) {
         // When we have decoded nv_blocks of variants we will stop encoding data
         // by calling FinishEncoding and then serialize the final encoded object
@@ -92,14 +95,19 @@ int ImportHtslib(std::string input_file,   // input file: "-" for stdin
             // writing or decompressing.
             djn_ctx->FinishEncoding();
             int serial_size = djn_ctx->Serialize(*out_stream);
-            ++n_blocks;
+            
             model_out += serial_size;
 
             std::cerr << "[PROGRESS] In uBCF: " << data_in << "->" << model_out 
                 << " (" << (double)data_in/model_out << "-fold) In VCF: " << data_in_vcf << "->" << model_out 
                 << " (" << (double)data_in_vcf/model_out << "-fold)" << std::endl;
 
+            std::cout << 2 << "\t" << n_blocks << "\t" << serial_size << "\t" << model_out << "\t" << 0 << "\t" << 0 << "\t" << 0 << std::endl;
+
             djn_ctx->StartEncoding(permute, reset_models);
+            data_in_local = 0, data_in_vcf_local = 0;
+            prev_cost = 0;
+            ++n_blocks;
         }
 
         // Error handling: if either bcf1_t or bcf_hdr_t pointers are NULL then
@@ -119,10 +127,18 @@ int ImportHtslib(std::string input_file,   // input file: "-" for stdin
         int ret = djn_ctx->EncodeBcf(fmt->p, fmt->p_len, fmt->n, reader->bcf1_->n_allele);
         assert(ret>0);
 
+        data_out_local += djn_ctx->GetCurrentSize() - prev_cost;
+        // Position,current block size,total out size, site cost,alts0,alts1
+        std::cout << 1 << "\t" << (n_lines % nv_blocks) << "\t" << djn_ctx->GetCurrentSize() << "\t" << data_out_local << "\t" << djn_ctx->GetCurrentSize() - prev_cost << "\t" << djn_ctx->hist_alts[0] << "\t" << djn_ctx->hist_alts[1] << std::endl;
+        prev_cost = djn_ctx->GetCurrentSize();
+
         // Update input bytes for uBcf and Vcf
         data_in     += fmt->p_len; // uBcf
         data_in_vcf += 2*fmt->p_len - 1; // Vcf: this is true only for diploid data with #alleles < 10
         ++n_lines; // Number of variants processed
+
+        data_in_local     += fmt->p_len; // uBcf
+        data_in_vcf_local += 2*fmt->p_len - 1; // Vcf: this is true only for diploid data with #alleles < 10
     }
 
     // Compress final data.
