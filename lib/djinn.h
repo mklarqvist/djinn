@@ -21,7 +21,6 @@
 #include <cstddef>//size_t
 #include <cstdint>//uint
 
-// #include <cstdlib>//malloc
 #include <cstring>//memcpy
 #include <cassert>//assert
 
@@ -32,6 +31,62 @@
 #include <limits> //std::numeric_limit
 #include <vector> //std::Vector
 #include <memory> //std::shared_ptr
+
+#if !(defined(__APPLE__)) && !(defined(__FreeBSD__))
+#include <malloc.h>  // this should never be needed but there are some reports that it is needed.
+#endif
+
+/* *************************************
+ *  Support.
+ * 
+ *  These subroutines and definitions are taken from the CRoaring repo
+ *  by Daniel Lemire et al. available under the Apache 2.0 License
+ *  (same as Djinn):
+ *  https://github.com/RoaringBitmap/CRoaring/ 
+ ***************************************/
+#if defined(__SIZEOF_LONG_LONG__) && __SIZEOF_LONG_LONG__ != 8
+#error This code assumes  64-bit long longs (by use of the GCC intrinsics). Your system is not currently supported.
+#endif
+
+// portable version of  posix_memalign
+static inline void* aligned_malloc(size_t alignment, size_t size) {
+    void *p;
+#ifdef _MSC_VER
+    p = _aligned_malloc(size, alignment);
+#elif defined(__MINGW32__) || defined(__MINGW64__)
+    p = __mingw_aligned_malloc(size, alignment);
+#else
+    // somehow, if this is used before including "x86intrin.h", it creates an
+    // implicit defined warning.
+    if (posix_memalign(&p, alignment, size) != 0) return NULL;
+#endif
+    return p;
+}
+
+static inline void aligned_free(void* memblock) {
+#ifdef _MSC_VER
+    _aligned_free(memblock);
+#elif defined(__MINGW32__) || defined(__MINGW64__)
+    __mingw_aligned_free(memblock);
+#else
+    free(memblock);
+#endif
+}
+
+#if defined(_MSC_VER)
+#define ALIGNED(x) __declspec(align(x))
+#else
+#if defined(__GNUC__)
+#define ALIGNED(x) __attribute__((aligned(x)))
+#endif
+#endif
+
+#ifdef __GNUC__
+#define WARN_UNUSED __attribute__((warn_unused_result))
+#else
+#define WARN_UNUSED
+#endif
+
 
 namespace djinn {
 
@@ -139,6 +194,89 @@ static constexpr uint32_t DJN_NM_REF_BITS[16] =
 #define DJN_BCF_UNPACK_GENOTYPE(A) DJN_BCF_GT_UNPACK[(A) >> 1]
 #define DJN_BCF_UNPACK_GENOTYPE_GENERAL(A) DJN_BCF_GT_UNPACK_GENERAL[(A) >> 1]
 
+/*======   GtOcc functionality   ======*/
+
+/**<
+ * Structure for using the partial-sum algortihms with constrained compressed
+ * bitvector encoded genotypes. Allows for O(1)-time partitions into one or 
+ * more groupings.
+ */
+struct djinn_occ {
+public:
+	djinn_occ(uint32_t n_s) : n_samples(n_s) {}
+	~djinn_occ() = default;
+
+    
+    int AddGroup(std::vector<uint32_t> p) {
+        if (p.size() == 0) return 0;
+        if (n_samples == 0) return -1;
+
+        const uint32_t tid = table.size();
+        table.push_back(std::vector<uint32_t>(n_samples + 1, 0));
+        for (int i = 0; i < p.size(); ++i) {
+            table[tid][p[i]+1] = true;
+        }
+
+        return 1;
+    }
+
+	/**<
+	 * Construct an Occ table from the pre-loaded matrix of sample->groupings.
+	 * The BuildTable() function requires that
+	 * AddGroup() has been run and successfully completed at least once.
+	 * @return Returns non-negative number if successful.
+	 */
+	int BuildTable(void) {
+        occ.clear();
+        vocc.clear();
+        if (table.size() == 0) return 0;
+
+        occ = std::vector< std::vector<uint32_t> >(table.size(), std::vector<uint32_t>( table[0].size(), 0));
+        cum_sums = std::vector< uint32_t >( occ.size() );
+
+        // Compute cumulative sums for each Table entry
+        for (uint32_t i = 0; i < table.size(); ++i) {
+            assert(table[i][0] == 0);
+            for (uint32_t j = 1; j < occ[i].size(); ++j)
+                occ[i][j] += occ[i][j-1] + table[i][j];
+
+            cum_sums[i] = occ[i].back();
+        }
+
+        // Matrix transpose for faster random access lookups.
+        // Such that vocc[i] = {occ[j][i], ...}
+        vocc = std::vector< std::vector<uint32_t> >(table[0].size() , std::vector<uint32_t>(occ.size(), 0));
+        for (int i = 0; i < table[0].size(); ++i) {
+            for (int j = 0; j < occ.size(); ++j) {
+                vocc[i][j] = occ[j][i];
+            }
+        }
+
+        return 1;
+    }
+
+public:
+    // Number of samples in the Occ table. 
+    uint32_t n_samples;
+
+	// Total cumulative sums for each row.
+	std::vector<uint32_t> cum_sums;
+
+	// A matrix with proportions samples times groupings
+	// rows corresponds to the cumulative sum of a grouping
+	// over the samples. The table corresponds to the set
+	// membership (presence or absence) and the occ table
+	// corresponds to the cumsum at any given sample offset.
+	std::vector< std::vector<uint32_t> > table;
+	std::vector< std::vector<uint32_t> > occ;
+	// Transpose of occ table for data locality lookups when
+	// using constrained run-length encoded objects.
+	std::vector< std::vector<uint32_t> > vocc;
+};
+
+
+/*======   Variant   ======*/
+
 #define DJN_UN_NONE 0 // No unpacking
 #define DJN_UN_EWAH 1 // EWAH level
 #define DJN_UN_IND  2 // Individual level
@@ -146,7 +284,11 @@ static constexpr uint32_t DJN_NM_REF_BITS[16] =
 #define DJN_DIRTY_2MC 0 // 1-bit or
 #define DJN_DIRTY_NM  1 // 4-bit encoding in dirty bitmaps
 
-// EWAH structure
+// Basic EWAH struct consisting of 4 bits of template bits
+// followed by 30 bits of run-length of "clean" machine words
+// of type template, and 30 bits of run-length of "dirty" machine
+// words. Dirty words are any bitvector that is not completely filled
+// by the same template.
 #pragma pack(push, 1)
 struct djinn_ewah_t {
     djinn_ewah_t() : ref(0), clean(0), dirty(0){}
@@ -156,6 +298,7 @@ struct djinn_ewah_t {
 };
 #pragma pack(pop)
 
+// djinn_variant_t descriptor
 struct djn_variant_dec_t {
     djn_variant_dec_t() : m_ewah(0), m_dirty(0), n_ewah(0), n_dirty(0), n_samples(0), dirty_type(0), ewah(nullptr), dirty(nullptr) {}
     ~djn_variant_dec_t() {
@@ -222,6 +365,71 @@ struct djinn_variant_t {
      * @return int    Returns the number of bytes used.
      */
     int ToVcf(char* out, const char phasing = '|') const;
+
+    /**
+     * Take advantage of a gtOcc matrix to slice out the target samples of interest
+     * for each group. Warning: NO CHECKS are made to ascertain that the gtOcc dimensions
+     * match that of this variant. Failure to comply with this restriction can result
+     * in segfaults.
+     * 
+     * @param occ  Reference pre-loaded djinn_occ object.
+     * @param id   Offset identifier in gtOcc for the target grouping.
+     * @param vnt  Pointer to djinn_variant_t that is going to be overloaded.
+     * @param copy_data Set this to TRUE if you want the data to be copied to the overloaded variant object.
+     * @return int Returns a non-zero value upon success. 
+     */
+    int Slice(const djinn_occ& occ, const int id, djinn_variant_t*& vnt, bool copy_data) const {
+        if (occ.occ.size() == 0) return -1;
+        if (id < 0) return -2;
+        if (data == nullptr) return -3;
+        if (data_len == 0) return -4;
+
+        uint32_t n_emit = 0;
+
+        if (unpacked == DJN_UN_IND) {
+            std::cerr << "DJN_UN_IND: no benefit gtOcc" << std::endl;
+            
+        } else if (unpacked == DJN_UN_EWAH) {
+            assert(d != nullptr);
+            uint32_t n_out = 0;
+            uint32_t diff  = 0;
+            // mul: number of packed items in 32-bit dirty bitvectors.
+            // mask: bitmap for dirty bitvectors (either 1-bit or 4-bit selector).
+            // shift: bit-shift width in bits for unpacking dirty words.
+            const uint32_t mul   = (d->dirty_type == DJN_DIRTY_2MC ? 32 :  8);
+            const uint8_t  mask  = (d->dirty_type == DJN_DIRTY_2MC ?  1 : 15);
+            const uint8_t  shift = (d->dirty_type == DJN_DIRTY_2MC ?  1 :  4);
+
+            uint32_t to = 0;
+            for (int i = 0; i < d->n_ewah; ++i) {
+                // Emit clean words
+                to = n_out + d->ewah[i]->clean*mul > d->n_samples ? d->n_samples - n_out : d->ewah[i]->clean*mul;
+                const uint32_t n_hits = (occ.occ[id][n_out+to] - occ.occ[id][n_out]);    
+                n_emit += n_hits;
+                // for (int j = 0; j < n_hits; ++j) std::cout << ((int)(d->ewah[i]->ref & mask));
+                n_out += to;
+                
+                // Emit dirty words
+                for (int j = 0; j < d->ewah[i]->dirty; ++j) {
+                    uint32_t ref = *(d->dirty[i] + j); // copy
+                    // std::cerr << std::bitset<32>(ref) << std::endl;
+                    to = n_out + mul > d->n_samples ? d->n_samples - n_out : mul;
+                    for (int k = 0; k < to; ++k, ++n_out) {
+                        // out[len_vcf++] = (ref & mask) + '0';
+                        if (occ.occ[id][n_out+1] - occ.occ[id][n_out]) {
+                            // std::cerr << "dirty occ=" << (ref&mask) << " at " << n_out << std::endl;
+                            // std::cout << ((int)(ref & mask));
+                            ++n_emit;
+                        }
+                        ref >>= shift;
+                    }
+                }
+            }
+            // if (n_emit) std::cout << " hits=" << n_emit << std::endl;
+            assert(n_out == d->n_samples);
+        }
+        return n_emit;
+    }
 
     int ploidy, n_allele; // ploidy: data stride size for unpacked data, n_allele: number of alleles including ref
     uint8_t* data;

@@ -8,6 +8,7 @@
 #include "examples/iterate_raw.h"
 #include "examples/iterate.h"
 #include "examples/encode.h"
+#include "examples/iterate_gtocc.h"
 
 
 #include <algorithm>//sort
@@ -29,14 +30,28 @@ int Benchmark(std::string input_file,   // input file: "-" for stdin
         std::cerr << "cannot benchmark when piping to stdout" << std::endl;
         return -1;
     }
+    clockdef t1, t2;
+    auto time_span = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1);
+    int ret = 1;
 
     // Encode input Vcf file.
-    clockdef t1 = std::chrono::high_resolution_clock::now();
-    int ret = ImportHtslib(input_file, output_file, type, permute, reset_models);
-    clockdef t2 = std::chrono::high_resolution_clock::now();
-    auto time_span = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1);
-    if (ret <= 0) return -1;
-    std::cerr << "[Import] Imported " << ret << " records in " << time_span.count() << "ms (" << (double)time_span.count()/ret << "ms/record)" << std::endl;
+    // t1 = std::chrono::high_resolution_clock::now();
+    // ret = ImportHtslib(input_file, output_file, type, permute, reset_models);
+    // t2 = std::chrono::high_resolution_clock::now();
+    // time_span = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1);
+    // if (ret <= 0) return -1;
+    // std::cerr << "[Import] Imported " << ret << " records in " << time_span.count() << "ms (" << (double)time_span.count()/ret << "ms/record)" << std::endl;
+
+    // Benchmark iterator with gtocc.
+    std::vector<uint32_t> occ_ranges = {1, 5, 10, 50, 100, 500, 1000, 2500};
+    for (int i = 0; i < occ_ranges.size(); ++i) {
+        t1 = std::chrono::high_resolution_clock::now();
+        int retOcc = IterateOcc(output_file, type, occ_ranges[i]);
+        t2 = std::chrono::high_resolution_clock::now();
+        time_span = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1);
+        if (retOcc <= 0) return -1;
+        std::cerr << "[IterateOcc-" << occ_ranges[i] << "] Decoded " << ret << " records in " << time_span.count() << "ms (" << (double)time_span.count()/ret << "ms/record)" << std::endl;
+    }
 
     // Benchmark raw iterator.
     t1 = std::chrono::high_resolution_clock::now();

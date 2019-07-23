@@ -14,8 +14,6 @@ if HTS_AVAIL
 AM_CXXFLAGS += -DHAVE_HTS
 endif
 
-bin_PROGRAMS = djinn
-
 djinn_SOURCES = main.cpp
 djinn_LDADD = libdjinn.la
 djinn_CXXFLAGS = -Ilib/ -std=c++11
@@ -37,3 +35,8 @@ libdjinn_la_LDFLAGS = -version-info 0:1:0
 libdjinn_la_SOURCES = lib/compressors.h lib/ctx_model.cpp lib/djinn.cpp lib/djinn.h lib/ewah_model.cpp lib/frequency_model.cpp lib/frequency_model.h lib/pbwt.cpp lib/pbwt.h
 libdjinn_ladir = $(includedir)/djinn
 libdjinn_la_HEADERS = lib/djinn.h lib/vcf_reader.h
+
+example: libdjinn.la main.cpp
+	$(CXX) $(djinn_CXXFLAGS) -L./.libs $(djinn_SOURCES) -o djinn -lhts -ldjinn '-Wl,-rpath,.libs/,-rpath,$$ORIGIN/.libs/'
+
+.PHONY: example
