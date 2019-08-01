@@ -487,7 +487,7 @@ int djinn_ctx_model::Serialize(uint8_t* dst) const {
     offset += sizeof(uint32_t);
 
     // Serialize bit-packed controller.
-    uint8_t pack = (use_pbwt << 7) | (init << 6) | (unused << 0);
+    uint8_t pack = (use_pbwt << 7) | (init << 6) | (store_offset << 5) | (unused << 0);
     dst[offset] = pack;
     offset += sizeof(uint8_t);
 
@@ -518,7 +518,7 @@ int djinn_ctx_model::Serialize(std::ostream& stream) const {
     stream.write((char*)&n_variants, sizeof(uint32_t));
 
     // Serialize bit-packed controller.
-    uint8_t pack = (use_pbwt << 7) | (init << 6) | (unused << 0);
+    uint8_t pack = (use_pbwt << 7) | (init << 6) | (store_offset << 5) | (unused << 0);
     stream.write((char*)&pack, sizeof(uint8_t));
     stream.write((char*)&p_len, sizeof(uint32_t));
     stream.write((char*)p, p_len);
@@ -565,6 +565,7 @@ int djinn_ctx_model::Deserialize(uint8_t* src) {
     uint8_t pack = src[offset];
     use_pbwt = (pack >> 7) & 1;
     init = (pack >> 6) & 1;
+    store_offset = (pack >> 5) & 1;
     unused = 0;
     offset += sizeof(uint8_t);
 
@@ -617,6 +618,7 @@ int djinn_ctx_model::Deserialize(std::istream& stream) {
     stream.read((char*)&pack, sizeof(uint8_t));
     use_pbwt = (pack >> 7) & 1;
     init = (pack >> 6) & 1;
+    store_offset = (pack >> 5) & 1;
     unused = 0;
 
     stream.read((char*)&p_len, sizeof(uint32_t));

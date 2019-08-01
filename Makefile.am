@@ -1,6 +1,6 @@
 AUTOMAKE_OPTIONS = foreign subdir-objects
 ACLOCAL_AMFLAGS = -I m4
-AM_CXXFLAGS = -fPIC -std=c++11
+AM_CXXFLAGS = -fPIC -std=c++11 -msse4.2
 if ZSTD_AVAIL
 AM_CXXFLAGS += -DHAVE_ZSTD
 endif
@@ -16,7 +16,7 @@ endif
 
 djinn_SOURCES = main.cpp
 djinn_LDADD = libdjinn.la
-djinn_CXXFLAGS = -Ilib/ -std=c++11
+djinn_CXXFLAGS = -Ilib/ -std=c++11 -msse4.2
 if HAVE_ZLIB_PATH
 djinn_CXXFLAGS += -L$(ZLIB_PATH)
 endif
@@ -32,7 +32,13 @@ endif
 
 lib_LTLIBRARIES = libdjinn.la
 libdjinn_la_LDFLAGS = -version-info 0:1:0
-libdjinn_la_SOURCES = lib/compressors.h lib/ctx_model.cpp lib/djinn.cpp lib/djinn.h lib/ewah_model.cpp lib/frequency_model.cpp lib/frequency_model.h lib/pbwt.cpp lib/pbwt.h
+libdjinn_la_SOURCES = lib/ctx_model.cpp \
+					  lib/djinn.cpp \
+					  lib/ewah_model.cpp \
+					  lib/frequency_model.cpp \
+					  lib/pbwt.cpp \
+					  lib/fastdelta.cpp
+
 libdjinn_ladir = $(includedir)/djinn
 libdjinn_la_HEADERS = lib/djinn.h lib/vcf_reader.h
 

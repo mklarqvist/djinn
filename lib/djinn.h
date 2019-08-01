@@ -31,6 +31,7 @@
 #include <limits> //std::numeric_limit
 #include <vector> //std::Vector
 #include <memory> //std::shared_ptr
+#include <cmath> //ceil
 
 #if !(defined(__APPLE__)) && !(defined(__FreeBSD__))
 #include <malloc.h>  // this should never be needed but there are some reports that it is needed.
@@ -227,12 +228,16 @@ public:
 	 * @return Returns non-negative number if successful.
 	 */
 	int BuildTable(void) {
-        occ.clear();
-        vocc.clear();
         if (table.size() == 0) return 0;
 
         occ = std::vector< std::vector<uint32_t> >(table.size(), std::vector<uint32_t>( table[0].size(), 0));
         cum_sums = std::vector< uint32_t >( occ.size() );
+
+        const uint32_t bv1_length = std::ceil(((n_samples+1)*1)/32.0f);
+        const uint32_t bv4_length = std::ceil(((n_samples+1)*4)/32.0f);
+        occ_bv1 = std::vector< std::vector<uint32_t> >(table.size(), std::vector<uint32_t>( bv1_length, 0));
+        occ_bv4 = std::vector< std::vector<uint32_t> >(table.size(), std::vector<uint32_t>( bv4_length, 0));
+
 
         // Compute cumulative sums for each Table entry
         for (uint32_t i = 0; i < table.size(); ++i) {
@@ -240,8 +245,26 @@ public:
             for (uint32_t j = 1; j < occ[i].size(); ++j)
                 occ[i][j] += occ[i][j-1] + table[i][j];
 
+            for (int j = 0; j < table[i].size(); ++j) {
+                // std::cerr << "j=" << j << "->" << j%32 << "," << j%8 << std::endl;
+                occ_bv1[i][j / 32] |= (table[i][j]*1)  << (1*(j%32));
+                occ_bv4[i][j /  8] |= (table[i][j]*15) << (4*(j%8));
+            }
+
+            // Debug
+            // for (int j = 0; j < bv1_length; ++j) {
+            //     if (occ_bv1[i][j]) std::cerr << " " << j << ":" << std::bitset<32>(occ_bv1[i][j]);
+            // }
+            // std::cerr << std::endl;
+
+            // for (int j = 0; j < bv4_length; ++j) {
+            //     if (occ_bv4[i][j]) std::cerr << " " << j << ":" << std::bitset<32>(occ_bv4[i][j]);
+            // }
+            // std::cerr << std::endl;
+
             cum_sums[i] = occ[i].back();
         }
+
 
         // Matrix transpose for faster random access lookups.
         // Such that vocc[i] = {occ[j][i], ...}
@@ -269,6 +292,8 @@ public:
 	// corresponds to the cumsum at any given sample offset.
 	std::vector< std::vector<uint32_t> > table;
 	std::vector< std::vector<uint32_t> > occ;
+    std::vector< std::vector<uint32_t> > occ_bv1;
+    std::vector< std::vector<uint32_t> > occ_bv4;
 	// Transpose of occ table for data locality lookups when
 	// using constrained run-length encoded objects.
 	std::vector< std::vector<uint32_t> > vocc;
@@ -388,47 +413,157 @@ struct djinn_variant_t {
 
         if (unpacked == DJN_UN_IND) {
             std::cerr << "DJN_UN_IND: no benefit gtOcc" << std::endl;
+            for (int i = 0; i < data_len; ++i) {
+
+            }
             
         } else if (unpacked == DJN_UN_EWAH) {
             assert(d != nullptr);
             uint32_t n_out = 0;
-            uint32_t diff  = 0;
             // mul: number of packed items in 32-bit dirty bitvectors.
             // mask: bitmap for dirty bitvectors (either 1-bit or 4-bit selector).
             // shift: bit-shift width in bits for unpacking dirty words.
             const uint32_t mul   = (d->dirty_type == DJN_DIRTY_2MC ? 32 :  8);
             const uint8_t  mask  = (d->dirty_type == DJN_DIRTY_2MC ?  1 : 15);
             const uint8_t  shift = (d->dirty_type == DJN_DIRTY_2MC ?  1 :  4);
+            // Target Occ vector
+            const std::vector<uint32_t>& tgt_occ = occ.occ[id];
 
-            uint32_t to = 0;
+            // std::cerr << ">>new" << std::endl;
+            uint32_t to = 0, n_hits = 0, ref = 0, local_to = 0, local_c = 0;
             for (int i = 0; i < d->n_ewah; ++i) {
                 // Emit clean words
                 to = n_out + d->ewah[i]->clean*mul > d->n_samples ? d->n_samples - n_out : d->ewah[i]->clean*mul;
-                const uint32_t n_hits = (occ.occ[id][n_out+to] - occ.occ[id][n_out]);    
-                n_emit += n_hits;
+                // uint32_t n_hits = (tgt_occ[n_out+to] - tgt_occ[n_out]); 
+                n_emit += (tgt_occ[n_out+to] - tgt_occ[n_out]);
                 // for (int j = 0; j < n_hits; ++j) std::cout << ((int)(d->ewah[i]->ref & mask));
                 n_out += to;
                 
                 // Emit dirty words
-                for (int j = 0; j < d->ewah[i]->dirty; ++j) {
-                    uint32_t ref = *(d->dirty[i] + j); // copy
-                    // std::cerr << std::bitset<32>(ref) << std::endl;
-                    to = n_out + mul > d->n_samples ? d->n_samples - n_out : mul;
-                    for (int k = 0; k < to; ++k, ++n_out) {
-                        // out[len_vcf++] = (ref & mask) + '0';
-                        if (occ.occ[id][n_out+1] - occ.occ[id][n_out]) {
-                            // std::cerr << "dirty occ=" << (ref&mask) << " at " << n_out << std::endl;
-                            // std::cout << ((int)(ref & mask));
-                            ++n_emit;
+                to = n_out + d->ewah[i]->dirty*mul > d->n_samples ? d->n_samples - n_out : d->ewah[i]->dirty*mul;
+                n_hits = (tgt_occ[n_out+to] - tgt_occ[n_out]); 
+                if (n_hits == 0) {
+                    n_out += to;    
+                    continue;
+                }
+
+                local_to = n_out + to;
+                local_c  = n_hits;
+                uint32_t c = 0;
+
+                // binary search
+                // run if range > 5*hits
+                if (d->ewah[i]->dirty > 5*n_hits) {
+                    uint32_t f = n_out, t = local_to;
+                    // std::cerr << "starting with=" << n_out << "->" << local_to << std::endl;
+                    djinn_variant_t::OccBinarySearch(tgt_occ, f, t, n_hits);
+                    // std::cerr << "Decided=" << f << "->" << t << " = " << tgt_occ[t] - tgt_occ[f] << "/" << n_hits 
+                    //     << " down from=" << n_out << "->" << n_out+to << " save=" << ((float)to)/(t-f)*mul << "ops" << std::endl;
+                    assert(tgt_occ[t] - tgt_occ[f] == n_hits);
+                    // std::cerr << "left=" << (f-n_out)/32 << " right=" << std::ceil((t-n_out)/32.0f) << "/" << d->ewah[i]->dirty << std::endl;
+
+                    // add prefix n_out
+                    f = (f-n_out)/32;
+                    t = std::ceil((t-n_out)/32.0f);
+                    n_out += f*mul;
+
+                    for (int j = f; j < t; ++j) {
+                        to = n_out + mul > d->n_samples ? d->n_samples - n_out : mul;
+                        n_hits = (tgt_occ[n_out+to] - tgt_occ[n_out]);
+                        
+                        if (n_hits == 0) {
+                            n_out += to;
+                            continue;
                         }
-                        ref >>= shift;
+
+                        ref = *(d->dirty[i] + j); // copy
+                        for (int k = 0; k < to; ++k, ++n_out) {
+                            // out[len_vcf++] = (ref & mask) + '0';
+                            if (tgt_occ[n_out+1] - tgt_occ[n_out]) {
+                                // std::cerr << "dirty occ=" << (ref&mask) << " at " << n_out << std::endl;
+                                // std::cout << ((int)(ref & mask));
+                                ++n_emit;
+                                ++c;
+                            }
+                            ref >>= shift;
+                        }
+
+                        if (c == local_c) {
+                            // std::cerr << "break" << std::endl;
+                            n_out = local_to;
+                            break;
+                        }
+                    }
+
+                    if (occ.cum_sums[id] == n_emit) {
+                        // std::cerr << "is end=" << n_emit << "==" << occ.cum_sums[id] << std::endl;
+                        n_out = d->n_samples; // to avoid assertion error below
+                        break;
+                    }
+                    // add suffix n_out
+                    // std::cerr << "adding suffix=" << (local_to-n_out) << " with l=" << local_to << ",t=" << n_out << std::endl;
+                    n_out += (local_to-n_out);
+                } else {
+                    for (int j = 0; j < d->ewah[i]->dirty; ++j) {
+                        to = n_out + mul > d->n_samples ? d->n_samples - n_out : mul;
+                        n_hits = (tgt_occ[n_out+to] - tgt_occ[n_out]);
+                        
+                        if (n_hits == 0) {
+                            n_out += to;
+                            continue;
+                        }
+
+                        ref = *(d->dirty[i] + j); // copy
+                        for (int k = 0; k < to; ++k, ++n_out) {
+                            // out[len_vcf++] = (ref & mask) + '0';
+                            if (tgt_occ[n_out+1] - tgt_occ[n_out]) {
+                                // std::cerr << "dirty occ=" << (ref&mask) << " at " << n_out << std::endl;
+                                // std::cout << ((int)(ref & mask));
+                                ++n_emit;
+                                ++c;
+                            }
+                            ref >>= shift;
+                        }
+
+                        if (c == local_c) {
+                            // std::cerr << "break" << std::endl;
+                            n_out = local_to;
+                            break;
+                        }
+                    }
+
+                    if (occ.cum_sums[id] == n_emit) {
+                        // std::cerr << "is end=" << n_emit << "==" << occ.cum_sums[id] << std::endl;
+                        n_out = d->n_samples; // to avoid assertion error below
+                        break;
                     }
                 }
             }
+            // std::cerr << n_emit << "/" << occ.cum_sums[id] << std::endl;
+            if (n_emit != occ.cum_sums[id]) std::cerr << n_emit << "!=" << occ.cum_sums[id] << std::endl;
+            assert(n_emit == occ.cum_sums[id]);
+            
             // if (n_emit) std::cout << " hits=" << n_emit << std::endl;
             assert(n_out == d->n_samples);
         }
         return n_emit;
+    }
+
+    static 
+    int OccBinarySearch(const std::vector<uint32_t>& occ, uint32_t& first, uint32_t& last, const uint32_t hits) {
+        uint32_t mid;
+        while (first + 1 != last) {
+            mid = (first + last) >> 1;
+            if (occ[mid] - occ[first] == hits) { // no longer have hits
+                last = mid;
+            } else if (occ[last] - occ[mid] == hits) {
+                first = mid;
+            } else {
+                return mid;
+            }
+        }
+
+        return -1;
     }
 
     int ploidy, n_allele; // ploidy: data stride size for unpacked data, n_allele: number of alleles including ref
@@ -462,7 +597,7 @@ static uint32_t round_log2(uint32_t x) {
 ***************************************/
 class djinn_model {
 public:
-    djinn_model() : use_pbwt(true), init(true), unused(0), n_variants(0) {}
+    djinn_model() : use_pbwt(true), init(true), store_offset(false), unused(0), n_variants(0) {}
     virtual ~djinn_model() {}
 
     /**
@@ -573,7 +708,8 @@ public:
 public:
     uint8_t use_pbwt: 1, // PBWT pre-processor is used
             init: 1,     // Models should be reset
-            unused: 6;   // Reserved space
+            store_offset: 1, // Store virtual offsets in byte array for random access. Used only for EWAH model
+            unused: 5;   // Reserved space
     uint32_t n_variants; // Number of encoded variants
 
     // Supportive array for computing allele counts to determine the presence
@@ -764,10 +900,25 @@ enum class CompressionStrategy : uint32_t { ZSTD = 0, LZ4 = 1 };
 
 struct djn_ewah_model_t {
 public:
+    template <class type>
+    struct djn_ewah_model_buf_t {
+        djn_ewah_model_buf_t() : p(nullptr), p_len(0), u_len(0), p_cap(0), p_free(true) {}
+        ~djn_ewah_model_buf_t() {
+            if (p_free) 
+                delete[] p;
+        }
+
+        // p data is general data
+        type *p;     // data
+        uint32_t p_len, u_len; // data length
+        uint32_t p_cap:31, p_free:1; // capacity (memory allocated), flag for data ownership
+    };
+
+public:
     djn_ewah_model_t();
     ~djn_ewah_model_t();
 
-    int StartEncoding(bool use_pbwt, bool reset = false);
+    int StartEncoding(bool use_pbwt, bool reset, bool store_offset);
     size_t FinishEncoding(uint8_t*& support_buffer, uint32_t& support_cap, CompressionStrategy strat, int c_level);
     int StartDecoding(uint8_t*& support_buffer, uint32_t& support_cap, CompressionStrategy strat, bool use_pbwt, bool reset = false);
     size_t FinishDecoding() { return 0; } // no effect
@@ -782,11 +933,20 @@ public:
     int Deserialize(std::istream& stream);
 
 public:
-    std::shared_ptr<PBWT> pbwt;
-    uint8_t *p;     // data
-    uint32_t p_len, u_len; // data length
-    uint32_t p_cap:31, p_free:1; // capacity (memory allocated), flag for data ownership
     uint32_t n_variants; // number of variants encoded
+    std::shared_ptr<PBWT> pbwt;
+    djn_ewah_model_buf_t<uint8_t> data;
+    djn_ewah_model_buf_t<uint32_t> offsets;
+    djn_ewah_model_buf_t<uint32_t> internal_offsets;
+    // // p data is general data
+    // uint8_t *p;     // data
+    // uint32_t p_len, u_len; // data length
+    // uint32_t p_cap:31, p_free:1; // capacity (memory allocated), flag for data ownership
+    
+    // // q data is used when storing virtual offsets
+    // uint32_t *q;     // data
+    // uint32_t q_len, qu_len; // data length
+    // uint32_t q_cap:31, q_free:1; // capacity (memory allocated), flag for data ownership
 };
 
 struct djn_ewah_model_container_t {
@@ -813,6 +973,12 @@ public:
     int Deserialize(uint8_t* dst);
     int Deserialize(std::istream& stream);
 
+private:
+    int DecodeRawRandomAccess(uint8_t* data, uint32_t& len);
+    int DecodeRawRandomAccess(djinn_variant_t*& variant);
+    int DecodeRawRandomAccessNm(uint8_t* data, uint32_t& len);
+    int DecodeRawRandomAccessNm(djinn_variant_t*& variant);
+
 public:
     int Encode2mc(uint8_t* data, uint32_t len);
     int Encode2mc(uint8_t* data, uint32_t len, const uint8_t* map, const int shift = 1);
@@ -827,6 +993,7 @@ public:
 
 public:
     bool use_pbwt;
+    bool store_offset;
     int ploidy;
     int64_t n_samples; // number of "samples" = haplotypes
     int64_t n_variants;

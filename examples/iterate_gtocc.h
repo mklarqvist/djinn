@@ -78,8 +78,6 @@ int IterateOcc(std::string input_file, int model, int n_sampling) {
     assert(occ.AddGroup(target_ids));
     occ.BuildTable();
 
-    std::cerr << "occ=" << occ.table.size() << " first=" << occ.occ[0].size() << std::endl;
-
     while (true) {
         int decode_ctx_ret = djn_decode->Deserialize(*in_stream);
         if (decode_ctx_ret <= 0) break; // exit condition

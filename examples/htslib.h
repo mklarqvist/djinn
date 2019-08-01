@@ -30,18 +30,20 @@
  * file handle (disk).
  * 
  * 
- * @param input_file   Input file string: file path or "-" to read from stdin
- * @param output_file  Output file string: file path or "-" to write to stdout
- * @param type         1: ctx model, 2; LZ4-EWAH, 4: ZSTD-EWAH
- * @param permute      Use PBWT preprocessor
- * @param reset_models Reset models for each block (random access)
+ * @param input_file   Input file string: file path or "-" to read from stdin.
+ * @param output_file  Output file string: file path or "-" to write to stdout.
+ * @param type         1: ctx model, 2; LZ4-EWAH, 4: ZSTD-EWAH.
+ * @param permute      Use PBWT preprocessor.
+ * @param reset_models Reset models for each block (random access).
+ * @param compression_level Compression level for general purpose compressor (valid for EWAH-model only).
  * @return int         Returns the number of imported variants when successful or a negative value otherwise.
  */
 int ImportHtslib(std::string input_file,   // input file: "-" for stdin
                  std::string output_file,  // output file: "-" for stdout
                  const uint32_t type,      // 1: ctx model, 2; LZ4-EWAH, 4: ZSTD-EWAH
                  const bool permute = true,// PBWT preprocessor
-                 const bool reset_models = true) // Reset models for each block (random access)
+                 const bool reset_models = true,
+                 int compression_level = 1) // Reset models for each block (random access)
 {
     // VcfReader use a singleton pattern: call the djinn::VcfReader::FromFile
     // function to get the instance.
@@ -63,8 +65,9 @@ int ImportHtslib(std::string input_file,   // input file: "-" for stdin
 
     djinn::djinn_model* djn_ctx = nullptr;
     if ((type >> 0) & 1)      djn_ctx = new djinn::djinn_ctx_model();
-    else if ((type >> 1) & 1) djn_ctx = new djinn::djinn_ewah_model(djinn::CompressionStrategy::LZ4,  1);
-    else if ((type >> 2) & 1) djn_ctx = new djinn::djinn_ewah_model(djinn::CompressionStrategy::ZSTD, 1);
+    else if ((type >> 1) & 1) djn_ctx = new djinn::djinn_ewah_model(djinn::CompressionStrategy::LZ4,  compression_level);
+    else if ((type >> 2) & 1) djn_ctx = new djinn::djinn_ewah_model(djinn::CompressionStrategy::ZSTD, compression_level);
+    djn_ctx->store_offset = true; // hack
     djn_ctx->StartEncoding(permute, reset_models);
     
     // Open file stream (or file handle) depending on the passed argument.

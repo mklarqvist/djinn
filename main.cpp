@@ -24,7 +24,8 @@ int Benchmark(std::string input_file,   // input file: "-" for stdin
               std::string output_file,  // output file: "-" for stdout
               const uint32_t type,      // 1: ctx model, 2; LZ4-EWAH, 4: ZSTD-EWAH
               const bool permute = true,// PBWT preprocessor
-              const bool reset_models = true)
+              const bool reset_models = true,
+              int compression_level = 1)
 {
     if (output_file == "-") {
         std::cerr << "cannot benchmark when piping to stdout" << std::endl;
@@ -35,23 +36,12 @@ int Benchmark(std::string input_file,   // input file: "-" for stdin
     int ret = 1;
 
     // Encode input Vcf file.
-    // t1 = std::chrono::high_resolution_clock::now();
-    // ret = ImportHtslib(input_file, output_file, type, permute, reset_models);
-    // t2 = std::chrono::high_resolution_clock::now();
-    // time_span = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1);
-    // if (ret <= 0) return -1;
-    // std::cerr << "[Import] Imported " << ret << " records in " << time_span.count() << "ms (" << (double)time_span.count()/ret << "ms/record)" << std::endl;
-
-    // Benchmark iterator with gtocc.
-    std::vector<uint32_t> occ_ranges = {1, 5, 10, 50, 100, 500, 1000, 2500};
-    for (int i = 0; i < occ_ranges.size(); ++i) {
-        t1 = std::chrono::high_resolution_clock::now();
-        int retOcc = IterateOcc(output_file, type, occ_ranges[i]);
-        t2 = std::chrono::high_resolution_clock::now();
-        time_span = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1);
-        if (retOcc <= 0) return -1;
-        std::cerr << "[IterateOcc-" << occ_ranges[i] << "] Decoded " << ret << " records in " << time_span.count() << "ms (" << (double)time_span.count()/ret << "ms/record)" << std::endl;
-    }
+    t1 = std::chrono::high_resolution_clock::now();
+    ret = ImportHtslib(input_file, output_file, type, permute, reset_models, compression_level);
+    t2 = std::chrono::high_resolution_clock::now();
+    time_span = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1);
+    if (ret <= 0) return -1;
+    std::cerr << "[Import] Imported " << ret << " records in " << time_span.count() << "ms (" << (double)time_span.count()/ret << "ms/record)" << std::endl;
 
     // Benchmark raw iterator.
     t1 = std::chrono::high_resolution_clock::now();
@@ -62,20 +52,33 @@ int Benchmark(std::string input_file,   // input file: "-" for stdin
     std::cerr << "[IterateRaw] Decoded " << ret << " records in " << time_span.count() << "ms (" << (double)time_span.count()/ret << "ms/record)" << std::endl;
 
     // Benchmark iterator.
-    t1 = std::chrono::high_resolution_clock::now();
-    int ret3 = Iterate(output_file, type);
-    t2 = std::chrono::high_resolution_clock::now();
-    time_span = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1);
-    if (ret3 <= 0) return -1;
-    std::cerr << "[Iterate] Decoded " << ret << " records in " << time_span.count() << "ms (" << (double)time_span.count()/ret << "ms/record)" << std::endl;
+    // t1 = std::chrono::high_resolution_clock::now();
+    // int ret3 = Iterate(output_file, type);
+    // t2 = std::chrono::high_resolution_clock::now();
+    // time_span = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1);
+    // if (ret3 <= 0) return -1;
+    // std::cerr << "[Iterate] Decoded " << ret << " records in " << time_span.count() << "ms (" << (double)time_span.count()/ret << "ms/record)" << std::endl;
 
-    // Benchmark iterator writing Vcf to stdout.
-    t1 = std::chrono::high_resolution_clock::now();
-    int ret4 = IterateVcf(output_file, type);
-    t2 = std::chrono::high_resolution_clock::now();
-    time_span = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1);
-    if (ret4 <= 0) return -1;
-    std::cerr << "[IterateVcf] Decoded " << ret << " records in " << time_span.count() << "ms (" << (double)time_span.count()/ret << "ms/record)" << std::endl;
+    // // Benchmark iterator writing Vcf to stdout.
+    // t1 = std::chrono::high_resolution_clock::now();
+    // int ret4 = IterateVcf(output_file, type);
+    // t2 = std::chrono::high_resolution_clock::now();
+    // time_span = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1);
+    // if (ret4 <= 0) return -1;
+    // std::cerr << "[IterateVcf] Decoded " << ret << " records in " << time_span.count() << "ms (" << (double)time_span.count()/ret << "ms/record)" << std::endl;
+
+    // Benchmark iterator with gtocc.
+    std::vector<uint32_t> occ_ranges = {5, 10, 50, 100, 500, 1000, 2500, 5000};
+    for (int i = 0; i < occ_ranges.size(); ++i) {
+        for (int j = 0; j < 5; ++j) {
+            t1 = std::chrono::high_resolution_clock::now();
+            int retOcc = IterateOcc(output_file, type, occ_ranges[i]);
+            t2 = std::chrono::high_resolution_clock::now();
+            time_span = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1);
+            if (retOcc <= 0) return -1;
+            std::cerr << "[IterateOcc-" << occ_ranges[i] << "] Decoded " << ret << " records in " << time_span.count() << "ms (" << (double)time_span.count()/ret << "ms/record)" << std::endl;
+        }
+    }
 
     return 1;
 }
@@ -286,6 +289,7 @@ int main(int argc, char** argv) {
         {"permute",  optional_argument, 0,  'p' },
         {"no-permute",  optional_argument, 0,  'P' },
         {"benchmark",  optional_argument, 0,  'b' },
+        {"compression-level",  optional_argument, 0,  '#' },
 		{0,0,0,0}
 	};
 
@@ -297,9 +301,10 @@ int main(int argc, char** argv) {
     bool decompress = false;
     bool permute = true;
     bool benchmark = false;
+    int c_level = 1;
 
     int c;
-    while ((c = getopt_long(argc, argv, "i:o:zlcdmpPb?", long_options, &option_index)) != -1){
+    while ((c = getopt_long(argc, argv, "i:o:#:zlcdmpPb?", long_options, &option_index)) != -1){
 		switch (c){
 		case 0:
 			std::cerr << "Case 0: " << option_index << '\t' << long_options[option_index].name << std::endl;
@@ -319,12 +324,23 @@ int main(int argc, char** argv) {
         case 'd': compress = false; decompress = true;  break;
         case 'p': permute = true;  break;
         case 'P': permute = false; break;
+        case '#': c_level = atoi(optarg); break;
 
 		default:
 			std::cerr << "Unrecognized option: " << (char)c << std::endl;
 			return 1;
 		}
 	}
+
+    if (c_level < 0) {
+        std::cerr << "compression level < 0. Setting to 1..." << std::endl;
+        c_level = 1;
+    }
+
+    if (c_level > 20) {
+        std::cerr << "compression level > 20. Setting to max..." << std::endl;
+        c_level = 20;
+    }
 
 	if(input.length() == 0){
 		std::cerr << "No input value specified..." << std::endl;
@@ -337,11 +353,11 @@ int main(int argc, char** argv) {
 
     bool reset = true;
     if (benchmark) {
-        return Benchmark(input, output, type, permute, reset);
+        return Benchmark(input, output, type, permute, reset, c_level);
     }
 
     if (compress) {
-        return ImportHtslib(input, output, type, permute, reset);
+        return ImportHtslib(input, output, type, permute, reset, c_level);
     }
 
     if (decompress) {

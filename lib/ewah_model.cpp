@@ -3,6 +3,7 @@
 #include "djinn.h"
 #include "pbwt.h"
 #include "compressors.h"
+#include "fastdelta.h"
 
 namespace djinn {
 
@@ -10,15 +11,13 @@ namespace djinn {
 
 djn_ewah_model_t::djn_ewah_model_t() :
     pbwt(std::make_shared<PBWT>()),
-    p(nullptr),
-    p_len(0), u_len(0), p_cap(0), p_free(false),
     n_variants(0)
 {
     
 }
 
 djn_ewah_model_t::~djn_ewah_model_t() {
-    if (p_free) delete[] p;
+
 }
 
 void djn_ewah_model_t::reset() {
@@ -26,17 +25,16 @@ void djn_ewah_model_t::reset() {
     n_variants = 0;
 }
 
-int djn_ewah_model_t::StartEncoding(bool use_pbwt, bool reset) {
-    if (p_cap == 0) { // initiate a buffer if there is none
-        delete[] p;
-        p = new uint8_t[10000000];
-        p_len = 0;
-        p_cap = 10000000;
-        p_free = true;
-    }
-    if (reset) this->reset();
-    p_len = 0;
-    u_len = 0;
+int djn_ewah_model_t::StartEncoding(bool use_pbwt, bool reset, bool store_offset) {
+    if (reset)
+        this->reset();
+    
+    data.p_len = 0;
+    data.u_len = 0;
+    offsets.p_len = 0;
+    offsets.u_len = 0;
+    internal_offsets.p_len = 0;
+    internal_offsets.u_len = 0;
 
     return 1;
 }
@@ -47,19 +45,43 @@ size_t djn_ewah_model_t::FinishEncoding(uint8_t*& support_buffer, uint32_t& supp
         case (CompressionStrategy::ZSTD): comp = &ZstdCompress; break;
         case (CompressionStrategy::LZ4):  comp = &Lz4Compress;  break;
     }
-    u_len = p_len;
-    if (p_len != 0) {
-        int ret = (*comp)(p, p_len, support_buffer, support_cap, c_level);
-        memcpy(p, support_buffer, ret); // copy data back to p
-        p_len = ret;
+    data.u_len = data.p_len;
+    if (data.p_len != 0) {
+        int ret = (*comp)(data.p, data.p_len, support_buffer, support_cap, c_level);
+        memcpy(data.p, support_buffer, ret); // copy data back to p
+        data.p_len = ret;
     }
+
+    if (offsets.p_len) {
+        // std::cerr << "q_Len=" << q_len << std::endl;
+        offsets.u_len = offsets.p_len;
+        // delta
+        compute_deltas_inplace(offsets.p, offsets.p_len, 0);
+        int ret = (*comp)((uint8_t*)offsets.p, offsets.p_len*sizeof(uint32_t), support_buffer, support_cap, c_level);
+        memcpy(offsets.p, support_buffer, ret); // copy data back to p
+        offsets.p_len = ret;
+        std::cerr << "[djn_ewah_model_t::FinishEncoding Q] debug=" << offsets.u_len << "->" << offsets.p_len << "->" << ret << std::endl;
+    }
+
+    if (internal_offsets.p_len) {
+        // std::cerr << "q_Len=" << q_len << std::endl;
+        internal_offsets.u_len = internal_offsets.p_len;
+        // delta
+        compute_deltas_inplace(internal_offsets.p, internal_offsets.p_len, 0);
+        int ret = (*comp)((uint8_t*)internal_offsets.p, internal_offsets.p_len*sizeof(uint32_t), support_buffer, support_cap, c_level);
+        memcpy(internal_offsets.p, support_buffer, ret); // copy data back to p
+        internal_offsets.p_len = ret;
+        std::cerr << "[djn_ewah_model_t::FinishEncoding OFF] debug=" << internal_offsets.u_len << "->" << internal_offsets.p_len << "->" << ret << std::endl;
+    }
+
     // std::cerr << "[djn_ewah_model_t::FinishEncoding] debug=" << u_len << "->" << p_len << "->" << ret << std::endl;
-    return p_len;
+    // std::cerr << "returning: " << p_len << " and " << q_len << "->" << p_len + q_len << std::endl;
+    return data.p_len + offsets.p_len + internal_offsets.p_len;
 }
 
 int djn_ewah_model_t::StartDecoding(uint8_t*& support_buffer, uint32_t& support_cap, CompressionStrategy strat, bool use_pbwt, bool reset) {
     if (reset) this->reset();
-    if (p == nullptr) return -2;
+    if (data.p == nullptr) return -2;
 
     GeneralDecompressor dec;
     switch(strat) {
@@ -67,19 +89,45 @@ int djn_ewah_model_t::StartDecoding(uint8_t*& support_buffer, uint32_t& support_
         case (CompressionStrategy::LZ4):  dec = &Lz4Decompress;  break;
     }
 
-    if (support_cap < u_len) {
+    if (support_cap < data.u_len) {
         uint8_t* old = support_buffer;
-        support_buffer = new uint8_t[u_len + 65536];
+        support_buffer = new uint8_t[data.u_len + 65536];
         memcpy(support_buffer, old, support_cap);
         delete[] old;
-        support_cap = u_len + 65536;
+        support_cap = data.u_len + 65536;
     }
 
-    if (p_len != 0) {
-        int ret = (*dec)(p, p_len, support_buffer, support_cap);
-        memcpy(p, support_buffer, ret); // copy data back to p
+    if (data.p_len != 0) {
+        int ret = (*dec)(data.p, data.p_len, support_buffer, support_cap);
+        memcpy(data.p, support_buffer, ret); // copy data back to p
     }
-    p_len = 0;
+    data.p_len = 0;
+
+    if (offsets.p_len != 0) {
+        int ret = (*dec)((uint8_t*)offsets.p, offsets.p_len, support_buffer, support_cap);
+        memcpy((uint8_t*)offsets.p, support_buffer, ret); // copy data back to p
+        offsets.p_len = offsets.u_len / sizeof(uint32_t);
+        assert(ret == offsets.u_len * sizeof(uint32_t));
+        compute_prefix_sum_inplace(offsets.p, offsets.u_len, 0);
+        // for (int i = 0; i < offsets.p_len; ++i) {
+        //     std::cerr << "," << offsets.p[i];
+        // }
+        // std::cerr << std::endl;
+        offsets.p_len = 0;
+    }
+
+    if (internal_offsets.p_len != 0) {
+        int ret = (*dec)((uint8_t*)internal_offsets.p, internal_offsets.p_len, support_buffer, support_cap);
+        memcpy((uint8_t*)internal_offsets.p, support_buffer, ret); // copy data back to p
+        internal_offsets.p_len = internal_offsets.u_len / sizeof(uint32_t);
+        assert(ret == internal_offsets.u_len * sizeof(uint32_t));
+        compute_prefix_sum_inplace(internal_offsets.p, internal_offsets.u_len, 0);
+        for (int i = 0; i < internal_offsets.p_len; ++i) {
+            std::cerr << "," << internal_offsets.p[i];
+        }
+        std::cerr << std::endl;
+        internal_offsets.p_len = 0;
+    }
 
     return 1;
 }
@@ -88,52 +136,123 @@ int djn_ewah_model_t::Serialize(uint8_t* dst) const {
     // Serialize as (uint32_t,uint32_t,uint8_t*):
     // p_len, n_variants, p
     uint32_t offset = 0;
-    *((uint32_t*)&dst[offset]) = p_len; // data length
+    *((uint32_t*)&dst[offset]) = data.p_len; // data length
     offset += sizeof(uint32_t);
-    *((uint32_t*)&dst[offset]) = u_len; // data length
+    *((uint32_t*)&dst[offset]) = data.u_len; // data length
     offset += sizeof(uint32_t);
     *((uint32_t*)&dst[offset]) = n_variants; // number of variants
     offset += sizeof(uint32_t);
-    memcpy(&dst[offset], p, p_len); // data
-    offset += p_len;
+    // q data
+    *((uint32_t*)&dst[offset]) = offsets.p_len;
+    offset += sizeof(uint32_t);
+    *((uint32_t*)&dst[offset]) = offsets.u_len;
+    offset += sizeof(uint32_t);
+
+    // q data
+    *((uint32_t*)&dst[offset]) = internal_offsets.p_len;
+    offset += sizeof(uint32_t);
+    *((uint32_t*)&dst[offset]) = internal_offsets.u_len;
+    offset += sizeof(uint32_t);
+    
+    memcpy(&dst[offset], data.p, data.p_len); // data
+    offset += data.p_len;
+    
+    if (offsets.p_len) {
+        memcpy(&dst[offset], offsets.p, offsets.p_len); // data
+        offset += offsets.p_len;
+    }
+
+    if (internal_offsets.p_len) {
+        memcpy(&dst[offset], internal_offsets.p, internal_offsets.p_len); // data
+        offset += internal_offsets.p_len;
+    }
+
     return offset;
 }
 
 int djn_ewah_model_t::Serialize(std::ostream& stream) const {
     // Serialize as (uint32_t,uint32_t,uint8_t*):
     // p_len, n_variants, p
-    stream.write((char*)&p_len, sizeof(uint32_t));
-    stream.write((char*)&u_len, sizeof(uint32_t));
+    stream.write((char*)&data.p_len, sizeof(uint32_t));
+    stream.write((char*)&data.u_len, sizeof(uint32_t));
     stream.write((char*)&n_variants, sizeof(uint32_t));
-    stream.write((char*)p, p_len);
+    stream.write((char*)&offsets.p_len, sizeof(uint32_t));
+    stream.write((char*)&offsets.u_len, sizeof(uint32_t));
+    stream.write((char*)&internal_offsets.p_len, sizeof(uint32_t));
+    stream.write((char*)&internal_offsets.u_len, sizeof(uint32_t));   
+    stream.write((char*)data.p, data.p_len);
+    
+    if (offsets.p_len) {
+        stream.write((char*)offsets.p, offsets.p_len);
+    }
+
+    if (internal_offsets.p_len) {
+        stream.write((char*)internal_offsets.p, internal_offsets.p_len);
+    }
     return stream.tellp();
 }
 
 int djn_ewah_model_t::GetSerializedSize() const {
-    int ret = sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint32_t) + p_len;
+    int ret = 7*sizeof(uint32_t) + data.p_len;
+    if (offsets.p_len) ret += offsets.p_len;
+    if (internal_offsets.p_len) ret += internal_offsets.p_len;
     return ret;
 }
 
 int djn_ewah_model_t::Deserialize(uint8_t* dst) {
     uint32_t offset = 0;
-    p_len = *((uint32_t*)&dst[offset]);
+    data.p_len = *((uint32_t*)&dst[offset]);
     offset += sizeof(uint32_t);
-    u_len = *((uint32_t*)&dst[offset]);
+    data.u_len = *((uint32_t*)&dst[offset]);
     offset += sizeof(uint32_t);
     n_variants = *((uint32_t*)&dst[offset]);
     offset += sizeof(uint32_t);
 
+    offsets.p_len = *((uint32_t*)&dst[offset]);
+    offset += sizeof(uint32_t);
+    offsets.u_len = *((uint32_t*)&dst[offset]);
+    offset += sizeof(uint32_t);
+
+    internal_offsets.p_len = *((uint32_t*)&dst[offset]);
+    offset += sizeof(uint32_t);
+    internal_offsets.u_len = *((uint32_t*)&dst[offset]);
+    offset += sizeof(uint32_t);
+
     // initiate a buffer if there is none or it's too small
-    if (p_cap == 0 || p == nullptr || u_len > p_cap) {
+    if (data.p_cap == 0 || data.p == nullptr || data.u_len > data.p_cap) {
         // std::cerr << "[Deserialize] Limit. p_cap=" << p_cap << "," << "p is nullptr=" << (p == nullptr ? "yes" : "no") << ",p_len=" << p_len << "/" << p_cap << std::endl;
-        if (p_free) delete[] p;
-        p_cap = (u_len > p_len ? u_len : p_len) + 65536;
-        p = new uint8_t[p_cap + 65536];
-        p_free = true;
+        if (data.p_free) delete[] data.p;
+        data.p_cap = (data.u_len > data.p_len ? data.u_len : data.p_len) + 65536;
+        data.p = new uint8_t[data.p_cap + 65536];
+        data.p_free = true;
     }
 
-    memcpy(p, &dst[offset], p_len); // data
-    offset += p_len;
+    memcpy(data.p, &dst[offset], data.p_len); // data
+    offset += data.p_len;
+
+    if (offsets.p_len > offsets.p_cap || offsets.p_len && offsets.p == nullptr) {
+        if (offsets.p_free) delete[] offsets.p;
+        offsets.p_cap = (offsets.u_len > offsets.p_len ? offsets.u_len : offsets.p_len) + 65536;
+        offsets.p = new uint32_t[offsets.p_cap + 65536];
+        offsets.p_free = true;
+    }
+
+    if (offsets.p_len) {
+        memcpy((char*)offsets.p, &dst[offset], offsets.p_len); // data
+        offset += offsets.p_len;
+    }
+
+    if (internal_offsets.p_len > internal_offsets.p_cap || internal_offsets.p_len && internal_offsets.p == nullptr) {
+        if (internal_offsets.p_free) delete[] internal_offsets.p;
+        internal_offsets.p_cap = (internal_offsets.u_len > internal_offsets.p_len ? internal_offsets.u_len : internal_offsets.p_len) + 65536;
+        internal_offsets.p = new uint32_t[internal_offsets.p_cap + 65536];
+        internal_offsets.p_free = true;
+    }
+
+    if (internal_offsets.p_len) {
+        memcpy((char*)internal_offsets.p, &dst[offset], internal_offsets.p_len); // data
+        offset += internal_offsets.p_len;
+    }
     
     return offset;
 }
@@ -141,21 +260,48 @@ int djn_ewah_model_t::Deserialize(uint8_t* dst) {
 int djn_ewah_model_t::Deserialize(std::istream& stream) {
     // Serialize as (uint32_t,uint32_t,uint8_t*):
     // p_len, n_variants, p
-    stream.read((char*)&p_len, sizeof(uint32_t));
-    stream.read((char*)&u_len, sizeof(uint32_t));
+    stream.read((char*)&data.p_len, sizeof(uint32_t));
+    stream.read((char*)&data.u_len, sizeof(uint32_t));
     stream.read((char*)&n_variants, sizeof(uint32_t));
+    stream.read((char*)&offsets.p_len, sizeof(uint32_t));
+    stream.read((char*)&offsets.u_len, sizeof(uint32_t));
+    stream.read((char*)&internal_offsets.p_len, sizeof(uint32_t));
+    stream.read((char*)&internal_offsets.u_len, sizeof(uint32_t));
 
     // initiate a buffer if there is none or it's too small
     // std::cerr << "[Deserialize] " << p_len << "," << u_len << std::endl;
-    if (p_cap == 0 || p == nullptr || u_len > p_cap) {
+    if (data.p_cap == 0 || data.p == nullptr || data.u_len > data.p_cap) {
         // std::cerr << "[Deserialize] Limit. p_cap=" << p_cap << "," << "p is nullptr=" << (p == nullptr ? "yes" : "no") << ",p_len=" << p_len << "/" << p_cap << std::endl;
-        if (p_free) delete[] p;
-        p_cap = (u_len > p_len ? u_len : p_len) + 65536;
-        p = new uint8_t[p_cap];
-        p_free = true;
+        if (data.p_free) delete[] data.p;
+        data.p_cap = (data.u_len > data.p_len ? data.u_len : data.p_len) + 65536;
+        data.p = new uint8_t[data.p_cap];
+        data.p_free = true;
     }
 
-    stream.read((char*)p, p_len);
+    stream.read((char*)data.p, data.p_len);
+
+    if (offsets.p_len > offsets.p_cap || offsets.p_len && offsets.p == nullptr) {
+        if (offsets.p_free) delete[] offsets.p;
+        offsets.p_cap = (offsets.u_len > offsets.p_len ? offsets.u_len : offsets.p_len) + 65536;
+        offsets.p = new uint32_t[offsets.p_cap + 65536];
+        offsets.p_free = true;
+    }
+
+    if (offsets.p_len) {
+        stream.read((char*)offsets.p, offsets.p_len);
+    }
+
+    if (internal_offsets.p_len > internal_offsets.p_cap || internal_offsets.p_len && internal_offsets.p == nullptr) {
+        if (internal_offsets.p_free) delete[] internal_offsets.p;
+        internal_offsets.p_cap = (internal_offsets.u_len > internal_offsets.p_len ? internal_offsets.u_len : internal_offsets.p_len) + 65536;
+        internal_offsets.p = new uint32_t[internal_offsets.p_cap + 65536];
+        internal_offsets.p_free = true;
+    }
+
+    if (internal_offsets.p_len) {
+        stream.read((char*)internal_offsets.p, internal_offsets.p_len);
+    }
+
     return stream.tellg();
 }
 
@@ -204,6 +350,7 @@ int djinn_ewah_model::EncodeBcf(uint8_t* data, size_t len_data, int ploidy, uint
         p[p_len++] = ploidy_models.size();
 
         ploidy_models.push_back(std::make_shared<djn_ewah_model_container_t>(len_data, ploidy, (bool)use_pbwt));
+        ploidy_models.back()->store_offset = store_offset;
         tgt_container = ploidy_models[ploidy_models.size() - 1];
         tgt_container->StartEncoding(use_pbwt, init);
     }
@@ -276,6 +423,7 @@ int djinn_ewah_model::Encode(uint8_t* data, size_t len_data, int ploidy, uint8_t
         ploidy_map[tuple] = ploidy_models.size();
         p[p_len++] = ploidy_models.size();
         ploidy_models.push_back(std::make_shared<djn_ewah_model_container_t>(len_data, ploidy, (bool)use_pbwt));
+        ploidy_models.back()->store_offset = store_offset;
         tgt_container = ploidy_models[ploidy_models.size() - 1];
         tgt_container->StartEncoding(use_pbwt, init);
     }
@@ -424,6 +572,7 @@ void djinn_ewah_model::StartEncoding(bool use_pbwt, bool reset) {
     // std::cerr << "[djinn_ewah_model::StartEncoding] models start encoding" << std::endl;
     for (int i = 0; i < ploidy_models.size(); ++i) {
         ploidy_models[i]->StartEncoding(use_pbwt, reset);
+        ploidy_models[i]->store_offset = store_offset; // tell model to store offsets or not
     }
 }
 
@@ -508,7 +657,7 @@ int djinn_ewah_model::Serialize(uint8_t* dst) const {
     offset += sizeof(uint32_t);
 
     // Serialize bit-packed controller.
-    uint8_t pack = (use_pbwt << 7) | (init << 6) | (unused << 0);
+    uint8_t pack = (use_pbwt << 7) | (init << 6) | (store_offset << 5) | (unused << 0);
     dst[offset] = pack;
     offset += sizeof(uint8_t);
 
@@ -542,7 +691,7 @@ int djinn_ewah_model::Serialize(std::ostream& stream) const {
     stream.write((char*)&n_variants, sizeof(uint32_t));
 
     // Serialize bit-packed controller.
-    uint8_t pack = (use_pbwt << 7) | (init << 6) | (unused << 0);
+    uint8_t pack = (use_pbwt << 7) | (init << 6) | (store_offset << 5) | (unused << 0);
     stream.write((char*)&pack, sizeof(uint8_t));
     stream.write((char*)&p_len, sizeof(uint32_t));
     stream.write((char*)p, p_len);
@@ -593,6 +742,7 @@ int djinn_ewah_model::Deserialize(uint8_t* src) {
     uint8_t pack = src[offset];
     use_pbwt = (pack >> 7) & 1;
     init = (pack >> 6) & 1;
+    store_offset = (pack >> 5) & 1;
     unused = 0;
     offset += sizeof(uint8_t);
 
@@ -628,6 +778,7 @@ int djinn_ewah_model::Deserialize(uint8_t* src) {
         } else {
             ploidy_map[tuple] = ploidy_models.size();
             ploidy_models.push_back(std::make_shared<djinn::djn_ewah_model_container_t>(n_s, pl, (bool)use_pbwt));
+            ploidy_models.back()->store_offset = store_offset;
             offset += ploidy_models.back()->Deserialize(&src[offset]);
         }
     }
@@ -658,6 +809,7 @@ int djinn_ewah_model::Deserialize(std::istream& stream) {
     stream.read((char*)&pack, sizeof(uint8_t));
     use_pbwt = (pack >> 7) & 1;
     init = (pack >> 6) & 1;
+    store_offset = (pack >> 5) & 1;
     unused = 0;
 
     stream.read((char*)&p_len, sizeof(uint32_t));
@@ -694,6 +846,7 @@ int djinn_ewah_model::Deserialize(std::istream& stream) {
             // std::cerr << "[Deserialize] Adding map [" << tuple << "] for [" << n_s << "," << pl << "]" << std::endl; 
             ploidy_map[tuple] = ploidy_models.size();
             ploidy_models.push_back(std::make_shared<djinn::djn_ewah_model_container_t>(n_s, pl, (bool)use_pbwt));
+            ploidy_models.back()->store_offset = store_offset;
             ploidy_models.back()->Deserialize(stream);
         }
     }
@@ -705,6 +858,7 @@ int djinn_ewah_model::Deserialize(std::istream& stream) {
 
 djn_ewah_model_container_t::djn_ewah_model_container_t(int64_t n_s, int pl, bool use_pbwt) : 
     use_pbwt(use_pbwt),
+    store_offset(false),
     ploidy(pl), n_samples(n_s), n_variants(0),
     n_samples_wah(std::ceil((float)n_samples / 32) * 32), 
     n_samples_wah_nm(std::ceil((float)n_samples * 4/32) * 8),
@@ -719,6 +873,7 @@ djn_ewah_model_container_t::djn_ewah_model_container_t(int64_t n_s, int pl, bool
 
 djn_ewah_model_container_t::djn_ewah_model_container_t(int64_t n_s, int pl, bool use_pbwt, uint8_t* src, uint32_t src_len) : 
     use_pbwt(use_pbwt),
+    store_offset(false),
     ploidy(pl), n_samples(n_s), n_variants(0),
     n_samples_wah(std::ceil((float)n_samples / 32) * 32), 
     n_samples_wah_nm(std::ceil((float)n_samples * 4/32) * 8),
@@ -769,8 +924,8 @@ void djn_ewah_model_container_t::StartEncoding(bool use_pbwt, bool reset) {
     n_variants = 0;
     p_len = 0;
 
-    model_2mc->StartEncoding(use_pbwt, reset);
-    model_nm->StartEncoding(use_pbwt, reset);
+    model_2mc->StartEncoding(use_pbwt, reset, store_offset);
+    model_nm->StartEncoding(use_pbwt, reset, store_offset);
 }
 
 size_t djn_ewah_model_container_t::FinishEncoding(uint8_t*& support_buffer, uint32_t& support_cap, CompressionStrategy strat, int c_level) {
@@ -889,7 +1044,7 @@ int djn_ewah_model_container_t::Encode2mc(uint8_t* data, uint32_t len, const uin
 
 int djn_ewah_model_container_t::EncodeNm(uint8_t* data, uint32_t len) {
     if (data == nullptr) return -1;
-    if (n_samples == 0) return -2;
+    if (n_samples == 0)  return -2;
     
     if (wah_bitmaps == nullptr) {
         n_wah = std::ceil((float)n_samples / 32) * 4;
@@ -944,25 +1099,25 @@ int djn_ewah_model_container_t::DecodeRaw_nm(uint8_t* data, uint32_t& len) {
         ewah->reset();
         len += sizeof(djinn_ewah_t);
         
-        djinn_ewah_t* e = (djinn_ewah_t*)&model_nm->p[model_nm->p_len]; 
+        djinn_ewah_t* e = (djinn_ewah_t*)&model_nm->data.p[model_nm->data.p_len]; 
         assert(e->clean + e->dirty > 0);
         ewah->ref   = e->ref;
         ewah->clean = e->clean;
         ewah->dirty = e->dirty;
-        model_nm->p_len += sizeof(djinn_ewah_t);
+        model_nm->data.p_len += sizeof(djinn_ewah_t);
         n_samples_obs += ewah->clean*8;
         n_samples_obs += ewah->dirty*8;
         hist_alts[ewah->ref & 15] += 8*ewah->clean;
 
         for (int i = 0; i < ewah->dirty; ++i) {
-            uint32_t r = *((const uint32_t*)&model_nm->p[model_nm->p_len]); // copy
+            uint32_t r = *((const uint32_t*)&model_nm->data.p[model_nm->data.p_len]); // copy
             *((uint32_t*)&data[len]) = r;
             for (int j = 0; j < 8; ++j) {
                 ++hist_alts[r & 15];
                 r >>= 4;
             }
             len += sizeof(uint32_t);
-            model_nm->p_len += sizeof(uint32_t);
+            model_nm->data.p_len += sizeof(uint32_t);
         }
         ++objects;
 
@@ -990,30 +1145,59 @@ int djn_ewah_model_container_t::EncodeWah(uint32_t* wah, uint32_t len) { // inpu
     if (model_2mc.get() == nullptr) return -1;
 
     // Resize if necessary.
-    if (model_2mc->p_len + n_samples + 65536 > model_2mc->p_cap) {
-        const uint32_t rc_size = model_2mc->p_len;
+    if (model_2mc->data.p_len + n_samples + 65536 > model_2mc->data.p_cap) {
+        const uint32_t rc_size = model_2mc->data.p_len;
         // std::cerr << "[djn_ewah_model_container_t::EncodeWah][RESIZE] resizing from: " << rc_size << "->" << 2*rc_size << std::endl;
-        uint8_t* prev = model_2mc->p; // old
-        model_2mc->p_cap = model_2mc->p_len + 2*n_samples + 65536;
-        model_2mc->p = new uint8_t[model_2mc->p_cap]; // double size. should rarely occur
-        memcpy(model_2mc->p, prev, rc_size);
-        if (model_2mc->p_free) delete[] prev;
-        model_2mc->p_free = true;
+        uint8_t* prev = model_2mc->data.p; // old
+        model_2mc->data.p_cap = model_2mc->data.p_len + 2*n_samples + 65536;
+        model_2mc->data.p = new uint8_t[model_2mc->data.p_cap]; // double size. should rarely occur
+        memcpy(model_2mc->data.p, prev, rc_size);
+        if (model_2mc->data.p_free) delete[] prev;
+        model_2mc->data.p_free = true;
+    }
+
+    if (store_offset && model_2mc->offsets.p_len + n_samples + 65536 > model_2mc->offsets.p_cap) {
+        // std::cerr << "resizing qlen" << std::endl;
+        const uint32_t rc_size = model_2mc->offsets.p_len;
+        // std::cerr << "[djn_ewah_model_container_t::EncodeWah][RESIZE] resizing from: " << rc_size << "->" << 2*rc_size << std::endl;
+        uint32_t* prev = model_2mc->offsets.p; // old
+        model_2mc->offsets.p_cap = model_2mc->offsets.p_len + 2*n_samples + 65536;
+        model_2mc->offsets.p = new uint32_t[model_2mc->offsets.p_cap]; // double size. should rarely occur
+        memcpy(model_2mc->offsets.p, prev, rc_size*sizeof(uint32_t));
+        if (model_2mc->offsets.p_free) delete[] prev;
+        model_2mc->offsets.p_free = true;
+    }
+
+    if (store_offset && model_2mc->internal_offsets.p_len + n_samples + 65536 > model_2mc->internal_offsets.p_cap) {
+        // std::cerr << "resizing qlen" << std::endl;
+        const uint32_t rc_size = model_2mc->internal_offsets.p_len;
+        // std::cerr << "[djn_ewah_model_container_t::EncodeWah][RESIZE] resizing from: " << rc_size << "->" << 2*rc_size << std::endl;
+        uint32_t* prev = model_2mc->internal_offsets.p; // old
+        model_2mc->internal_offsets.p_cap = model_2mc->internal_offsets.p_len + 2*n_samples + 65536;
+        model_2mc->internal_offsets.p = new uint32_t[model_2mc->internal_offsets.p_cap]; // double size. should rarely occur
+        memcpy(model_2mc->internal_offsets.p, prev, rc_size*sizeof(uint32_t));
+        if (model_2mc->internal_offsets.p_free) delete[] prev;
+        model_2mc->internal_offsets.p_free = true;
     }
 
     uint32_t n_objs = 1;
     uint32_t n_obs  = 0;
     
-    djinn_ewah_t* ewah = (djinn_ewah_t*)&model_2mc->p[model_2mc->p_len];
+    djinn_ewah_t* ewah = (djinn_ewah_t*)&model_2mc->data.p[model_2mc->data.p_len];
     ewah->reset();
-    model_2mc->p_len += sizeof(djinn_ewah_t);
+    if (store_offset) {
+        model_2mc->offsets.p[model_2mc->offsets.p_len++] = model_2mc->data.p_len; // each EWAH position
+        model_2mc->internal_offsets.p[model_2mc->internal_offsets.p_len++] = model_2mc->data.p_len; //
+        // std::cerr << model_2mc->data.p_len << std::endl;
+    }
+    model_2mc->data.p_len += sizeof(djinn_ewah_t);
 
     for (int i = 0; i < len; ++i) {
         // Is dirty
         if (wah[i] != 0 && wah[i] != std::numeric_limits<uint32_t>::max()) {
             ++ewah->dirty;
-            *((uint32_t*)&model_2mc->p[model_2mc->p_len]) = wah[i];
-            model_2mc->p_len += sizeof(uint32_t);
+            *((uint32_t*)&model_2mc->data.p[model_2mc->data.p_len]) = wah[i];
+            model_2mc->data.p_len += sizeof(uint32_t);
             ++n_obs;
         } 
         // Is clean
@@ -1023,9 +1207,14 @@ int djn_ewah_model_container_t::EncodeWah(uint32_t* wah, uint32_t len) { // inpu
                 // Only make a new EWAH if anything is set
                 n_obs += ewah->clean;
                 assert(ewah->clean + ewah->dirty > 0);
-                ewah = (djinn_ewah_t*)&model_2mc->p[model_2mc->p_len];
+                ewah = (djinn_ewah_t*)&model_2mc->data.p[model_2mc->data.p_len];
                 ewah->reset();
-                model_2mc->p_len += sizeof(djinn_ewah_t);
+                if (store_offset) {
+                    model_2mc->offsets.p[model_2mc->offsets.p_len++] = model_2mc->data.p_len;
+                    // model_2mc->internal_offsets.p[model_2mc->internal_offsets.p_len++] = model_2mc->data.p_len;
+                    // std::cerr << model_2mc->data.p_len << std::endl;
+                }
+                model_2mc->data.p_len += sizeof(djinn_ewah_t);
                 ++ewah->clean;
                 ewah->ref = (wah[i] & 1);
                 ++n_objs;
@@ -1037,9 +1226,14 @@ int djn_ewah_model_container_t::EncodeWah(uint32_t* wah, uint32_t len) { // inpu
                     n_obs += ewah->clean;
                     if (ewah->clean) {
                         assert(ewah->clean + ewah->dirty > 0);
-                        ewah = (djinn_ewah_t*)&model_2mc->p[model_2mc->p_len];
+                        ewah = (djinn_ewah_t*)&model_2mc->data.p[model_2mc->data.p_len];
                         ewah->reset();
-                        model_2mc->p_len += sizeof(djinn_ewah_t);
+                        if (store_offset) {
+                            model_2mc->offsets.p[model_2mc->offsets.p_len++] = model_2mc->data.p_len;
+                            // model_2mc->internal_offsets.p[model_2mc->internal_offsets.p_len++] = model_2mc->data.p_len;
+                            // std::cerr << model_2mc->data.p_len << std::endl;
+                        }
+                        model_2mc->data.p_len += sizeof(djinn_ewah_t);
                     }
                     ++ewah->clean;
                     ewah->ref = (wah[i] & 1);
@@ -1061,30 +1255,57 @@ int djn_ewah_model_container_t::EncodeWahNm(uint32_t* wah, uint32_t len) { // in
     if (model_nm.get() == nullptr) return -1;
 
     // Resize if necessary.
-    if (model_nm->p_len + n_samples + 65536 > model_nm->p_cap) {
-        const uint32_t rc_size = model_nm->p_len;
-        uint8_t* prev = model_nm->p; // old
-        model_nm->p_cap = model_nm->p_len + 2*n_samples + 65536;
-        model_nm->p = new uint8_t[model_nm->p_cap]; // double size. should rarely occur
-        memcpy(model_nm->p, prev, rc_size);
-        if (model_nm->p_free) delete[] prev;
-        model_nm->p_free = true;
+    if (model_nm->data.p_len + n_samples + 65536 > model_nm->data.p_cap) {
+        const uint32_t rc_size = model_nm->data.p_len;
+        uint8_t* prev = model_nm->data.p; // old
+        model_nm->data.p_cap = model_nm->data.p_len + 2*n_samples + 65536;
+        model_nm->data.p = new uint8_t[model_nm->data.p_cap]; // double size. should rarely occur
+        memcpy(model_nm->data.p, prev, rc_size);
+        if (model_nm->data.p_free) delete[] prev;
+        model_nm->data.p_free = true;
+    }
+
+    if (store_offset && model_nm->offsets.p_len + n_samples + 65536 > model_nm->offsets.p_cap) {
+        const uint32_t rc_size = model_nm->offsets.p_len;
+        // std::cerr << "[djn_ewah_model_container_t::EncodeWah][RESIZE] resizing from: " << rc_size << "->" << 2*rc_size << std::endl;
+        uint32_t* prev = model_nm->offsets.p; // old
+        model_nm->offsets.p_cap = model_nm->offsets.p_len + 2*n_samples + 65536;
+        model_nm->offsets.p = new uint32_t[model_nm->offsets.p_cap]; // double size. should rarely occur
+        memcpy(model_nm->offsets.p, prev, rc_size*sizeof(uint32_t));
+        if (model_nm->offsets.p_free) delete[] prev;
+        model_nm->offsets.p_free = true;
+    }
+
+    if (store_offset && model_nm->internal_offsets.p_len + n_samples + 65536 > model_nm->internal_offsets.p_cap) {
+        // std::cerr << "resizing qlen" << std::endl;
+        const uint32_t rc_size = model_nm->internal_offsets.p_len;
+        // std::cerr << "[djn_ewah_model_container_t::EncodeWah][RESIZE] resizing from: " << rc_size << "->" << 2*rc_size << std::endl;
+        uint32_t* prev = model_nm->internal_offsets.p; // old
+        model_nm->internal_offsets.p_cap = model_nm->internal_offsets.p_len + 2*n_samples + 65536;
+        model_nm->internal_offsets.p = new uint32_t[model_nm->internal_offsets.p_cap]; // double size. should rarely occur
+        memcpy(model_nm->internal_offsets.p, prev, rc_size*sizeof(uint32_t));
+        if (model_nm->internal_offsets.p_free) delete[] prev;
+        model_nm->internal_offsets.p_free = true;
     }
 
     // Debug
     uint32_t n_objs = 1;
     uint32_t n_obs  = 0;
     
-    djinn_ewah_t* ewah = (djinn_ewah_t*)&model_nm->p[model_nm->p_len];
+    djinn_ewah_t* ewah = (djinn_ewah_t*)&model_nm->data.p[model_nm->data.p_len];
     ewah->reset();
-    model_nm->p_len += sizeof(djinn_ewah_t);
+    if (store_offset) {
+        model_nm->offsets.p[model_nm->offsets.p_len++] = model_nm->data.p_len;
+        model_nm->internal_offsets.p[model_nm->internal_offsets.p_len++] = model_nm->data.p_len;
+    }
+    model_nm->data.p_len += sizeof(djinn_ewah_t);
 
     for (int i = 0; i < len; ++i) {
         // Is dirty
         if (wah[i] != DJN_NM_REF_BITS[wah[i] & 15]) {
             ++ewah->dirty;
-            *((uint32_t*)&model_nm->p[model_nm->p_len]) = wah[i];
-            model_nm->p_len += sizeof(uint32_t);
+            *((uint32_t*)&model_nm->data.p[model_nm->data.p_len]) = wah[i];
+            model_nm->data.p_len += sizeof(uint32_t);
             ++n_obs;
         } 
         // Is clean
@@ -1093,9 +1314,13 @@ int djn_ewah_model_container_t::EncodeWahNm(uint32_t* wah, uint32_t len) { // in
             if (ewah->dirty) {
                 n_obs += ewah->clean;
                 assert(ewah->clean + ewah->dirty > 0);
-                ewah = (djinn_ewah_t*)&model_nm->p[model_nm->p_len];
+                ewah = (djinn_ewah_t*)&model_nm->data.p[model_nm->data.p_len];
                 ewah->reset();
-                model_nm->p_len += sizeof(djinn_ewah_t);
+                if (store_offset) {
+                    model_nm->offsets.p[model_nm->offsets.p_len++] = model_nm->data.p_len;
+                    model_nm->internal_offsets.p[model_nm->internal_offsets.p_len++] = model_nm->data.p_len;
+                }
+                model_nm->data.p_len += sizeof(djinn_ewah_t);
                 ++ewah->clean;
                 ewah->ref = (wah[i] & 15);
                 ++n_objs;
@@ -1107,9 +1332,13 @@ int djn_ewah_model_container_t::EncodeWahNm(uint32_t* wah, uint32_t len) { // in
                     n_obs += ewah->clean;
                     if (ewah->clean) {
                         assert(ewah->clean + ewah->dirty > 0);
-                        ewah = (djinn_ewah_t*)&model_nm->p[model_nm->p_len];
+                        ewah = (djinn_ewah_t*)&model_nm->data.p[model_nm->data.p_len];
                         ewah->reset();
-                        model_nm->p_len += sizeof(djinn_ewah_t);
+                        if (store_offset) {
+                            model_nm->offsets.p[model_nm->offsets.p_len++] = model_nm->data.p_len;
+                            model_nm->internal_offsets.p[model_nm->internal_offsets.p_len++] = model_nm->data.p_len;
+                        }
+                        model_nm->data.p_len += sizeof(djinn_ewah_t);
                     }
                     ++ewah->clean;
                     ewah->ref = (wah[i] & 15);
@@ -1276,6 +1505,22 @@ int djn_ewah_model_container_t::DecodeNextRaw(uint8_t* data, uint32_t& len) {
     return -3;
 }
 
+int djn_ewah_model_container_t::DecodeRawRandomAccess(uint8_t* data, uint32_t& len) {
+    if (data == nullptr) return -1;
+    if (model_2mc.get() == nullptr) return -1;
+    if (model_nm.get() == nullptr) return -1;
+    
+    uint32_t start_offset = model_2mc->internal_offsets.p[model_2mc->internal_offsets.p_len++];
+    // uint32_t start_offset = model_2mc->internal_offsets.p[model_2mc->internal_offsets.p_len++];
+
+
+    return -1;
+}
+
+int djn_ewah_model_container_t::DecodeRawRandomAccess(djinn_variant_t*& variant) {
+    return -1;
+}
+
 // Return raw, potentially permuted, EWAH encoding
 int djn_ewah_model_container_t::DecodeRaw(uint8_t* data, uint32_t& len) {
     if (data == nullptr) return -1;
@@ -1293,24 +1538,24 @@ int djn_ewah_model_container_t::DecodeRaw(uint8_t* data, uint32_t& len) {
         ewah->reset();
         len += sizeof(djinn_ewah_t);
         
-        djinn_ewah_t* e = (djinn_ewah_t*)&model_2mc->p[model_2mc->p_len]; 
-        // std::cerr << "EWAH: ref=" << e->ref << ",clean=" << e->clean << ",dirty=" << e->dirty << " offset=" << model_2mc->p_len << "/" << model_2mc->p_cap << std::endl;
+        djinn_ewah_t* e = (djinn_ewah_t*)&model_2mc->data.p[model_2mc->data.p_len]; 
+        // std::cerr << "EWAH: ref=" << e->ref << ",clean=" << e->clean << ",dirty=" << e->dirty << " offset=" << model_2mc->data.p_len << "/" << model_2mc->data.p_cap << std::endl;
         assert(e->clean + e->dirty > 0);
         ewah->ref   = e->ref;
         ewah->clean = e->clean;
         ewah->dirty = e->dirty;
-        model_2mc->p_len += sizeof(djinn_ewah_t);
+        model_2mc->data.p_len += sizeof(djinn_ewah_t);
         n_samples_obs += ewah->clean*32;
         n_samples_obs += ewah->dirty*32;
         hist_alts[ewah->ref & 1] += 32*ewah->clean;
 
         for (int i = 0; i < ewah->dirty; ++i) {
-            const uint32_t* r = (const uint32_t*)&model_2mc->p[model_2mc->p_len];
+            const uint32_t* r = (const uint32_t*)&model_2mc->data.p[model_2mc->data.p_len];
             *((uint32_t*)&data[len]) = *r;
             hist_alts[1] += __builtin_popcount(*r);
             hist_alts[0] += __builtin_popcount(~(*r));
             len += sizeof(uint32_t);
-            model_2mc->p_len += sizeof(uint32_t);
+            model_2mc->data.p_len += sizeof(uint32_t);
         }
         ++objects;
 
@@ -1463,8 +1708,8 @@ int djn_ewah_model_container_t::GetSerializedSize() const {
 
 int djn_ewah_model_container_t::GetCurrentSize() const {
     int ret = p_len;
-    ret += model_2mc->p_len;
-    ret += model_nm->p_len;
+    ret += model_2mc->data.p_len;
+    ret += model_nm->data.p_len;
     return ret;
 }
 
